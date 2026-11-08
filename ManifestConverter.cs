@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Google.Protobuf;
+using System.Text.Json.Serialization;
 using HoyoFileClean.Protos;
 using ZstdSharp;
 
@@ -7,7 +7,8 @@ namespace HoyoFileClean;
 
 public sealed record ConversionSummary(int FileCount, long TotalSize);
 
-public sealed record ManifestFile(string Path, long Size, string Hash);
+public sealed record ManifestFile(string Path, long Size,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Hash = null);
 
 internal sealed record ManifestFileList(
     string HashAlgorithm,
@@ -19,13 +20,6 @@ public static class ManifestConverter
 {
     private const int MaxCompressedSize = 64 * 1024 * 1024;
     private const int MaxDecodedSize = 128 * 1024 * 1024;
-    private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-        "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"
-    };
 
     public static ConversionSummary Convert(
         string inputPath,
@@ -76,25 +70,7 @@ public static class ManifestConverter
         {
             throw new InvalidDataException("Manifest 没有文件条目，不能生成文件列表。");
         }
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ManifestFile file in files)
-        {
-            if (!paths.Add(file.Path))
-            {
-                throw new InvalidDataException($"Manifest 中存在重复文件路径：{file.Path}");
-            }
-        }
-        foreach (ManifestFile file in files)
-        {
-            for (int separator = file.Path.IndexOf('/'); separator >= 0;
-                separator = file.Path.IndexOf('/', separator + 1))
-            {
-                if (paths.Contains(file.Path[..separator]))
-                {
-                    throw new InvalidDataException($"Manifest 中的文件同时被用作父目录：{file.Path[..separator]}");
-                }
-            }
-        }
+        FilePathRules.ValidatePaths(files.Select(file => file.Path), "Manifest");
         long totalSize;
         try
         {
@@ -105,19 +81,7 @@ public static class ManifestConverter
             throw new InvalidDataException("Manifest 文件总大小超过可表示范围，已停止转换。", error);
         }
         var list = new ManifestFileList("MD5", files.Count, totalSize, files);
-        byte[] json = JsonSerializer.SerializeToUtf8Bytes(list, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true
-        });
-
-        string partialPath = Path.Combine(
-            Path.GetDirectoryName(Path.GetFullPath(outputPath))!, $"{Guid.NewGuid():N}.partial");
-        using (var output = new FileStream(partialPath, FileMode.CreateNew, FileAccess.Write))
-        {
-            output.Write(json);
-        }
-        File.Move(partialPath, outputPath, overwrite: false);
+        JsonFileOutput.WriteNew(outputPath, list);
         return new ConversionSummary(files.Count, totalSize);
     }
 
@@ -144,17 +108,7 @@ public static class ManifestConverter
             throw new InvalidDataException($"Manifest 文件大小或 MD5 无效：{asset.AssetName}");
         }
 
-        string path = asset.AssetName.Replace('\\', '/');
-        if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)
-            || path.Split('/').Any(segment => segment.Length == 0
-                || segment is "." or ".."
-                || segment.EndsWith('.') || segment.EndsWith(' ')
-                || segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
-                || ReservedDeviceNames.Contains(segment.Split('.')[0])))
-        {
-            throw new InvalidDataException($"Manifest 文件路径不是安全的相对路径：{asset.AssetName}");
-        }
-
+        string path = FilePathRules.NormalizeRelative(asset.AssetName, "Manifest");
         return new ManifestFile(path, asset.AssetSize, asset.AssetHashMd5.ToLowerInvariant());
     }
 }

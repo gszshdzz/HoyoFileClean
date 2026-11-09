@@ -7,10 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
-    <PackageReference Include="Grpc.Tools" Version="2.85.0" PrivateAssets="All" />
-    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
-    <Protobuf Include="Protos\Sophon.proto" GrpcServices="None" />
-    <Compile Remove="tests\**\*.cs" />
+    <ProjectReference Include="core\HoyoFileClean.Core.csproj" />
+    <Compile Remove="tests\**\*.cs;core\**\*.cs;desktop\**\*.cs;desktop.tests\**\*.cs" />
   </ItemGroup>
 </Project>

@@ -14,6 +14,9 @@ public sealed record ScanProgress(int CompletedFiles, int TotalFiles, long Proce
 
 public static class DirectoryScanner
 {
+    public static string NormalizeRootPath(string path)
+        => Path.TrimEndingDirectorySeparator(FullPath(path));
+
     public static ScanSummary Scan(
         string rootPath,
         string outputPath,
@@ -22,7 +25,7 @@ public static class DirectoryScanner
         bool computeHashes = false,
         Action<ScanProgress>? progress = null)
     {
-        string root = Path.TrimEndingDirectorySeparator(FullPath(rootPath));
+        string root = NormalizeRootPath(rootPath);
         string output = FullPath(outputPath);
         if (!IsOutsideRoot(RelativePath(root, output)))
         {

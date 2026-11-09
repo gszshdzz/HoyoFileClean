@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace HoyoFileClean;
 
@@ -13,8 +14,13 @@ public static class FileComparer
         {
             throw new IOException($"输出已存在，不能覆盖：{outputPath}");
         }
-        Side a = ReadSide(aPaths);
-        Side b = ReadSide(bPaths);
+        ComparisonResult result = Compare(ReadInputs(aPaths), ReadInputs(bPaths));
+        WriteReport(outputPath, result);
+        return result.Summary;
+    }
+
+    public static ComparisonResult Compare(FileListSnapshot a, FileListSnapshot b)
+    {
         var onlyA = new List<ManifestFile>();
         var onlyB = new List<ManifestFile>();
         var different = new List<Difference>();
@@ -29,7 +35,7 @@ public static class FileComparer
             if (left is null || right is null)
             {
                 ManifestFile file = (left ?? right)!;
-                Side absentSide = left is null ? a : b;
+                FileListSnapshot absentSide = left is null ? a : b;
                 if (absentSide.IsOutsideScope(path))
                 {
                     outsideScope.Add(new UncomparedFile(left is null ? "b" : "a", file));
@@ -58,20 +64,54 @@ public static class FileComparer
         }
         var summary = new ComparisonSummary(onlyA.Count, onlyB.Count, different.Count,
             matchedWithHash, matchedSizeOnly, outsideScope.Count);
-        JsonFileOutput.WriteNew(outputPath, new
-        {
-            aInputs = a.Inputs,
-            bInputs = b.Inputs,
-            summary,
-            onlyA,
-            onlyB,
-            different,
-            outsideScope
-        });
-        return summary;
+        return new ComparisonResult(a.Sources.Select(source => source.Path).ToArray(),
+            b.Sources.Select(source => source.Path).ToArray(), summary,
+            onlyA.AsReadOnly(), onlyB.AsReadOnly(), different.AsReadOnly(), outsideScope.AsReadOnly());
     }
 
-    private static Side ReadSide(IEnumerable<string> paths)
+    public static void WriteReport(string outputPath, ComparisonResult result)
+        => JsonFileOutput.WriteNew(outputPath, result);
+
+    // The report is data, never authority to open inputs or operate on a game directory.
+    public static ComparisonResult ImportReport(string reportPath, FileListSnapshot a, FileListSnapshot b)
+    {
+        ComparisonResult expected = Compare(a, b);
+        var options = ReaderOptions();
+        ComparisonResult imported;
+        try
+        {
+            using var stream = File.OpenRead(reportPath);
+            imported = JsonSerializer.Deserialize<ComparisonResult>(stream, options)
+                ?? throw new JsonException("比较报告不能为空。");
+        }
+        catch (JsonException error)
+        {
+            throw new InvalidDataException("比较报告 JSON 格式无效。", error);
+        }
+        bool SameInputs(IReadOnlyList<string> actual, IReadOnlyList<string> current)
+            => actual.Count == current.Count && actual.Zip(current).All(pair =>
+                string.Equals(pair.First, pair.Second, StringComparison.OrdinalIgnoreCase));
+        if (!SameInputs(imported.AInputs, expected.AInputs) || !SameInputs(imported.BInputs, expected.BInputs))
+        {
+            throw new InvalidDataException("比较报告的两侧身份与当前输入不一致；A 必须是游戏扫描，B 必须是参考清单。请重新比较。");
+        }
+        imported = imported with { AInputs = expected.AInputs, BInputs = expected.BInputs };
+        if (!JsonNode.DeepEquals(JsonSerializer.SerializeToNode(imported), JsonSerializer.SerializeToNode(expected)))
+        {
+            throw new InvalidDataException("比较报告内容与当前清单不一致或已损坏。请重新比较。");
+        }
+        return expected;
+    }
+
+    private static JsonSerializerOptions ReaderOptions() => new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        AllowDuplicateProperties = false
+    };
+
+    public static FileListSnapshot ReadInputs(IEnumerable<string> paths)
     {
         string[] inputs = paths.Select(Path.GetFullPath).ToArray();
         if (inputs.Length == 0)
@@ -79,14 +119,8 @@ public static class FileComparer
             throw new ArgumentException("A、B 两侧都至少需要一份清单。");
         }
         var files = new Dictionary<string, ManifestFile>(StringComparer.OrdinalIgnoreCase);
-        var scopes = new List<ScanScope>();
-        var options = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            RespectRequiredConstructorParameters = true,
-            RespectNullableAnnotations = true,
-            AllowDuplicateProperties = false
-        };
+        var sources = new List<FileListSource>();
+        var options = ReaderOptions();
         foreach (string input in inputs)
         {
             FileList list;
@@ -130,15 +164,17 @@ public static class FileComparer
             {
                 throw new InvalidDataException($"清单文件数或总大小与条目不一致：{input}");
             }
-            if (list.Scan is not null)
+            ScanScope? scope = list.Scan;
+            if (scope is not null)
             {
-                scopes.Add(list.Scan with
+                scope = scope with
                 {
-                    ExcludedDirectories = NormalizeScope(list.Scan.ExcludedDirectories, input),
-                    ExcludedFiles = NormalizeScope(list.Scan.ExcludedFiles, input),
-                    SkippedLinks = NormalizeScope(list.Scan.SkippedLinks, input)
-                });
+                    ExcludedDirectories = NormalizeScope(scope.ExcludedDirectories, input),
+                    ExcludedFiles = NormalizeScope(scope.ExcludedFiles, input),
+                    SkippedLinks = NormalizeScope(scope.SkippedLinks, input)
+                };
             }
+            sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope));
             foreach (ManifestFile file in normalized)
             {
                 if (files.TryGetValue(file.Path, out ManifestFile? existing)
@@ -150,12 +186,12 @@ public static class FileComparer
             }
         }
         FilePathRules.ValidatePaths(files.Keys, "同一侧的清单");
-        return new Side(inputs, files, scopes);
+        return new FileListSnapshot(sources, files);
     }
 
-    private static string[] NormalizeScope(IEnumerable<string> paths, string input)
-        => paths.Select(path => FilePathRules.NormalizeRelative(
-            path ?? throw new InvalidDataException($"清单扫描范围不能包含空路径：{input}"), input)).ToArray();
+    private static IReadOnlyList<string> NormalizeScope(IEnumerable<string> paths, string input)
+        => Array.AsReadOnly(paths.Select(path => FilePathRules.NormalizeRelative(
+            path ?? throw new InvalidDataException($"清单扫描范围不能包含空路径：{input}"), input)).ToArray());
 
     private static bool IsMd5(string? value)
         => value is { Length: 32 } && value.All(character => character is >= '0' and <= '9'
@@ -164,20 +200,4 @@ public static class FileComparer
     private sealed record FileList(int FileCount, long TotalSize, List<ManifestFile> Files,
         string? HashAlgorithm = null, ScanScope? Scan = null);
 
-    private sealed record ScanScope(string Root, string[] ExcludedDirectories,
-        string[] ExcludedFiles, string[] SkippedLinks, string Mode);
-
-    private sealed record Side(string[] Inputs, Dictionary<string, ManifestFile> Files, List<ScanScope> Scopes)
-    {
-        public bool IsOutsideScope(string path)
-            => Scopes.Any(scope => scope.ExcludedFiles.Contains(path, StringComparer.OrdinalIgnoreCase)
-                || scope.ExcludedDirectories.Concat(scope.SkippedLinks).Any(excluded =>
-                    path.Equals(excluded, StringComparison.OrdinalIgnoreCase)
-                    || path.StartsWith(excluded + "/", StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private sealed record Difference(ManifestFile A, ManifestFile B,
-        bool SizeDifferent, bool HashDifferent, bool HashCompared);
-
-    private sealed record UncomparedFile(string PresentIn, ManifestFile File);
 }

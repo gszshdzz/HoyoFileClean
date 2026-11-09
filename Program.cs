@@ -90,6 +90,53 @@ try
             }
             Console.WriteLine($"{(computeHashes ? "重" : "轻")}扫描完成：{scan.FileCount:N0} 个文件，{scan.TotalSize:N0} 字节，跳过 {scan.SkippedLinks.Count:N0} 个链接或重解析点。");
             break;
+        case "compare":
+            if (args.Length < 6)
+            {
+                PrintUsage();
+                return 2;
+            }
+            var aInputs = new List<string>();
+            var bInputs = new List<string>();
+            for (int index = 2; index < args.Length;)
+            {
+                List<string>? inputs = args[index++] switch
+                {
+                    "--a" => aInputs,
+                    "--b" => bInputs,
+                    _ => null
+                };
+                if (inputs is null)
+                {
+                    PrintUsage();
+                    return 2;
+                }
+                int start = index;
+                while (index < args.Length && !args[index].StartsWith("--", StringComparison.Ordinal))
+                {
+                    if (string.IsNullOrWhiteSpace(args[index]))
+                    {
+                        PrintUsage();
+                        return 2;
+                    }
+                    inputs.Add(args[index++]);
+                }
+                if (index == start)
+                {
+                    PrintUsage();
+                    return 2;
+                }
+            }
+            if (aInputs.Count == 0 || bInputs.Count == 0)
+            {
+                PrintUsage();
+                return 2;
+            }
+            ComparisonSummary comparison = FileComparer.Compare(aInputs, bInputs, args[1]);
+            Console.WriteLine($"比较完成：A 独有 {comparison.OnlyA:N0}，B 独有 {comparison.OnlyB:N0}，共有但不同 {comparison.Different:N0}。");
+            Console.WriteLine($"大小与 MD5 一致 {comparison.MatchedWithHash:N0}，仅大小一致（未校验哈希）{comparison.MatchedSizeOnly:N0}，对侧扫描范围外 {comparison.OutsideScope:N0}。");
+            Console.WriteLine($"输出：{Path.GetFullPath(args[1])}");
+            return 0;
         default:
             PrintUsage();
             return 2;
@@ -109,9 +156,11 @@ static void PrintUsage()
 {
     Console.WriteLine("用法：HoyoFileClean convert <manifest> <output.json> [--uncompressed]");
     Console.WriteLine("      HoyoFileClean scan <root> <output.json> [--hash] [--exclude-dir <path> ...] [--exclude-file <path> ...]");
+    Console.WriteLine("      HoyoFileClean compare <output.json> --a <list.json> ... --b <list.json> ...");
     Console.WriteLine("默认输入为 zstd 压缩的 Sophon 构建清单；解压后的 protobuf 加 --uncompressed。");
     Console.WriteLine("默认轻扫只读路径和大小；--hash 复用列表计算 MD5，交互终端低频刷新进度。");
     Console.WriteLine("排除选项可跟多个路径，也可重复；路径相对扫描根目录，或为根目录内的绝对路径，不支持通配符。");
     Console.WriteLine("scan 只读、不跟随链接，输出必须在扫描根目录之外；两个命令均不覆盖已有输出。");
     Console.WriteLine("convert 只转换当前清单，不访问游戏目录、不联网。");
+    Console.WriteLine("compare 两侧平等，均可输入多份清单；差异正常输出，同一侧冲突报错，不移动文件。");
 }

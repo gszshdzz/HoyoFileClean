@@ -10,7 +10,7 @@ internal static class FilePathRules
         "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"
     };
 
-    public static string NormalizeRelative(string path, string source)
+    public static string NormalizeRelative(string path, string? source = null)
     {
         string normalized = path.Replace('\\', '/');
         if (string.IsNullOrWhiteSpace(normalized) || Path.IsPathRooted(normalized)
@@ -20,12 +20,12 @@ internal static class FilePathRules
                 || segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
                 || ReservedDeviceNames.Contains(segment.Split('.')[0])))
         {
-            throw new InvalidDataException($"{source} 文件路径不是安全的相对路径：{path}");
+            throw new CoreException(CoreErrorCode.RelativePathInvalid, path, source);
         }
         return normalized;
     }
 
-    public static void ValidatePaths(IEnumerable<string> filePaths, string source)
+    public static void ValidatePaths(IEnumerable<string> filePaths, string? source = null)
     {
         string[] paths = filePaths.ToArray();
         var index = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -33,7 +33,7 @@ internal static class FilePathRules
         {
             if (!index.Add(path))
             {
-                throw new InvalidDataException($"{source} 中存在重复文件路径：{path}");
+                throw new CoreException(CoreErrorCode.DuplicatePath, path, source);
             }
         }
         foreach (string path in paths)
@@ -43,7 +43,7 @@ internal static class FilePathRules
             {
                 if (index.Contains(path[..separator]))
                 {
-                    throw new InvalidDataException($"{source} 中的文件同时被用作父目录：{path[..separator]}");
+                    throw new CoreException(CoreErrorCode.FileDirectoryConflict, path[..separator], source);
                 }
             }
         }

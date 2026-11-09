@@ -84,10 +84,12 @@ public sealed class FileComparerTests
         string conflict = WriteList("conflict", true, new ManifestFile("FILE", changeHash ? 3 : 4, changeHash ? OtherHash : Hash));
         string empty = WriteList("empty", true);
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+        CoreException error = Assert.Throws<CoreException>(() =>
             FileComparer.Compare(swap ? [empty] : [first, conflict], swap ? [first, conflict] : [empty], Output));
 
-        Assert.Contains("同一侧", error.Message);
+        Assert.Equal(CoreErrorCode.InputConflict, error.Code);
+        Assert.Equal(conflict, error.Input);
+        Assert.Equal("FILE", error.Path);
         Assert.False(File.Exists(Output));
         Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
     }
@@ -236,7 +238,19 @@ public sealed class FileComparerTests
         }
         File.WriteAllText(input, data.ToJsonString());
 
-        Assert.Throws<InvalidDataException>(() => FileComparer.Compare([input], [input], Output));
+        CoreErrorCode expected = problem switch
+        {
+            "badHash" or "missingHash" or "negativeSize" or "nullFile" => CoreErrorCode.FileMetadataInvalid,
+            "badAlgorithm" or "badMode" => CoreErrorCode.ListHashModeInvalid,
+            "badCount" or "badTotal" => CoreErrorCode.ListSummaryInvalid,
+            "unsafePath" or "reservedPath" or "unsafeScopePath" => CoreErrorCode.RelativePathInvalid,
+            "duplicatePath" => CoreErrorCode.DuplicatePath,
+            "parentConflict" => CoreErrorCode.FileDirectoryConflict,
+            "overflow" => CoreErrorCode.TotalSizeOverflow,
+            "nullScopePath" => CoreErrorCode.ScopePathMissing,
+            _ => CoreErrorCode.ListJsonInvalid
+        };
+        Assert.Equal(expected, Assert.Throws<CoreException>(() => FileComparer.Compare([input], [input], Output)).Code);
         Assert.False(File.Exists(Output));
     }
 
@@ -250,7 +264,7 @@ public sealed class FileComparerTests
         string input = Path.Combine(directory, "input.json");
         File.WriteAllText(input, content);
 
-        Assert.Throws<InvalidDataException>(() => FileComparer.Compare([input], [input], Output));
+        Assert.Equal(CoreErrorCode.ListJsonInvalid, Assert.Throws<CoreException>(() => FileComparer.Compare([input], [input], Output)).Code);
         Assert.False(File.Exists(Output));
     }
 
@@ -260,7 +274,7 @@ public sealed class FileComparerTests
         string first = WriteList("first", false, new ManifestFile("file", 3));
         string second = WriteList("second", false, new ManifestFile("file/child", 3));
 
-        Assert.Throws<InvalidDataException>(() => FileComparer.Compare([first, second], [first], Output));
+        Assert.Equal(CoreErrorCode.FileDirectoryConflict, Assert.Throws<CoreException>(() => FileComparer.Compare([first, second], [first], Output)).Code);
         Assert.False(File.Exists(Output));
     }
 
@@ -270,7 +284,7 @@ public sealed class FileComparerTests
         string input = WriteList("input", false);
         byte[] before = File.ReadAllBytes(input);
 
-        Assert.Throws<IOException>(() => FileComparer.Compare([input], [input], input));
+        Assert.Equal(CoreErrorCode.OutputExists, Assert.Throws<CoreException>(() => FileComparer.Compare([input], [input], input)).Code);
         Assert.Equal(before, File.ReadAllBytes(input));
     }
 
@@ -278,8 +292,8 @@ public sealed class FileComparerTests
     public void MissingInputsOrOutputParentDoNotPublishResults()
     {
         string input = WriteList("input", false);
-        Assert.Throws<ArgumentException>(() => FileComparer.Compare([], [input], Output));
-        Assert.Throws<ArgumentException>(() => FileComparer.Compare([input], [], Output));
+        Assert.Equal(CoreErrorCode.InputsRequired, Assert.Throws<CoreException>(() => FileComparer.Compare([], [input], Output)).Code);
+        Assert.Equal(CoreErrorCode.InputsRequired, Assert.Throws<CoreException>(() => FileComparer.Compare([input], [], Output)).Code);
         Assert.Throws<FileNotFoundException>(() => FileComparer.Compare([Path.Combine(directory, "missing")], [input], Output));
         Assert.Throws<DirectoryNotFoundException>(() =>
             FileComparer.Compare([input], [input], Path.Combine(directory, "missing", "output.json")));

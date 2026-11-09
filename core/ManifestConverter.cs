@@ -28,12 +28,12 @@ public static class ManifestConverter
     {
         if (File.Exists(outputPath) || Directory.Exists(outputPath))
         {
-            throw new IOException($"输出已存在，不能覆盖：{outputPath}");
+            throw new CoreException(CoreErrorCode.OutputExists, outputPath);
         }
         using var input = File.OpenRead(inputPath);
         if (!uncompressed && input.Length > MaxCompressedSize)
         {
-            throw new InvalidDataException("Manifest 压缩输入大小超过 64 MiB，已停止转换。");
+            throw new CoreException(CoreErrorCode.ManifestCompressedSizeLimit, inputPath);
         }
         using var decoded = new MemoryStream();
         if (uncompressed)
@@ -49,7 +49,7 @@ public static class ManifestConverter
             }
             catch (Exception error) when (error is ZstdException or EndOfStreamException)
             {
-                throw new InvalidDataException("无法解压 Manifest：zstd 数据损坏或不完整。", error);
+                throw new CoreException(CoreErrorCode.ManifestCompressionInvalid, inputPath, innerException: error);
             }
         }
 
@@ -60,7 +60,7 @@ public static class ManifestConverter
         }
         catch (InvalidProtocolBufferException error)
         {
-            throw new InvalidDataException("无法解析 Manifest：protobuf 数据损坏或不完整。", error);
+            throw new CoreException(CoreErrorCode.ManifestEncodingInvalid, inputPath, innerException: error);
         }
         List<ManifestFile> files = manifest.Assets
             .Where(asset => asset.AssetType == 0)
@@ -68,9 +68,9 @@ public static class ManifestConverter
             .ToList();
         if (files.Count == 0)
         {
-            throw new InvalidDataException("Manifest 没有文件条目，不能生成文件列表。");
+            throw new CoreException(CoreErrorCode.ManifestEmpty, inputPath);
         }
-        FilePathRules.ValidatePaths(files.Select(file => file.Path), "Manifest");
+        FilePathRules.ValidatePaths(files.Select(file => file.Path), inputPath);
         long totalSize;
         try
         {
@@ -78,7 +78,7 @@ public static class ManifestConverter
         }
         catch (OverflowException error)
         {
-            throw new InvalidDataException("Manifest 文件总大小超过可表示范围，已停止转换。", error);
+            throw new CoreException(CoreErrorCode.TotalSizeOverflow, inputPath, innerException: error);
         }
         var list = new ManifestFileList("MD5", files.Count, totalSize, files);
         JsonFileOutput.WriteNew(outputPath, list);
@@ -93,7 +93,7 @@ public static class ManifestConverter
         {
             if (output.Length + count > MaxDecodedSize)
             {
-                throw new InvalidDataException("Manifest 解压后大小超过 128 MiB，已停止转换。");
+                throw new CoreException(CoreErrorCode.ManifestDecodedSizeLimit);
             }
             output.Write(buffer, 0, count);
         }
@@ -105,10 +105,10 @@ public static class ManifestConverter
             || asset.AssetHashMd5.Any(character => character is not
                 (>= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F')))
         {
-            throw new InvalidDataException($"Manifest 文件大小或 MD5 无效：{asset.AssetName}");
+            throw new CoreException(CoreErrorCode.FileMetadataInvalid, asset.AssetName);
         }
 
-        string path = FilePathRules.NormalizeRelative(asset.AssetName, "Manifest");
+        string path = FilePathRules.NormalizeRelative(asset.AssetName);
         return new ManifestFile(path, asset.AssetSize, asset.AssetHashMd5.ToLowerInvariant());
     }
 }

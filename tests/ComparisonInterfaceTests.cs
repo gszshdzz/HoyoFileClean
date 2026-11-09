@@ -45,7 +45,7 @@ public sealed class ComparisonInterfaceTests
         JsonObject json = JsonNode.Parse(File.ReadAllText(report))!.AsObject();
         json["onlyA"]![0]!["size"] = 100;
         File.WriteAllText(report, json.ToJsonString());
-        Assert.Throws<InvalidDataException>(() => FileComparer.ImportReport(report, left, right));
+        Assert.Equal(CoreErrorCode.ReportContentMismatch, Assert.Throws<CoreException>(() => FileComparer.ImportReport(report, left, right)).Code);
     }
 
     [Fact]
@@ -55,8 +55,8 @@ public sealed class ComparisonInterfaceTests
         string report = Path.Combine(directory, "report.json");
         FileComparer.Compare([a], [b], report);
         Write("a", new ManifestFile("file", 4));
-        Assert.Throws<InvalidDataException>(() => FileComparer.ImportReport(report,
-            FileComparer.ReadInputs([a]), FileComparer.ReadInputs([b])));
+        Assert.Equal(CoreErrorCode.ReportContentMismatch, Assert.Throws<CoreException>(() => FileComparer.ImportReport(report,
+            FileComparer.ReadInputs([a]), FileComparer.ReadInputs([b]))).Code);
     }
 
     [Fact]
@@ -66,12 +66,12 @@ public sealed class ComparisonInterfaceTests
         string report = Path.Combine(directory, "report.json");
         FileComparer.Compare([a], [b], report);
         FileListSnapshot left = FileComparer.ReadInputs([a]), right = FileComparer.ReadInputs([b]);
-        Assert.Throws<InvalidDataException>(() => FileComparer.ImportReport(report, right, left));
+        Assert.Equal(CoreErrorCode.ReportInputsMismatch, Assert.Throws<CoreException>(() => FileComparer.ImportReport(report, right, left)).Code);
         JsonObject json = JsonNode.Parse(File.ReadAllText(report))!.AsObject();
         json["aInputs"]![0] = @"Z:\never-open-this-input.json";
         json["onlyA"]![0]!["path"] = "../escape";
         File.WriteAllText(report, json.ToJsonString());
-        Assert.Throws<InvalidDataException>(() => FileComparer.ImportReport(report, left, right));
+        Assert.Equal(CoreErrorCode.ReportInputsMismatch, Assert.Throws<CoreException>(() => FileComparer.ImportReport(report, left, right)).Code);
     }
 
     [Theory]
@@ -85,14 +85,14 @@ public sealed class ComparisonInterfaceTests
         var snapshot = FileComparer.ReadInputs([input]);
         string report = Path.Combine(directory, "report.json");
         File.WriteAllText(report, json);
-        Assert.Throws<InvalidDataException>(() => FileComparer.ImportReport(report, snapshot, snapshot));
+        Assert.Equal(CoreErrorCode.ReportJsonInvalid, Assert.Throws<CoreException>(() => FileComparer.ImportReport(report, snapshot, snapshot)).Code);
     }
 
     [Fact]
     public void ReadSideChecksAggregateSizeOverflow()
     {
         string a = Write("a", new ManifestFile("a", long.MaxValue)), b = Write("b", new ManifestFile("b", 1));
-        Assert.Throws<InvalidDataException>(() => FileComparer.ReadInputs([a, b]));
+        Assert.Equal(CoreErrorCode.TotalSizeOverflow, Assert.Throws<CoreException>(() => FileComparer.ReadInputs([a, b])).Code);
     }
 
     [Fact]

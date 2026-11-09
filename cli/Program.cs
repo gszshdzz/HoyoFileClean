@@ -1,4 +1,5 @@
 using HoyoFileClean;
+using HoyoFileClean.Cli;
 
 if (args.Length == 0 || args is ["--help"] or ["-h"])
 {
@@ -18,7 +19,7 @@ try
             }
             ConversionSummary conversion = ManifestConverter.Convert(
                 args[1], args[2], uncompressed: args.Length == 4);
-            Console.WriteLine($"转换完成：{conversion.FileCount:N0} 个文件，{conversion.TotalSize:N0} 字节。");
+            CliOutput.Conversion(conversion);
             break;
         case "scan":
             if (args.Length < 3)
@@ -86,9 +87,9 @@ try
             }
             foreach (string link in scan.SkippedLinks)
             {
-                Console.Error.WriteLine($"警告：已跳过链接或重解析点，未跟随：{link}");
+                CliOutput.SkippedLink(link);
             }
-            Console.WriteLine($"{(computeHashes ? "重" : "轻")}扫描完成：{scan.FileCount:N0} 个文件，{scan.TotalSize:N0} 字节，跳过 {scan.SkippedLinks.Count:N0} 个链接或重解析点。");
+            CliOutput.Scan(scan, computeHashes);
             break;
         case "compare":
             if (args.Length < 6)
@@ -133,34 +134,25 @@ try
                 return 2;
             }
             ComparisonSummary comparison = FileComparer.Compare(aInputs, bInputs, args[1]);
-            Console.WriteLine($"比较完成：A 独有 {comparison.OnlyA:N0}，B 独有 {comparison.OnlyB:N0}，共有但不同 {comparison.Different:N0}。");
-            Console.WriteLine($"大小与 MD5 一致 {comparison.MatchedWithHash:N0}，仅大小一致（未校验哈希）{comparison.MatchedSizeOnly:N0}，对侧扫描范围外 {comparison.OutsideScope:N0}。");
-            Console.WriteLine($"输出：{Path.GetFullPath(args[1])}");
+            CliOutput.Comparison(comparison);
+            CliOutput.Saved(args[1]);
             return 0;
         default:
             PrintUsage();
             return 2;
     }
-    Console.WriteLine($"输出：{Path.GetFullPath(args[2])}");
+    CliOutput.Saved(args[2]);
     return 0;
 }
-catch (Exception error) when (error is IOException or InvalidDataException
+catch (Exception error) when (error is CoreException or IOException or InvalidDataException
     or UnauthorizedAccessException or ArgumentException or NotSupportedException
     or System.Security.SecurityException or System.Security.Cryptography.CryptographicException)
 {
-    Console.Error.WriteLine(error.ToString());
+    CliOutput.Error(error);
     return 1;
 }
 
 static void PrintUsage()
 {
-    Console.WriteLine("用法：HoyoFileClean convert <manifest> <output.json> [--uncompressed]");
-    Console.WriteLine("      HoyoFileClean scan <root> <output.json> [--hash] [--exclude-dir <path> ...] [--exclude-file <path> ...]");
-    Console.WriteLine("      HoyoFileClean compare <output.json> --a <list.json> ... --b <list.json> ...");
-    Console.WriteLine("默认输入为 zstd 压缩的 Sophon 构建清单；解压后的 protobuf 加 --uncompressed。");
-    Console.WriteLine("默认轻扫只读路径和大小；--hash 复用列表计算 MD5，交互终端低频刷新进度。");
-    Console.WriteLine("排除选项可跟多个路径，也可重复；路径相对扫描根目录，或为根目录内的绝对路径，不支持通配符。");
-    Console.WriteLine("scan 只读、不跟随链接，输出必须在扫描根目录之外；两个命令均不覆盖已有输出。");
-    Console.WriteLine("convert 只转换当前清单，不访问游戏目录、不联网。");
-    Console.WriteLine("compare 两侧平等，均可输入多份清单；差异正常输出，同一侧冲突报错，不移动文件。");
+    CliOutput.Usage();
 }

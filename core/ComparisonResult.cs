@@ -24,7 +24,7 @@ public sealed class FileListSnapshot
         try { TotalSize = files.Values.Sum(file => file.Size); }
         catch (OverflowException error)
         {
-            throw new InvalidDataException("同一侧的清单文件总大小溢出。", error);
+            throw new CoreException(CoreErrorCode.TotalSizeOverflow, innerException: error);
         }
         HashedFileCount = files.Values.Count(file => file.Hash is not null);
     }

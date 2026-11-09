@@ -29,14 +29,14 @@ public static class DirectoryScanner
         string output = FullPath(outputPath);
         if (!IsOutsideRoot(RelativePath(root, output)))
         {
-            throw new ArgumentException("输出必须放在扫描根目录之外，以免修改或扫描到结果文件。");
+            throw new CoreException(CoreErrorCode.OutputInsideScanRoot, output);
         }
         if (File.Exists(output) || Directory.Exists(output))
         {
-            throw new IOException($"输出已存在，不能覆盖：{output}");
+            throw new CoreException(CoreErrorCode.OutputExists, output);
         }
         string outputParent = Path.GetDirectoryName(output)
-            ?? throw new ArgumentException("输出路径必须指定文件名。");
+            ?? throw new CoreException(CoreErrorCode.OutputFileNameRequired, output);
         ValidateDirectoryPath(root);
         ValidateDirectoryPath(outputParent);
         HashSet<string> excludedDirs = NormalizeExclusions(root, excludedDirectories);
@@ -45,7 +45,7 @@ public static class DirectoryScanner
         List<ManifestFile> files = ReadFileList(root, excludedDirs, excludedFilePaths, skippedLinks);
         files.Sort((left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
         skippedLinks.Sort(StringComparer.Ordinal);
-        FilePathRules.ValidatePaths(files.Select(file => file.Path), "扫描结果");
+        FilePathRules.ValidatePaths(files.Select(file => file.Path));
         long totalSize;
         try
         {
@@ -53,7 +53,7 @@ public static class DirectoryScanner
         }
         catch (OverflowException error)
         {
-            throw new InvalidDataException("扫描文件总大小超过可表示范围，已停止。", error);
+            throw new CoreException(CoreErrorCode.TotalSizeOverflow, innerException: error);
         }
         if (computeHashes)
         {
@@ -89,15 +89,15 @@ public static class DirectoryScanner
             FileAttributes directoryAttributes = File.GetAttributes(directory);
             if ((directoryAttributes & FileAttributes.ReparsePoint) != 0)
             {
-                throw new IOException($"扫描目录变为链接或重解析点，已停止：{directory}");
+                throw new CoreException(CoreErrorCode.ScanDirectoryIsLink, directory);
             }
             if ((directoryAttributes & FileAttributes.Directory) == 0)
             {
-                throw new IOException($"扫描目录已不再是目录，已停止：{directory}");
+                throw new CoreException(CoreErrorCode.ScanDirectoryMissing, directory);
             }
             foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos("*", options))
             {
-                string relative = FilePathRules.NormalizeRelative(RelativePath(root, entry.FullName), "扫描");
+                string relative = FilePathRules.NormalizeRelative(RelativePath(root, entry.FullName));
                 FileAttributes attributes = entry.Attributes;
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                 {
@@ -153,13 +153,13 @@ public static class DirectoryScanner
             FileAttributes attributes = File.GetAttributes(path);
             if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
             {
-                throw new IOException($"扫描文件变为链接或目录，已停止：{path}");
+                throw new CoreException(CoreErrorCode.ScanFileTypeChanged, path);
             }
             using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 buffer.Length, FileOptions.SequentialScan);
             if (input.Length != file.Size)
             {
-                throw new IOException($"扫描时文件大小发生变化，已停止：{path}");
+                throw new CoreException(CoreErrorCode.ScanFileSizeChanged, path);
             }
             int count;
             while ((count = input.Read(buffer, 0, buffer.Length)) != 0)
@@ -170,7 +170,7 @@ public static class DirectoryScanner
             }
             if (input.Length != file.Size || input.Position != file.Size)
             {
-                throw new IOException($"扫描时文件大小发生变化，已停止：{path}");
+                throw new CoreException(CoreErrorCode.ScanFileSizeChanged, path);
             }
             files[index] = file with { Hash = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() };
         }
@@ -185,15 +185,15 @@ public static class DirectoryScanner
             if (string.IsNullOrWhiteSpace(path)
                 || (Path.IsPathRooted(path) && !Path.IsPathFullyQualified(path)))
             {
-                throw new ArgumentException($"排除项必须是相对路径或完整绝对路径：{path}");
+                throw new CoreException(CoreErrorCode.ExclusionPathInvalid, path);
             }
             string fullPath = Path.TrimEndingDirectorySeparator(FullPath(path, root));
             string relative = RelativePath(root, fullPath);
             if (relative == "." || IsOutsideRoot(relative))
             {
-                throw new ArgumentException($"排除项必须位于扫描根目录内，且不能排除根目录本身：{path}");
+                throw new CoreException(CoreErrorCode.ExclusionOutsideRoot, path);
             }
-            result.Add(FilePathRules.NormalizeRelative(relative, "排除项"));
+            result.Add(FilePathRules.NormalizeRelative(relative));
         }
         return result;
     }
@@ -214,7 +214,7 @@ public static class DirectoryScanner
             }
             else
             {
-                throw new NotSupportedException("扫描不支持此设备卷路径，请使用普通盘符或 UNC 路径。");
+                throw new CoreException(CoreErrorCode.DevicePathUnsupported, path);
             }
         }
         return basePath is null ? Path.GetFullPath(path) : Path.GetFullPath(path, basePath);
@@ -239,11 +239,11 @@ public static class DirectoryScanner
             FileAttributes attributes = File.GetAttributes(current);
             if ((attributes & FileAttributes.ReparsePoint) != 0)
             {
-                throw new IOException($"目录路径包含链接或重解析点，已停止：{current}");
+                throw new CoreException(CoreErrorCode.DirectoryIsLink, current);
             }
             if ((attributes & FileAttributes.Directory) == 0)
             {
-                throw new DirectoryNotFoundException($"路径不是目录：{current}");
+                throw new CoreException(CoreErrorCode.DirectoryMissing, current);
             }
         }
     }

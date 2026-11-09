@@ -88,7 +88,7 @@ public sealed class ManifestConverterTests
         string input = CreateInput(new SophonManifestProto());
         string output = Path.Combine(directory, "files.json");
 
-        Assert.Throws<InvalidDataException>(() => ManifestConverter.Convert(input, output));
+        Assert.Equal(CoreErrorCode.ManifestEmpty, Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
         Assert.False(File.Exists(output));
     }
 
@@ -102,8 +102,8 @@ public sealed class ManifestConverterTests
         File.WriteAllBytes(input, [0x0a, 0xff]);
         string output = Path.Combine(directory, "files.json");
 
-        Assert.Throws<InvalidDataException>(() =>
-            ManifestConverter.Convert(input, output, uncompressed));
+        Assert.Equal(uncompressed ? CoreErrorCode.ManifestEncodingInvalid : CoreErrorCode.ManifestCompressionInvalid,
+            Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output, uncompressed)).Code);
         Assert.False(File.Exists(output));
     }
 
@@ -120,7 +120,7 @@ public sealed class ManifestConverterTests
         });
         string output = Path.Combine(directory, "files.json");
 
-        Assert.Throws<InvalidDataException>(() => ManifestConverter.Convert(input, output));
+        Assert.Equal(CoreErrorCode.FileMetadataInvalid, Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
         Assert.False(File.Exists(output));
     }
 
@@ -139,7 +139,7 @@ public sealed class ManifestConverterTests
             });
             string output = Path.Combine(directory, $"{Guid.NewGuid():N}.json");
 
-            Assert.Throws<InvalidDataException>(() => ManifestConverter.Convert(input, output));
+            Assert.Equal(CoreErrorCode.RelativePathInvalid, Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
             Assert.False(File.Exists(output));
         }
     }
@@ -154,7 +154,7 @@ public sealed class ManifestConverterTests
         string output = Path.Combine(directory, "files.json");
         File.WriteAllText(output, "keep-existing-content");
 
-        Assert.Throws<IOException>(() => ManifestConverter.Convert(input, output));
+        Assert.Equal(CoreErrorCode.OutputExists, Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
         Assert.Equal("keep-existing-content", File.ReadAllText(output));
         Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
     }
@@ -191,7 +191,7 @@ public sealed class ManifestConverterTests
         });
         string output = Path.Combine(directory, "files.json");
 
-        Assert.Throws<InvalidDataException>(() => ManifestConverter.Convert(input, output));
+        Assert.Equal(CoreErrorCode.DuplicatePath, Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
         Assert.False(File.Exists(output));
     }
 
@@ -213,7 +213,7 @@ public sealed class ManifestConverterTests
         });
         string output = Path.Combine(directory, "files.json");
 
-        Assert.Throws<InvalidDataException>(() => ManifestConverter.Convert(input, output));
+        Assert.Equal(CoreErrorCode.FileDirectoryConflict, Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
         Assert.False(File.Exists(output));
     }
 
@@ -259,10 +259,10 @@ public sealed class ManifestConverterTests
         }
         string output = Path.Combine(directory, "files.json");
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+        CoreException error = Assert.Throws<CoreException>(() =>
             ManifestConverter.Convert(input, output));
 
-        Assert.Contains("解压后大小超过", error.Message);
+        Assert.Equal(CoreErrorCode.ManifestDecodedSizeLimit, error.Code);
         Assert.False(File.Exists(output));
     }
 

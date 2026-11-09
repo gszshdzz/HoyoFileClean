@@ -130,7 +130,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
         File.WriteAllText(Output, "keep-existing-content");
 
-        Assert.Throws<IOException>(() => DirectoryScanner.Scan(Root, Output));
+        Assert.Equal(CoreErrorCode.OutputExists, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output)).Code);
 
         Assert.Equal("keep-existing-content", File.ReadAllText(Output));
         Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
@@ -145,7 +145,7 @@ public sealed class DirectoryScannerTests
         WriteFile("nested/keep.bin", "abc");
         string output = Path.GetFullPath(relativeOutput, Root);
 
-        Assert.Throws<ArgumentException>(() => DirectoryScanner.Scan(Root, output));
+        Assert.Equal(CoreErrorCode.OutputInsideScanRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, output)).Code);
 
         Assert.False(File.Exists(output));
         Assert.Empty(Directory.EnumerateFiles(Root, "*.partial", SearchOption.AllDirectories));
@@ -177,11 +177,12 @@ public sealed class DirectoryScannerTests
 
         if (invalidName)
         {
-            Assert.Throws<InvalidDataException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path]));
+            Assert.Equal(CoreErrorCode.RelativePathInvalid, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path])).Code);
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path]));
+            Assert.Equal(path == "C:relative.bin" ? CoreErrorCode.ExclusionPathInvalid : CoreErrorCode.ExclusionOutsideRoot,
+                Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path])).Code);
         }
 
         AssertNoResult();
@@ -192,8 +193,8 @@ public sealed class DirectoryScannerTests
     {
         WriteFile("keep.bin", "abc");
 
-        Assert.Throws<ArgumentException>(() => DirectoryScanner.Scan(Root, Output,
-            excludedDirectories: [Path.Combine(directory, "external")]));
+        Assert.Equal(CoreErrorCode.ExclusionOutsideRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output,
+            excludedDirectories: [Path.Combine(directory, "external")])).Code);
 
         AssertNoResult();
     }
@@ -206,7 +207,10 @@ public sealed class DirectoryScannerTests
         string file = WriteFile("keep.bin", "abc");
         string root = useFile ? file : Path.Combine(directory, "missing");
 
-        Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(root, Output));
+        if (useFile)
+            Assert.Equal(CoreErrorCode.DirectoryMissing, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(root, Output)).Code);
+        else
+            Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(root, Output));
 
         AssertNoResult();
     }
@@ -264,7 +268,7 @@ public sealed class DirectoryScannerTests
         Directory.CreateSymbolicLink(alias, Root);
         string root = useChild ? Path.Combine(alias, "child") : alias;
 
-        Assert.Throws<IOException>(() => DirectoryScanner.Scan(root, Output));
+        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(root, Output)).Code);
 
         AssertNoResult();
     }
@@ -276,7 +280,7 @@ public sealed class DirectoryScannerTests
         string alias = Path.Combine(directory, "output-alias");
         Directory.CreateSymbolicLink(alias, Root);
 
-        Assert.Throws<IOException>(() => DirectoryScanner.Scan(Root, Path.Combine(alias, "scan.json")));
+        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Path.Combine(alias, "scan.json"))).Code);
 
         Assert.False(File.Exists(Path.Combine(Root, "scan.json")));
         Assert.Empty(Directory.EnumerateFiles(Root, "*.partial"));
@@ -364,7 +368,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
         string actualOutput = Path.Combine(Root, "unsafe-scan.json");
 
-        Assert.Throws<ArgumentException>(() => DirectoryScanner.Scan(Root, prefix + actualOutput));
+        Assert.Equal(CoreErrorCode.OutputInsideScanRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, prefix + actualOutput)).Code);
 
         Assert.False(File.Exists(actualOutput));
         Assert.Empty(Directory.EnumerateFiles(Root, "*.partial"));
@@ -392,8 +396,8 @@ public sealed class DirectoryScannerTests
     {
         WriteFile("keep.bin", "abc");
 
-        Assert.Throws<NotSupportedException>(() => DirectoryScanner.Scan(
-            @"\\?\Volume{00000000-0000-0000-0000-000000000000}\missing", Output));
+        Assert.Equal(CoreErrorCode.DevicePathUnsupported, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(
+            @"\\?\Volume{00000000-0000-0000-0000-000000000000}\missing", Output)).Code);
 
         AssertNoResult();
     }
@@ -485,8 +489,8 @@ public sealed class DirectoryScannerTests
             }
         }
 
-        Assert.Throws<IOException>(() => DirectoryScanner.Scan(Root, Output,
-            computeHashes: true, progress: Progress));
+        Assert.Equal(CoreErrorCode.ScanFileSizeChanged, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output,
+            computeHashes: true, progress: Progress)).Code);
 
         AssertNoResult();
     }
@@ -510,8 +514,8 @@ public sealed class DirectoryScannerTests
             }
         }
 
-        Assert.Throws<IOException>(() => DirectoryScanner.Scan(Root, Output,
-            computeHashes: true, progress: Progress));
+        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output,
+            computeHashes: true, progress: Progress)).Code);
 
         AssertNoResult();
     }

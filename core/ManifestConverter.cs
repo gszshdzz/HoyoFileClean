@@ -23,20 +23,25 @@ public static class ManifestConverter
 
     public static ConversionSummary Convert(
         string inputPath,
-        string outputPath,
-        bool uncompressed = false)
+        string outputPath)
     {
         if (File.Exists(outputPath) || Directory.Exists(outputPath))
         {
             throw new CoreException(CoreErrorCode.OutputExists, outputPath);
         }
         using var input = File.OpenRead(inputPath);
-        if (!uncompressed && input.Length > MaxCompressedSize)
+        Span<byte> header = stackalloc byte[4];
+        int headerLength = input.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
+        input.Position = 0;
+        bool compressed = headerLength == 4
+            && (header.SequenceEqual(new byte[] { 0x28, 0xb5, 0x2f, 0xfd })
+                || (header[0] is >= 0x50 and <= 0x5f && header[1] == 0x2a && header[2] == 0x4d && header[3] == 0x18));
+        if (compressed && input.Length > MaxCompressedSize)
         {
             throw new CoreException(CoreErrorCode.ManifestCompressedSizeLimit, inputPath);
         }
         using var decoded = new MemoryStream();
-        if (uncompressed)
+        if (!compressed)
         {
             CopyWithLimit(input, decoded);
         }

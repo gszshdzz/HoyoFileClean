@@ -317,7 +317,7 @@ public sealed class WizardTests
         });
         string raw = Path.Combine(directory, "manifest"), converted = Path.Combine(directory, "reference.json");
         File.WriteAllBytes(raw, Google.Protobuf.MessageExtensions.ToByteArray(manifest));
-        ManifestConverter.Convert(raw, converted, uncompressed: true);
+        ManifestConverter.Convert(raw, converted);
         string scanned = Path.Combine(directory, "scan.json");
         DirectoryScanner.Scan(root, scanned);
         var session = new WizardSession();

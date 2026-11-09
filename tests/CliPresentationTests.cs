@@ -15,7 +15,7 @@ public sealed class CliPresentationTests
     [InlineData("unsafe-path", "文件路径不是安全的相对路径", "RelativePathInvalid")]
     [InlineData("same-side-conflict", "同一侧的清单存在相互矛盾", "InputConflict")]
     [InlineData("inside-root", "输出必须放在扫描根目录之外", "OutputInsideScanRoot")]
-    [InlineData("broken-manifest", "无法解析 Manifest", "ManifestEncodingInvalid")]
+    [InlineData("broken-manifest", "清单损坏或不是支持的 manifest", "ManifestEncodingInvalid")]
     public void CoreErrorsArePresentedByCliWithoutRawExceptionText(string scenario, string message, string code)
     {
         Directory.CreateDirectory(directory);
@@ -31,7 +31,7 @@ public sealed class CliPresentationTests
             case "inside-root": arguments = ["scan", directory, output]; break;
             case "broken-manifest":
                 File.WriteAllBytes(a, [0x0a, 0xff]);
-                arguments = ["convert", a, output, "--uncompressed"];
+                arguments = ["convert", a, output];
                 break;
         }
         var result = Run(arguments);
@@ -74,6 +74,17 @@ public sealed class CliPresentationTests
         Assert.Equal(b, error.Input);
         Assert.Equal(nameof(CoreErrorCode.InputConflict), error.Message);
         Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void RemovedCompressionOptionIsNotAdvertisedOrAccepted()
+    {
+        var help = Run(["--help"]);
+        Assert.Equal(0, help.Code);
+        Assert.DoesNotContain("--uncompressed", help.Output);
+        Assert.DoesNotContain("protobuf", help.Output);
+        Assert.DoesNotContain("zstd", help.Output);
+        Assert.Equal(2, Run(["convert", "input", "output", "--uncompressed"]).Code);
     }
 
     [Fact]

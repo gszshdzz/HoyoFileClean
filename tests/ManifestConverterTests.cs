@@ -66,7 +66,7 @@ public sealed class ManifestConverterTests
     }
 
     [Fact]
-    public void UncompressedManifestCanBeConvertedExplicitly()
+    public void UncompressedManifestIsDetectedAutomatically()
     {
         string input = CreateInput(new SophonManifestProto
         {
@@ -74,7 +74,7 @@ public sealed class ManifestConverterTests
         }, compressed: false);
         string output = Path.Combine(directory, "files.json");
 
-        ConversionSummary summary = ManifestConverter.Convert(input, output, uncompressed: true);
+        ConversionSummary summary = ManifestConverter.Convert(input, output);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(output));
         Assert.Equal(
@@ -92,18 +92,72 @@ public sealed class ManifestConverterTests
         Assert.False(File.Exists(output));
     }
 
+    [Fact]
+    public void UnknownFieldBeforeAssetsDoesNotRequireAn0AHeader()
+    {
+        string input = CreateInput(new SophonManifestProto { Assets = { FileAsset("file", 3, ExampleMd5) } }, compressed: false);
+        byte[] original = File.ReadAllBytes(input);
+        File.WriteAllBytes(input, new byte[] { 0x10, 0x01 }.Concat(original).ToArray());
+        Assert.Equal(new ConversionSummary(1, 3), ManifestConverter.Convert(input, Path.Combine(directory, "files.json")));
+    }
+
+    [Theory]
+    [InlineData(0x50)]
+    [InlineData(0x5f)]
+    public void SkippableFrameBeforeCompressedManifestIsDetected(int magic)
+    {
+        string input = CreateInput(new SophonManifestProto { Assets = { FileAsset("file", 3, ExampleMd5) } });
+        byte[] original = File.ReadAllBytes(input);
+        File.WriteAllBytes(input, new byte[] { (byte)magic, 0x2a, 0x4d, 0x18, 3, 0, 0, 0, 1, 2, 3 }.Concat(original).ToArray());
+        Assert.Equal(new ConversionSummary(1, 3), ManifestConverter.Convert(input, Path.Combine(directory, "files.json")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("28")]
+    [InlineData("28B5")]
+    [InlineData("28B52F")]
+    [InlineData("28B52FFD")]
+    [InlineData("502A4D18")]
+    [InlineData("0AFF")]
+    [InlineData("FFFFFFFF")]
+    public void EmptyShortAndInvalidInputsNeverPublish(string hex)
+    {
+        Directory.CreateDirectory(directory);
+        string input = Path.Combine(directory, "manifest"), output = Path.Combine(directory, "files.json");
+        File.WriteAllBytes(input, System.Convert.FromHexString(hex));
+        Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output));
+        Assert.False(File.Exists(output));
+        Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
+    }
+
+    [Fact]
+    public void DetectedCompressionStillEnforcesInputSizeLimit()
+    {
+        Directory.CreateDirectory(directory);
+        string input = Path.Combine(directory, "manifest"), output = Path.Combine(directory, "files.json");
+        using (var stream = File.Create(input))
+        {
+            stream.Write(new byte[] { 0x28, 0xb5, 0x2f, 0xfd });
+            stream.SetLength(64L * 1024 * 1024 + 1);
+        }
+        Assert.Equal(CoreErrorCode.ManifestCompressedSizeLimit,
+            Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
+        Assert.False(File.Exists(output));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void DamagedManifestDoesNotPublishFileList(bool uncompressed)
+    public void DamagedManifestDoesNotPublishFileList(bool compressed)
     {
         Directory.CreateDirectory(directory);
         string input = Path.Combine(directory, "manifest");
-        File.WriteAllBytes(input, [0x0a, 0xff]);
+        File.WriteAllBytes(input, compressed ? [0x28, 0xb5, 0x2f, 0xfd, 0xff] : [0x0a, 0xff]);
         string output = Path.Combine(directory, "files.json");
 
-        Assert.Equal(uncompressed ? CoreErrorCode.ManifestEncodingInvalid : CoreErrorCode.ManifestCompressionInvalid,
-            Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output, uncompressed)).Code);
+        Assert.Equal(compressed ? CoreErrorCode.ManifestCompressionInvalid : CoreErrorCode.ManifestEncodingInvalid,
+            Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
         Assert.False(File.Exists(output));
     }
 

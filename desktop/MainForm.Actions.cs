@@ -20,7 +20,6 @@ public sealed partial class MainForm
         using var dialog = new FolderBrowserDialog { Description = "选择转换输出目录（每份 manifest 独立写为 原文件名.json，不覆盖）", UseDescriptionForTitle = true };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         string[] outputs = inputs.Select(input => Path.Combine(dialog.SelectedPath, Path.GetFileName(input) + ".json")).ToArray();
-        bool raw = uncompressed.Checked;
         session.InvalidateReference();
         referenceOrigin = reportOrigin = "";
         await RunWorkAsync(() =>
@@ -34,7 +33,7 @@ public sealed partial class MainForm
             {
                 for (int i = 0; i < inputs.Length; i++)
                 {
-                    ManifestConverter.Convert(inputs[i], outputs[i], raw);
+                    ManifestConverter.Convert(inputs[i], outputs[i]);
                     written.Add(outputs[i]);
                 }
                 return FileComparer.ReadInputs(outputs);
@@ -47,7 +46,7 @@ public sealed partial class MainForm
         }, result =>
         {
             session.AcceptReference(result);
-            referenceOrigin = "manifest 来源（" + (raw ? "未压缩" : "zstd 压缩") + "）：\r\n" + string.Join("\r\n", inputs) + "\r\n\r\n";
+            referenceOrigin = "manifest 来源：\r\n" + string.Join("\r\n", inputs) + "\r\n\r\n";
         }, "正在转换 manifest…");
     }
 

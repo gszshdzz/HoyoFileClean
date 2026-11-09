@@ -12,13 +12,13 @@ try
     switch (args[0])
     {
         case "convert":
-            if (args.Length is not (3 or 4) || (args.Length == 4 && args[3] != "--uncompressed"))
+            if (args.Length != 3)
             {
                 PrintUsage();
                 return 2;
             }
             ConversionSummary conversion = ManifestConverter.Convert(
-                args[1], args[2], uncompressed: args.Length == 4);
+                args[1], args[2]);
             CliOutput.Conversion(conversion);
             break;
         case "scan":

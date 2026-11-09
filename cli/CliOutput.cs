@@ -54,8 +54,7 @@ internal static class CliOutput
         CoreErrorCode.OutputFileNameRequired => "输出路径必须指定文件名。",
         CoreErrorCode.ManifestCompressedSizeLimit => "Manifest 压缩输入大小超过 64 MiB，已停止转换。",
         CoreErrorCode.ManifestDecodedSizeLimit => "Manifest 解压后大小超过 128 MiB，已停止转换。",
-        CoreErrorCode.ManifestCompressionInvalid => "无法解压 Manifest：zstd 数据损坏或不完整。",
-        CoreErrorCode.ManifestEncodingInvalid => "无法解析 Manifest：protobuf 数据损坏或不完整。",
+        CoreErrorCode.ManifestCompressionInvalid or CoreErrorCode.ManifestEncodingInvalid => "清单损坏或不是支持的 manifest。",
         CoreErrorCode.ManifestEmpty => "Manifest 没有文件条目，不能生成文件列表。",
         CoreErrorCode.FileMetadataInvalid => "文件大小或 MD5 无效。",
         CoreErrorCode.TotalSizeOverflow => "文件总大小超过可表示范围，已停止。",
@@ -85,10 +84,10 @@ internal static class CliOutput
 
     public static void Usage()
     {
-        Console.WriteLine("用法：HoyoFileClean convert <manifest> <output.json> [--uncompressed]");
+        Console.WriteLine("用法：HoyoFileClean convert <manifest> <output.json>");
         Console.WriteLine("      HoyoFileClean scan <root> <output.json> [--hash] [--exclude-dir <path> ...] [--exclude-file <path> ...]");
         Console.WriteLine("      HoyoFileClean compare <output.json> --a <list.json> ... --b <list.json> ...");
-        Console.WriteLine("默认输入为 zstd 压缩的 Sophon 构建清单；解压后的 protobuf 加 --uncompressed。");
+        Console.WriteLine("支持本地 Sophon 构建清单，程序自动识别输入，无需手动处理。");
         Console.WriteLine("默认轻扫只读路径和大小；--hash 复用列表计算 MD5，交互终端低频刷新进度。");
         Console.WriteLine("排除选项可跟多个路径，也可重复；路径相对扫描根目录，或为根目录内的绝对路径，不支持通配符。");
         Console.WriteLine("scan 只读、不跟随链接，输出必须在扫描根目录之外；所有命令均不覆盖已有输出。");

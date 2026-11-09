@@ -14,7 +14,6 @@ public sealed partial class MainForm : Form
     private readonly ProgressBar progress = new() { Dock = DockStyle.Fill, Visible = false };
     private readonly TextBox status = OutputBox("Status");
     private readonly ListBox manifests = new() { Name = "Manifests", Height = 100, Dock = DockStyle.Fill, HorizontalScrollbar = true };
-    private readonly CheckBox uncompressed = new() { Text = "所有选中输入均为未压缩 protobuf", AutoSize = true, Name = "Uncompressed" };
     private readonly TextBox referenceResult = OutputBox("ReferenceResult");
     private readonly TextBox gameRoot = new() { Name = "GameRoot", Width = 570 };
     private readonly CheckBox heavy = new() { Text = "MD5 重扫（读取文件内容，耗时更长）", AutoSize = true, Name = "HeavyScan" };
@@ -69,7 +68,6 @@ public sealed partial class MainForm : Form
         skip.Click += async (_, _) => await ImportAsync();
         execute.Click += async (_, _) => await ExecuteAsync();
         close.Click += (_, _) => Close();
-        uncompressed.CheckedChanged += (_, _) => ReferenceChanged();
         gameRoot.TextChanged += (_, _) => GameChanged();
         heavy.CheckedChanged += (_, _) => GameChanged();
         excludedDirectories.TextChanged += (_, _) => GameChanged();
@@ -111,7 +109,6 @@ public sealed partial class MainForm : Form
         input.Controls.Add(Note("手动选择参考 manifest。“解析”只转换清单，不扫描游戏。自动获取：暂未支持。"));
         input.Controls.Add(Buttons(add, remove));
         input.Controls.Add(manifests);
-        input.Controls.Add(uncompressed);
         input.Controls.Add(Note("跳过＝导入一份或多份现成清单 JSON；不会无输入前进。游戏名称／包识别暂未支持。"));
         return Page(input, referenceResult);
     }

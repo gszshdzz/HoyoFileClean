@@ -9,7 +9,10 @@ public sealed partial class MainForm
         switch (session.Step)
         {
             case 0: await ConvertAsync(); break;
-            case 1: await ScanAsync(); break;
+            case 1:
+                if (importGameSource.Checked) await ImportGameAsync();
+                else await ScanAsync();
+                break;
             case 2: await CompareAsync(); break;
         }
     }
@@ -70,16 +73,19 @@ public sealed partial class MainForm
         string root = gameRoot.Text.Trim();
         if (!Path.IsPathFullyQualified(root)) { status.Text = "请输入或浏览选择游戏目录的完整路径。"; return; }
         bool hashes = heavy.Checked;
-        string[] dirs = ReadLines(excludedDirectories), files = ReadLines(excludedFiles);
+        string[] dirs = excludedDirectories.Items.Cast<string>().ToArray(), files = excludedFiles.Items.Cast<string>().ToArray();
         var reporter = new Progress<ScanProgress>(value =>
         {
             if (!session.IsBusy) return;
-            progress.Style = ProgressBarStyle.Continuous;
-            progress.Value = Math.Clamp((int)value.Percentage, 0, 100);
+            ShowScanProgress(value);
             status.Text = $"正在 MD5 重扫：{value.CompletedFiles:N0}/{value.TotalFiles:N0} 个文件；{value.ProcessedBytes:N0}/{value.TotalBytes:N0} 字节。";
         });
         session.InvalidateGame();
         scanOrigin = reportOrigin = "";
+        ResetScanProgress();
+        scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Marquee;
+        scanFileStatus.Text = "文件数量：正在枚举，总数尚未知…";
+        scanByteStatus.Text = "文件大小：正在枚举，总大小尚未知…";
         await RunWorkAsync(() =>
         {
             return DirectoryScanner.Scan(root, dirs, files, hashes,
@@ -87,8 +93,40 @@ public sealed partial class MainForm
         }, result =>
         {
             session.AcceptGame(result, root);
+            ShowScanProgress(new ScanProgress(result.FileCount, result.FileCount, result.TotalSize, result.TotalSize));
             scanOrigin = "本次实际扫描；结果仅保留在内存。\r\n";
-        }, hashes ? "正在枚举文件，随后计算 MD5…" : "正在轻扫（只读取路径与大小）…");
+        }, hashes ? "正在枚举文件，随后计算 MD5…" : "正在轻扫（只读取路径与大小）…", onFinished: StopScanProgress);
+    }
+
+    private void StopScanProgress()
+    {
+        scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Continuous;
+        if (session.Game is not null) return;
+        scanFileProgress.Value = scanByteProgress.Value = 0;
+        scanFileStatus.Text = "文件数量：未完成，结果不可用";
+        scanByteStatus.Text = "文件大小：未完成，结果不可用";
+    }
+
+    private async Task ImportGameAsync()
+    {
+        string root = gameRoot.Text.Trim(), path = gameJson.Text.Trim();
+        if (!Path.IsPathFullyQualified(root)) { status.Text = "请先指定游戏目录的完整路径，以核对历史记录。"; return; }
+        if (path.Length == 0) { status.Text = "请选择或拖入扫描 JSON。"; return; }
+        session.InvalidateGame();
+        scanOrigin = reportOrigin = "";
+        ResetScanProgress();
+        await RunWorkAsync(() =>
+        {
+            FileListSnapshot result = FileComparer.ReadInputs([path]);
+            WizardSession.ValidateGameInput(result, root);
+            return result;
+        }, result =>
+        {
+            session.AcceptGame(result, root);
+            scanFileStatus.Text = $"文件数量：历史记录 {result.FileCount:N0} 个（未扫描）";
+            scanByteStatus.Text = $"文件大小：历史记录 {result.TotalSize:N0} 字节（未读取）";
+            scanOrigin = "已导入历史扫描 JSON；未重新扫描，也不证明目录当前状态未变化。模式与范围来自记录。\r\n";
+        }, "正在校验扫描 JSON 与指定目录…");
     }
 
     private async Task CompareAsync()
@@ -103,64 +141,44 @@ public sealed partial class MainForm
         }, "正在比较两侧清单…");
     }
 
-    private async Task ImportAsync()
+    private async Task ImportReportAsync()
     {
-        if (session.IsBusy || session.Step is not (1 or 2)) return;
-        int step = session.Step;
+        if (session.IsBusy || session.Step != 2 || session.Game is not { } game || session.Reference is not { } reference) return;
         using var dialog = new OpenFileDialog
         {
-            Title = step == 1 ? "导入已有扫描 JSON" : "导入比较报告并核对当前两侧",
+            Title = "导入比较报告并核对当前两侧",
             Filter = "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*",
             Multiselect = false
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        string[] inputs = dialog.FileNames;
-        switch (step)
+        string path = dialog.FileName;
+        session.InvalidateComparison();
+        reportOrigin = "";
+        await RunWorkAsync(() => FileComparer.ImportReport(path, game, reference), result =>
         {
-            case 1:
-                string root = gameRoot.Text.Trim();
-                session.InvalidateGame();
-                scanOrigin = reportOrigin = "";
-                await RunWorkAsync(() =>
-                {
-                    FileListSnapshot result = FileComparer.ReadInputs(inputs);
-                    WizardSession.ValidateGameInput(result, root);
-                    return result;
-                }, result =>
-                {
-                    session.AcceptGame(result, root);
-                    scanOrigin = "已导入历史扫描 JSON；未重新扫描，也不证明目录当前状态未变化。以下模式与范围来自扫描记录。\r\n";
-                }, "正在校验扫描 JSON 与指定目录…");
-                break;
-            case 2:
-                if (session.Game is not { } game || session.Reference is not { } reference) return;
-                session.InvalidateComparison();
-                reportOrigin = "";
-                await RunWorkAsync(() => FileComparer.ImportReport(inputs[0], game, reference), result =>
-                {
-                    session.AcceptComparison(result);
-                    reportOrigin = "已核对身份和内容的导入报告：" + inputs[0] + "\r\n";
-                }, "正在核对报告身份，并用当前清单复核内容…");
-                break;
-        }
+            session.AcceptComparison(result);
+            reportOrigin = "已核对身份和内容的导入报告：" + path + "\r\n";
+        }, "正在核对报告身份，并用当前清单复核内容…");
     }
 
     private async Task RunWorkAsync<T>(Func<T> work, Action<T> apply, string message,
-        string completedMessage = "处理完成，请核对本步摘要后点击下一步。", int? totalFiles = null, Action? onFinished = null)
+        Func<string>? completedMessage = null, int? totalFiles = null, Action? onFinished = null)
     {
         Task operation = session.RunAsync(work, apply);
         status.Text = message;
         progress.Value = 0;
         progress.Maximum = totalFiles ?? 100;
         progress.Style = totalFiles is null ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
-        progress.Visible = true;
+        progress.Visible = session.Step != 1;
         differences.Render();
         RefreshView();
         string outcome;
         try
         {
             await operation;
-            outcome = completedMessage;
+            outcome = session.Step == 1 && session.Game is not null
+                ? ResultText.DescribeGameStatus(session.Game, importGameSource.Checked)
+                : completedMessage?.Invoke() ?? "处理完成，请核对本步摘要后点击下一步。";
         }
         catch (OperationCanceledException) when (parsingCancellation is { IsCancellationRequested: true })
         {
@@ -236,5 +254,4 @@ public sealed partial class MainForm
         _ => "操作未完成，请检查输入后重试。"
     };
 
-    private static string[] ReadLines(TextBox box) => box.Lines.Select(line => line.Trim()).Where(line => line.Length > 0).ToArray();
 }

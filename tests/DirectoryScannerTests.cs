@@ -105,6 +105,30 @@ public sealed class DirectoryScannerTests
         Assert.Equal((1, 3L), (summary.FileCount, summary.TotalSize));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitlyExcludedLinksAreNotCountedAgainAsSkippedLinks(bool computeHashes)
+    {
+        WriteFile("keep.bin", "abc");
+        string externalDirectory = Path.Combine(directory, "external");
+        Directory.CreateDirectory(externalDirectory);
+        Directory.CreateSymbolicLink(Path.Combine(Root, "excluded-directory"), externalDirectory);
+        File.CreateSymbolicLink(Path.Combine(Root, "excluded-file.bin"), Path.Combine(directory, "missing.bin"));
+        Directory.CreateSymbolicLink(Path.Combine(Root, "still-skipped"), externalDirectory);
+
+        ScanSummary summary = DirectoryScanner.Scan(Root, Output,
+            ["excluded-directory"], ["excluded-file.bin"], computeHashes: computeHashes);
+
+        Assert.Equal("still-skipped", Assert.Single(summary.SkippedLinks));
+        using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
+        JsonElement scan = json.RootElement.GetProperty("scan");
+        Assert.Equal("excluded-directory", Assert.Single(scan.GetProperty("excludedDirectories").EnumerateArray()).GetString());
+        Assert.Equal("excluded-file.bin", Assert.Single(scan.GetProperty("excludedFiles").EnumerateArray()).GetString());
+        Assert.Equal("still-skipped", Assert.Single(scan.GetProperty("skippedLinks").EnumerateArray()).GetString());
+        Assert.Equal(new[] { "keep.bin" }, FilePaths(json.RootElement));
+    }
+
     [Fact]
     public void HashingDoesNotAllocateAWholeFileBuffer()
     {

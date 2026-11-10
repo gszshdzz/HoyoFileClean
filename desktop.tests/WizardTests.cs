@@ -7,8 +7,120 @@ namespace HoyoFileClean.Desktop.Tests;
 
 public sealed class WizardTests
 {
+    [Fact]
+    public void GameReadingOffersSourcesSingleLineInputsAndEditableExclusionLists() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        session.Next();
+        using var form = new MainForm(session);
+        form.Location = new Point(-20000, -20000);
+        form.StartPosition = FormStartPosition.Manual;
+        form.ShowInTaskbar = false;
+        form.Show();
+        Application.DoEvents();
+        Assert.True(Find<RadioButton>(form, "ScanGameSource").Checked);
+        Control sourceRow = Find<RadioButton>(form, "ScanGameSource").Parent!;
+        Button scanButton = Find<Button>(form, "ReadGame");
+        Assert.NotSame(sourceRow, scanButton.Parent);
+        Assert.True(scanButton.RectangleToScreen(scanButton.ClientRectangle).Top >=
+            Find<TextBox>(form, "GameRoot").RectangleToScreen(Find<TextBox>(form, "GameRoot").ClientRectangle).Bottom);
+        foreach (string name in new[] { "GameRoot", "GameJson", "ExclusionJson", "ExcludedDirectoryInput", "ExcludedFileInput" })
+        {
+            TextBox input = Find<TextBox>(form, name);
+            Assert.False(input.Multiline);
+            Assert.True(input.AllowDrop);
+        }
+        Find<TextBox>(form, "GameRoot").Text = directory;
+        Find<TextBox>(form, "ExcludedDirectoryInput").Text = "Cache";
+        Find<Button>(form, "AddExcludedDirectory").PerformClick();
+        ListBox list = Find<ListBox>(form, "ExcludedDirectories");
+        Assert.Equal("Cache", Assert.Single(list.Items.Cast<string>()));
+        Assert.Null(session.Game);
+        list.SelectedIndex = 0;
+        Find<Button>(form, "RemoveExcludedDirectory").PerformClick();
+        Assert.Empty(list.Items);
+        Find<RadioButton>(form, "ImportGameSource").Checked = true;
+        Assert.Equal("导入", Find<Button>(form, "ReadGame").Text);
+        Assert.False(Find<Button>(form, "Execute").Visible);
+        Assert.False(Find<Button>(form, "Import").Visible);
+        Assert.NotNull(Find<ProgressBar>(form, "ScanFileProgress"));
+        Assert.NotNull(Find<ProgressBar>(form, "ScanByteProgress"));
+        Assert.Empty(form.Controls.Find("ScanResult", true));
+        ProgressBar parsing = Find<ProgressBar>(form, "OperationProgress");
+        ProgressBar comparing = Find<ProgressBar>(form, "ComparisonProgress");
+        Assert.NotSame(parsing.Parent, comparing.Parent);
+        var outer = Assert.IsType<TableLayoutPanel>(form.Controls[0]);
+        Assert.Equal(4, outer.RowCount);
+        Assert.DoesNotContain(outer.Controls.Cast<Control>(), control => control is ProgressBar);
+        Assert.Contains("尚无有效结果", Find<Label>(form, "Status").Text);
+    });
+
+    [Fact]
+    public void ExclusionRulesValidateBothArraysBeforePublishing()
+    {
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "rules.json");
+        File.WriteAllText(path, """{"excludedDirectories":["Cache","cache"],"excludedFiles":["settings.ini"]}""");
+        ExclusionRules rules = ExclusionRules.Read(path, directory);
+        Assert.Single(rules.Directories);
+        Assert.Equal("settings.ini", Assert.Single(rules.Files));
+        File.WriteAllText(path, """{"excludedDirectories":["Cache"],"excludedFiles":["../outside"]}""");
+        Assert.Throws<CoreException>(() => ExclusionRules.Read(path, directory));
+    }
+
     private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+
+    [Theory]
+    [InlineData(650)]
+    [InlineData(1000)]
+    public void GameListsGrowWithoutOverlappingResultsAndRejectMixedDrops(int height) => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string folder = Path.Combine(directory, "Cache"), other = Path.Combine(directory, "Logs");
+        Directory.CreateDirectory(folder);
+        Directory.CreateDirectory(other);
+        string file = Path.Combine(directory, "settings.ini");
+        File.WriteAllText(file, "test");
+        WizardSession session = Ready();
+        session.Next();
+        using var form = new MainForm(session) { StartPosition = FormStartPosition.Manual,
+            Location = new Point(-20000, -20000), ShowInTaskbar = false, Size = new Size(800, height) };
+        form.Show();
+        Application.DoEvents();
+        Find<TextBox>(form, "GameRoot").Text = directory;
+        Application.DoEvents();
+        ListBox dirs = Find<ListBox>(form, "ExcludedDirectories"), files = Find<ListBox>(form, "ExcludedFiles");
+        foreach (ListBox list in new[] { dirs, files })
+        {
+            Assert.True(list.Height > 30, string.Join(" / ", Ancestors(list).Select(c => $"{c.GetType().Name}:{c.Size}")));
+            Assert.True(list.RectangleToScreen(list.ClientRectangle).Bottom <=
+                Find<ProgressBar>(form, "ScanFileProgress").RectangleToScreen(Rectangle.Empty).Top);
+        }
+        DragEventArgs Raise(ListBox list, string method, params string[] paths)
+        {
+            var args = new DragEventArgs(new DataObject(DataFormats.FileDrop, paths), 0, 0, 0, DragDropEffects.Copy, DragDropEffects.None);
+            typeof(Control).GetMethod(method, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(list, [args]);
+            return args;
+        }
+        static IEnumerable<Control> Ancestors(Control c)
+        {
+            for (Control? current = c; current is not null; current = current.Parent) yield return current;
+        }
+        foreach (ListBox list in new[] { dirs, files })
+        {
+            Assert.Equal(DragDropEffects.None, Raise(list, "OnDragEnter", folder, file).Effect);
+            Raise(list, "OnDragDrop", folder, file);
+            Assert.Empty(list.Items);
+        }
+        Raise(dirs, "OnDragDrop", folder, other);
+        Assert.Equal(2, dirs.Items.Count);
+        Raise(files, "OnDragDrop", file);
+        Assert.Single(files.Items.Cast<string>());
+        Raise(dirs, "OnDragDrop", folder, other);
+        Assert.Equal(2, dirs.Items.Count);
+    });
 
     [Fact]
     public void EveryNextStepRequiresAnEffectiveResult()
@@ -30,6 +142,27 @@ public sealed class WizardTests
         Assert.False(session.CanAdvance);
         session.Back();
         Assert.True(session.CanAdvance);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GameStatusBrieflyReportsSkippedLinksAndExcludedScope(bool imported)
+    {
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "scope.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            fileCount = 0, totalSize = 0, files = Array.Empty<object>(),
+            scan = new { root = directory, mode = "light", excludedDirectories = new[] { "Cache" },
+                excludedFiles = Array.Empty<string>(), skippedLinks = new[] { "link-a", "link-b" } }
+        }));
+        string text = ResultText.DescribeGameStatus(FileComparer.ReadInputs([path]), imported);
+        Assert.Contains("排除 1 项", text);
+        Assert.Contains("跳过链接／重解析点 2 项（未跟随）", text);
+        Assert.Contains("上述范围未扫描", text);
+        Assert.DoesNotContain("link-a", text);
+        Assert.Equal(imported, text.Contains("未重新扫描"));
     }
 
     [Fact]
@@ -230,8 +363,8 @@ public sealed class WizardTests
         form.PerformLayout();
         Assert.False(Find<Button>(form, "Next").Enabled);
         Assert.False(Find<Button>(form, "Back").Enabled);
-        Assert.False(Find<Button>(form, "Execute").Enabled);
-        Assert.False(Find<Button>(form, "Import").Enabled);
+        Assert.False(Find<Button>(form, "Execute").Visible);
+        Assert.False(Find<Button>(form, "Import").Visible);
         Assert.True(Find<RadioButton>(form, "NetworkSource").Checked);
         Assert.False(Find<CheckBox>(form, "HeavyScan").Checked);
         Assert.True(Find<DataGridView>(form, "Manifests").Columns["Name"]!.ReadOnly);
@@ -257,7 +390,7 @@ public sealed class WizardTests
         string[] controls = step switch
         {
             0 => ["Manifests", "ReferenceResult", "Next", "ParseManualReference"],
-            1 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "ScanResult", "Next", "Execute"],
+            1 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "ScanFileProgress", "ScanByteProgress", "Next", "ReadGame"],
             2 => ["ComparisonResult", "Next", "Execute"],
             _ => ["GameTree", "ReferenceTree", "ConfirmSelection", "DemonstrateDelete"]
         };
@@ -436,7 +569,8 @@ public sealed class WizardTests
         Assert.Equal(SortOrder.Descending, grid.SortOrder);
         Assert.Null(session.Reference);
         Assert.False(Find<Button>(form, "Next").Enabled);
-        Assert.Contains("尚未解析", Find<Label>(form, "LocalManifestSummary").Text);
+        Assert.Empty(form.Controls.Find("LocalManifestSummary", true));
+        Assert.Contains("已获取 2 份候选清单，尚未解析", Find<Label>(form, "Status").Text);
         using (var bitmap = new Bitmap(form.Width, form.Height))
         {
             form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
@@ -507,6 +641,8 @@ public sealed class WizardTests
         row.Cells["Checked"].Value = false;
         Assert.Null(session.Reference);
         Assert.False(Find<Button>(form, "Next").Enabled);
+        Assert.Contains("请重新解析", Find<Label>(form, "Status").Text);
+        Assert.DoesNotContain("点击下一步", Find<Label>(form, "Status").Text);
         Assert.Equal(bytes, File.ReadAllBytes(source));
         form.Close();
     });
@@ -682,10 +818,10 @@ public sealed class WizardTests
             Assert.False(session.IsBusy);
             Assert.DoesNotContain("处理失败", Find<Label>(form, "Status").Text);
         }
-        Find<Button>(form, "Execute").PerformClick();
+        Find<Button>(form, "ReadGame").PerformClick();
         Wait();
         Assert.NotNull(session.Game);
-        Assert.Contains("仅保留在内存", Find<TextBox>(form, "ScanResult").Text);
+        Assert.Contains("仅保留在内存", Find<Label>(form, "Status").Text);
         Find<Button>(form, "Next").PerformClick();
         Find<Button>(form, "Execute").PerformClick();
         Wait();
@@ -782,7 +918,7 @@ public sealed class WizardTests
         Assert.Equal(directory, box.Text);
         Assert.Empty(table.Rows.Cast<DataGridViewRow>());
         Assert.Null(session.Reference);
-        Assert.Contains("请点击获取", Find<Label>(form, "LocalManifestSummary").Text);
+        Assert.Contains("请点击获取", Find<Label>(form, "Status").Text);
         foreach (DragEventArgs invalid in new[]
         {
             Drag([file]), Drag([directory, other]), Drag([Path.Combine(directory, "missing")]),
@@ -1328,6 +1464,154 @@ public sealed class WizardTests
         session.ConfirmSelection(true);
         Assert.True(session.CanDemonstrateDeletion);
         Assert.Equal("abc", File.ReadAllText(Path.Combine(root, "game-only")));
+    }
+
+    [Fact]
+    public void FailedRescanClearsBothPreviousCompletedBars() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string root = Path.Combine(directory, "game");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "file"), "abc");
+        var session = new WizardSession();
+        session.AcceptReference(FileComparer.ReadInputs([WriteList("reference", null, [new ManifestFile("file", 3)])]));
+        session.Next();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<TextBox>(form, "GameRoot").Text = root;
+        Button scan = Find<Button>(form, "ReadGame");
+        scan.PerformClick();
+        WaitForPageWork(form, session, "ReadGame");
+        Assert.Equal(100, Find<ProgressBar>(form, "ScanFileProgress").Value);
+        Assert.Equal(100, Find<ProgressBar>(form, "ScanByteProgress").Value);
+        Directory.Move(root, root + "-moved");
+        scan.PerformClick();
+        WaitForPageWork(form, session, "ReadGame");
+        Assert.Null(session.Game);
+        Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
+        Assert.Equal(0, Find<ProgressBar>(form, "ScanFileProgress").Value);
+        Assert.Equal(0, Find<ProgressBar>(form, "ScanByteProgress").Value);
+        form.Close();
+    });
+
+    [Fact]
+    public void NavigationShowsCurrentResultStatusAndProgressBelongsToPages() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Label status = Find<Label>(form, "Status");
+        ProgressBar parsing = Find<ProgressBar>(form, "OperationProgress");
+        ProgressBar comparison = Find<ProgressBar>(form, "ComparisonProgress");
+        Assert.NotSame(status.Parent, parsing.Parent);
+        Assert.NotSame(status.Parent, comparison.Parent);
+        Assert.NotSame(parsing.Parent, comparison.Parent);
+        status.Text = "上一个页面的解析完成提示";
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Contains("轻扫", status.Text);
+        Assert.DoesNotContain("上一个页面", status.Text);
+        Assert.False(parsing.Visible);
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Contains("比较", status.Text);
+        Assert.DoesNotContain("轻扫", status.Text);
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Contains("演示", status.Text);
+        Find<Button>(form, "Back").PerformClick();
+        Assert.Contains("比较", status.Text);
+        Find<Button>(form, "Back").PerformClick();
+        Find<CheckBox>(form, "HeavyScan").Checked = true;
+        Assert.Contains("尚无有效结果", status.Text);
+        Find<Button>(form, "Back").PerformClick();
+        Assert.Contains("参考", status.Text);
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Contains("尚无有效结果", status.Text);
+        form.Close();
+    });
+
+    [Fact]
+    public void FailedRuleImportPreservesListsAndGameAndUnlocksInputs() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        FileListSnapshot game = session.Game!;
+        session.Next();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<TextBox>(form, "GameRoot").Text = game.Sources[0].Scan!.Root;
+        session.AcceptGame(game, game.Sources[0].Scan!.Root);
+        ListBox dirs = Find<ListBox>(form, "ExcludedDirectories"), files = Find<ListBox>(form, "ExcludedFiles");
+        dirs.Items.Add("existing-dir");
+        files.Items.Add("existing-file");
+        string path = Path.Combine(directory, "invalid-rules.json");
+        File.WriteAllText(path, """{"excludedDirectories":["new-dir"],"excludedFiles":["../outside"]}""");
+        Find<TextBox>(form, "ExclusionJson").Text = path;
+        Find<Button>(form, "ImportExclusionRules").PerformClick();
+        WaitForPageWork(form, session, "ImportExclusionRules");
+        Assert.Equal("existing-dir", Assert.Single(dirs.Items.Cast<string>()));
+        Assert.Equal("existing-file", Assert.Single(files.Items.Cast<string>()));
+        Assert.Same(game, session.Game);
+        Assert.Contains("原列表未改变", Find<Label>(form, "Status").Text);
+        Assert.True(dirs.Enabled && files.Enabled && Find<TextBox>(form, "GameRoot").Enabled);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        form.Close();
+    });
+
+    [Fact]
+    public void HistoricalImportNavigationUsesRecordedStatusAndFailureCannotRestoreOldResult() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        string root = session.Game!.Sources[0].Scan!.Root;
+        session.Next();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Assert.False(Directory.Exists(root));
+        Find<RadioButton>(form, "ImportGameSource").Checked = true;
+        Find<TextBox>(form, "GameRoot").Text = root;
+        Find<TextBox>(form, "GameJson").Text = Path.Combine(directory, "game.json");
+        Find<Button>(form, "ReadGame").PerformClick();
+        WaitForPageWork(form, session, "ReadGame");
+        Assert.NotNull(session.Game);
+        Label status = Find<Label>(form, "Status");
+        Assert.Contains("已导入历史扫描", status.Text);
+        Assert.Contains("未重新扫描", status.Text);
+        Find<Button>(form, "Next").PerformClick();
+        Find<Button>(form, "Back").PerformClick();
+        Assert.Contains("已导入历史扫描", status.Text);
+        Assert.Contains("未重新扫描", status.Text);
+        Assert.Equal(0, Find<ProgressBar>(form, "ScanFileProgress").Value);
+        Find<TextBox>(form, "GameJson").Text = Path.Combine(directory, "missing.json");
+        Find<Button>(form, "ReadGame").PerformClick();
+        WaitForPageWork(form, session, "ReadGame");
+        Assert.Null(session.Game);
+        Assert.Contains("处理失败", status.Text);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Find<Button>(form, "Back").PerformClick();
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Contains("尚无有效结果", status.Text);
+        Assert.DoesNotContain("已导入历史扫描", status.Text);
+        form.Close();
+    });
+
+    private static void WaitForPageWork(MainForm form, WizardSession session, string button)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        while ((session.IsBusy || !Find<Button>(form, button).Enabled || Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal))
+            && timer.Elapsed < TimeSpan.FromSeconds(5)) Application.DoEvents();
+        Application.DoEvents();
+        Assert.False(session.IsBusy);
+        Assert.True(Find<Button>(form, button).Enabled);
+        Assert.DoesNotContain("正在", Find<Label>(form, "Status").Text);
     }
 
     private WizardSession Ready()

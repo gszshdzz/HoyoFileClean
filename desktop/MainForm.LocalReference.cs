@@ -21,6 +21,13 @@ public sealed partial class MainForm
 
     private Panel BuildLocalReferencePage()
     {
+        localManifestDirectory.AllowDrop = true;
+        localManifestDirectory.DragEnter += (_, args) =>
+            args.Effect = DroppedManifestDirectory(args) is not null ? DragDropEffects.Copy : DragDropEffects.None;
+        localManifestDirectory.DragDrop += (_, args) =>
+        {
+            if (DroppedManifestDirectory(args) is { } directory) localManifestDirectory.Text = directory;
+        };
         Button browse = MakeButton("浏览…", "BrowseLocalManifestDirectory");
         browse.Click += (_, _) =>
         {
@@ -48,6 +55,17 @@ public sealed partial class MainForm
         input.Controls.Add(Note("只获取当前目录的候选清单文件，不解析内容、不扫描子目录；链接文件不列入。默认按修改时间从新到旧显示。"));
         input.Controls.Add(localManifestSummary);
         return Page(input, localManifests);
+    }
+
+    private string? DroppedManifestDirectory(DragEventArgs args)
+    {
+        if (session.IsBusy || session.Step != 0 || !localSource.Checked
+            || (args.AllowedEffect & DragDropEffects.Copy) == 0) return null;
+        if (args.Data is ITypedDataObject data && data.TryGetData(DataFormats.FileDrop, out string[]? paths)
+            && paths is { Length: 1 } && !string.IsNullOrWhiteSpace(paths[0])
+            && Path.IsPathFullyQualified(paths[0]) && Directory.Exists(paths[0]))
+            return paths[0];
+        return null;
     }
 
     private async Task GetLocalManifestsAsync()

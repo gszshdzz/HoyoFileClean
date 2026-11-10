@@ -750,6 +750,72 @@ public sealed class WizardTests
     });
 
     [Fact]
+    public void LocalDirectoryDropFillsOnlyOneDirectoryWithoutFetchingAndHonorsBusyState() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string other = Path.Combine(directory, "other");
+        Directory.CreateDirectory(other);
+        string file = Path.Combine(directory, "file");
+        File.WriteAllText(file, "keep");
+        var session = new WizardSession();
+        using var form = new MainForm(session);
+        TextBox box = Find<TextBox>(form, "LocalManifestDirectory");
+        ManifestTable table = Find<ManifestTable>(form, "LocalManifests");
+        Assert.True(box.AllowDrop);
+        DragEventArgs Drag(string[] paths, DragDropEffects allowed = DragDropEffects.Copy)
+            => new(new DataObject(DataFormats.FileDrop, paths), 0, 0, 0, allowed, DragDropEffects.None);
+        void Raise(string name, DragEventArgs args)
+            => typeof(Control).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(box, [args]);
+        string original = box.Text;
+        DragEventArgs folder = Drag([directory]);
+        Raise("OnDragEnter", folder);
+        Assert.Equal(DragDropEffects.None, folder.Effect);
+        Raise("OnDragDrop", folder);
+        Assert.Equal(original, box.Text);
+        Find<RadioButton>(form, "LocalSource").Checked = true;
+        table.AddFiles([new LocalManifestFile("old", file, 4, DateTime.UtcNow)]);
+        session.AcceptReference(FileComparer.ReadInputs([WriteList("reference", null, [new ManifestFile("file", 4)])]));
+        Raise("OnDragEnter", folder);
+        Assert.Equal(DragDropEffects.Copy, folder.Effect);
+        Raise("OnDragDrop", folder);
+        Assert.Equal(directory, box.Text);
+        Assert.Empty(table.Rows.Cast<DataGridViewRow>());
+        Assert.Null(session.Reference);
+        Assert.Contains("请点击获取", Find<Label>(form, "LocalManifestSummary").Text);
+        foreach (DragEventArgs invalid in new[]
+        {
+            Drag([file]), Drag([directory, other]), Drag([Path.Combine(directory, "missing")]),
+            Drag([other], DragDropEffects.Move),
+            new DragEventArgs(new DataObject(DataFormats.Text, other), 0, 0, 0, DragDropEffects.Copy, DragDropEffects.Copy)
+        })
+        {
+            Raise("OnDragEnter", invalid);
+            Assert.Equal(DragDropEffects.None, invalid.Effect);
+            Raise("OnDragDrop", invalid);
+            Assert.Equal(directory, box.Text);
+        }
+        using var release = new ManualResetEventSlim();
+        Task work = session.RunAsync(() => release.Wait(TimeSpan.FromSeconds(10)), _ => { });
+        try
+        {
+            DragEventArgs busy = Drag([other]);
+            Raise("OnDragEnter", busy);
+            Assert.Equal(DragDropEffects.None, busy.Effect);
+            Raise("OnDragDrop", busy);
+            Assert.Equal(directory, box.Text);
+        }
+        finally
+        {
+            release.Set();
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (!work.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            work.GetAwaiter().GetResult();
+        }
+        Assert.Equal("keep", File.ReadAllText(file));
+    });
+
+    [Fact]
     public void ManualTableFileDropAddsCheckedFilesWithoutParsingAndRejectsInvalidBatches() => OnSta(() =>
     {
         Directory.CreateDirectory(directory);

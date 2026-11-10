@@ -11,6 +11,9 @@ public sealed class DifferencePanel : UserControl
     private readonly Label selection = new() { Name = "SelectionSummary", AutoSize = true };
     private readonly TextBox details = new() { Name = "DifferenceDetails", Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical };
     private bool rendering;
+    private bool hasRendered;
+    private ComparisonResult? renderedComparison;
+    private DifferenceCategory renderedFilter;
 
     public DifferencePanel(WizardSession session)
     {
@@ -90,6 +93,11 @@ public sealed class DifferencePanel : UserControl
 
     public void Render()
     {
+        if (hasRendered && ReferenceEquals(renderedComparison, session.Comparison) && renderedFilter == session.Filter)
+        {
+            RefreshSelection();
+            return;
+        }
         rendering = true;
         gameTree.BeginUpdate();
         referenceTree.BeginUpdate();
@@ -114,6 +122,9 @@ public sealed class DifferencePanel : UserControl
             AddChildren(gameTree.Nodes, root, true);
             AddChildren(referenceTree.Nodes, root, false);
             details.Text = session.Comparison is null ? "尚无有效比较结果。" : ResultText.Describe(session.Comparison);
+            renderedComparison = session.Comparison;
+            renderedFilter = session.Filter;
+            hasRendered = true;
         }
         finally
         {
@@ -157,6 +168,7 @@ public sealed class DifferencePanel : UserControl
         rendering = true;
         try
         {
+            filter.Enabled = !session.IsBusy;
             selection.Text = $"已选 {session.SelectedCount:N0} 个文件，{session.SelectedSize:N0} 字节  ";
             confirm.Checked = session.SelectionConfirmed;
             confirm.Enabled = !session.IsBusy && session.SelectedCount > 0;

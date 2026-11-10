@@ -11,10 +11,15 @@ public sealed partial class MainForm : Form
     private readonly Button execute = MakeButton("解析", "Execute");
     private readonly Button next = MakeButton("下一步", "Next");
     private readonly Button close = MakeButton("关闭", "CloseWizard");
-    private readonly ProgressBar progress = new() { Dock = DockStyle.Fill, Visible = false };
-    private readonly TextBox status = OutputBox("Status");
-    private readonly ListBox manifests = new() { Name = "Manifests", Height = 100, Dock = DockStyle.Fill, HorizontalScrollbar = true };
-    private readonly TextBox referenceResult = OutputBox("ReferenceResult");
+    private readonly Button cancelParsing = MakeButton("取消解析", "CancelParsing");
+    private readonly ReferenceParser referenceParser;
+    private CancellationTokenSource? parsingCancellation;
+    private readonly Button parseManualReference = MakeButton("解析", "ParseManualReference");
+    private readonly ProgressBar progress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
+    private readonly Label status = new() { Name = "Status", Dock = DockStyle.Fill, AutoSize = true,
+        BackColor = SystemColors.Control, Padding = new Padding(0, 3, 0, 3) };
+    private readonly ManifestTable manifests = new("Manifests");
+    private readonly Label referenceResult = new() { Name = "ReferenceResult", AutoSize = true, Dock = DockStyle.Top };
     private readonly RadioButton networkSource = new() { Name = "NetworkSource", Text = "网络获取", AutoSize = true, Checked = true };
     private readonly RadioButton localSource = new() { Name = "LocalSource", Text = "本地获取", AutoSize = true };
     private readonly RadioButton manualSource = new() { Name = "ManualSource", Text = "手动输入", AutoSize = true };
@@ -34,9 +39,10 @@ public sealed partial class MainForm : Form
 
     public MainForm() : this(new WizardSession()) { }
 
-    internal MainForm(WizardSession session)
+    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null)
     {
         this.session = session;
+        this.referenceParser = referenceParser ?? new ReferenceParser();
         Text = "HoyoFileClean — 文件差异向导（删除仅演示）";
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
@@ -50,7 +56,7 @@ public sealed partial class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var flow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Padding = new Padding(0, 0, 0, 12) };
         string[] titles = ["1 参考清单", "2 游戏扫描", "3 确认与比较", "4 差异与选择"];
@@ -62,7 +68,7 @@ public sealed partial class MainForm : Form
         }
         foreach (Panel page in pages) content.Controls.Add(page);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
-        buttons.Controls.AddRange([back, skip, execute, next, close]);
+        buttons.Controls.AddRange([back, skip, execute, next, cancelParsing, close]);
         layout.Controls.Add(flow, 0, 0);
         layout.Controls.Add(content, 0, 1);
         layout.Controls.Add(progress, 0, 2);
@@ -74,6 +80,12 @@ public sealed partial class MainForm : Form
         skip.Click += async (_, _) => await ImportAsync();
         execute.Click += async (_, _) => await ExecuteAsync();
         close.Click += (_, _) => Close();
+        cancelParsing.Click += (_, _) =>
+        {
+            parsingCancellation?.Cancel();
+            cancelParsing.Enabled = false;
+            status.Text = "正在取消解析，请等待正在执行的解析退出…";
+        };
         gameRoot.TextChanged += (_, _) => GameChanged();
         heavy.CheckedChanged += (_, _) => GameChanged();
         excludedDirectories.TextChanged += (_, _) => GameChanged();
@@ -82,7 +94,9 @@ public sealed partial class MainForm : Form
         {
             if (!session.IsBusy) return;
             args.Cancel = true;
-            status.Text = "正在处理，请等待当前操作完成后关闭。当前模块不支持中途取消，不会在关闭窗口后继续后台扫描。";
+            status.Text = parsingCancellation is not null
+                ? "正在解析，请先点击取消解析，等待退出后关闭。"
+                : "正在处理，请等待当前操作完成后关闭；扫描暂不支持中途取消。";
         };
         RefreshView();
         ActiveControl = session.Step == 0 ? (manualSource.Checked ? manualSource : networkSource) : execute;
@@ -90,34 +104,36 @@ public sealed partial class MainForm : Form
 
     private Panel BuildReferencePage()
     {
-        Button add = MakeButton("添加 manifest…", "AddManifest");
+        Button add = MakeButton("添加清单…", "AddManifest");
         Button remove = MakeButton("移除选中", "RemoveManifest");
         add.Click += (_, _) =>
         {
-            using var dialog = new OpenFileDialog { Title = "选择一份或多份 manifest", Multiselect = true, Filter = "所有文件 (*.*)|*.*" };
+            using var dialog = new OpenFileDialog { Title = "选择清单（manifest 或 JSON）", Multiselect = true, Filter = "所有文件 (*.*)|*.*" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            bool changed = false;
-            foreach (string path in dialog.FileNames)
+            try
             {
-                if (manifests.Items.Cast<string>().Contains(path, StringComparer.OrdinalIgnoreCase)) continue;
-                manifests.Items.Add(path);
-                changed = true;
+                manifests.AddFiles(dialog.FileNames.Select(ReadReferenceMetadata), check: true);
+                ReferenceChanged();
             }
-            if (changed) ReferenceChanged();
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { status.Text = "无法添加文件：" + DescribeDesktopError(error); }
         };
         remove.Click += (_, _) =>
         {
-            if (manifests.SelectedIndex < 0) return;
-            manifests.Items.RemoveAt(manifests.SelectedIndex);
+            foreach (DataGridViewRow row in manifests.Rows.Cast<DataGridViewRow>().Where(row => row.Cells[0].Value is true).ToArray())
+                manifests.Rows.Remove(row);
             ReferenceChanged();
         };
         var input = Vertical();
-        input.Controls.Add(Note("手动选择参考 manifest。“解析”只转换清单，不扫描游戏。"));
-        input.Controls.Add(Buttons(add, remove));
-        input.Controls.Add(manifests);
-        input.Controls.Add(Note("跳过＝导入一份或多份现成清单 JSON；不会无输入前进。游戏名称／包识别暂未支持。"));
-        manualReferencePage = Page(input, referenceResult);
+        input.Controls.Add(Note("添加 manifest 或清单 JSON，勾选后统一解析。"));
+        input.Controls.Add(Buttons(add, remove, parseManualReference));
+        parseManualReference.Click += async (_, _) => await ExecuteAsync();
+        input.Controls.Add(referenceResult);
+        manifests.CheckedFilesChanged += ReferenceChanged;
+        manualReferencePage = Page(input, manifests);
         referenceModeContent.Controls.Add(manualReferencePage);
+        localReferencePage = BuildLocalReferencePage();
+        referenceModeContent.Controls.Add(localReferencePage);
         referenceModeContent.Controls.Add(referencePlaceholder);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -133,7 +149,9 @@ public sealed partial class MainForm : Form
             option.CheckedChanged += (_, _) =>
             {
                 if (!option.Checked) return;
-                status.Clear();
+                manifests.ResetResults();
+                localManifests.ResetResults();
+                status.Text = "";
                 ReferenceChanged();
             };
         }
@@ -204,45 +222,60 @@ public sealed partial class MainForm : Form
         for (int i = 0; i < pages.Length; i++)
         {
             pages[i].Visible = i == session.Step;
-            pages[i].Enabled = !session.IsBusy;
+            if (i < 3) SetInputsBusy(pages[i], session.IsBusy);
             steps[i].Text = (i == session.Step ? "当前 → " : "") + new[] { "1 参考清单", "2 游戏扫描", "3 确认与比较", "4 差异与选择" }[i];
         }
         back.Enabled = !session.IsBusy && session.Step > 0;
-        skip.Visible = execute.Visible = next.Visible = session.Step < 3;
+        skip.Visible = execute.Visible = session.Step is 1 or 2;
+        next.Visible = session.Step < 3;
         skip.Enabled = execute.Enabled = !session.IsBusy;
         manualReferencePage.Visible = manualSource.Checked;
-        referencePlaceholder.Visible = !manualSource.Checked;
-        referencePlaceholder.Text = networkSource.Checked
-            ? "网络获取暂未实现。请切换到“手动输入”使用现有功能。"
-            : "本地获取暂未实现。请切换到“手动输入”使用现有功能。";
+        localReferencePage.Visible = localSource.Checked;
+        referencePlaceholder.Visible = networkSource.Checked;
+        referencePlaceholder.Text = "网络获取暂未实现。请切换到“本地获取”查看启动器清单，或使用“手动输入”。";
+        parseManualReference.Enabled = !session.IsBusy && manualSource.Checked;
         if (session.Step == 0) skip.Enabled = execute.Enabled = !session.IsBusy && manualSource.Checked;
         if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
-        next.Enabled = session.CanAdvance && (session.Step != 0 || manualSource.Checked);
+        next.Enabled = session.CanAdvance && (session.Step != 0 || !networkSource.Checked);
         close.Enabled = !session.IsBusy;
+        cancelParsing.Visible = parsingCancellation is not null;
+        cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };
         execute.Text = session.Step switch { 0 => "解析", 1 => "扫描", _ => "比较" };
-        referenceResult.Text = referenceOrigin + ResultText.Describe(session.Reference, "参考清单");
+        referenceResult.Text = session.Reference is { } reference
+            ? $"有效参考：{reference.FileCount:N0} 个条目，共 {reference.TotalSize:N0} 字节。" : "尚无有效参考结果。";
         scanResult.Text = scanOrigin + ResultText.Describe(session.Game, "游戏扫描");
         comparisonResult.Text = "【左侧／A：游戏文件】\r\n" + scanOrigin + ResultText.Describe(session.Game, "游戏扫描")
             + "\r\n\r\n【右侧／B：参考清单】\r\n" + referenceOrigin + ResultText.Describe(session.Reference, "参考清单")
             + "\r\n\r\n【比较结果】\r\n" + reportOrigin + ResultText.Describe(session.Comparison);
     }
 
+    private static void SetInputsBusy(Control parent, bool busy)
+    {
+        foreach (Control control in parent.Controls)
+        {
+            if (control is ManifestTable table)
+                table.SetBusy(busy);
+            else
+            {
+                if (control is ButtonBase or ComboBox || control is TextBox { ReadOnly: false })
+                    control.Enabled = !busy;
+                SetInputsBusy(control, busy);
+            }
+        }
+    }
+
     private static Button MakeButton(string text, string name) => new() { Text = text, Name = name, AutoSize = true, MinimumSize = new Size(90, 30) };
     private static Label Note(string text)
-    {
-        var label = new Label { Text = text, AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 5, 0, 5) };
-        label.ParentChanged += (_, _) =>
-        {
-            if (label.Parent is not { } parent) return;
-            void Wrap() => label.MaximumSize = new Size(Math.Max(120, parent.ClientSize.Width - parent.Padding.Horizontal - label.Margin.Horizontal), 0);
-            parent.SizeChanged += (_, _) => Wrap();
-            Wrap();
-        };
-        return label;
-    }
+        => new() { Text = text, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 5) };
     private static TextBox OutputBox(string name) => new() { Name = name, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     private static TextBox InputLines(string name) => new() { Name = name, Multiline = true, ScrollBars = ScrollBars.Vertical, Height = 64, Dock = DockStyle.Fill };
-    private static TableLayoutPanel Vertical() => new() { ColumnCount = 1, AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 0, 0, 8) };
+    private static TableLayoutPanel Vertical()
+    {
+        var panel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top, Padding = new Padding(0, 0, 0, 8) };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return panel;
+    }
     private static FlowLayoutPanel Buttons(params Control[] controls)
     {
         var panel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, WrapContents = false };
@@ -251,9 +284,12 @@ public sealed partial class MainForm : Form
     }
     private static Panel Page(Control input, Control result)
     {
-        var panel = new Panel { Dock = DockStyle.Fill };
-        panel.Controls.Add(result);
-        panel.Controls.Add(input);
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        panel.Controls.Add(input, 0, 0);
+        panel.Controls.Add(result, 0, 1);
         return panel;
     }
 }

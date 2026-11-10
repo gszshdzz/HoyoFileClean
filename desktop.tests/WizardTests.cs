@@ -234,7 +234,7 @@ public sealed class WizardTests
         Assert.False(Find<Button>(form, "Import").Enabled);
         Assert.True(Find<RadioButton>(form, "NetworkSource").Checked);
         Assert.False(Find<CheckBox>(form, "HeavyScan").Checked);
-        Assert.True(Find<TextBox>(form, "ReferenceResult").ReadOnly);
+        Assert.True(Find<DataGridView>(form, "Manifests").Columns["Name"]!.ReadOnly);
     });
 
     [Theory]
@@ -256,7 +256,7 @@ public sealed class WizardTests
         Rectangle client = form.RectangleToScreen(form.ClientRectangle);
         string[] controls = step switch
         {
-            0 => ["Manifests", "ReferenceResult", "Next", "Execute"],
+            0 => ["Manifests", "ReferenceResult", "Next", "ParseManualReference"],
             1 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "ScanResult", "Next", "Execute"],
             2 => ["ComparisonResult", "Next", "Execute"],
             _ => ["GameTree", "ReferenceTree", "ConfirmSelection", "DemonstrateDelete"]
@@ -321,15 +321,25 @@ public sealed class WizardTests
         Assert.True(Find<RadioButton>(form, mode).Checked);
         Assert.Single(new[] { "NetworkSource", "LocalSource", "ManualSource" },
             name => Find<RadioButton>(form, name).Checked);
-        Assert.Equal(manual, Find<ListBox>(form, "Manifests").Visible);
-        Assert.Equal(manual, Find<TextBox>(form, "ReferenceResult").Visible);
-        Assert.Equal(!manual, Find<Label>(form, "ReferencePlaceholder").Visible);
-        Assert.Equal(manual, Find<Button>(form, "Execute").Enabled);
-        Assert.Equal(manual, Find<Button>(form, "Import").Enabled);
+        Assert.Equal(manual, Find<DataGridView>(form, "Manifests").Visible);
+        Assert.Equal(manual, Find<Label>(form, "ReferenceResult").Visible);
+        Assert.Equal(mode == "NetworkSource", Find<Label>(form, "ReferencePlaceholder").Visible);
+        Assert.Equal(mode == "LocalSource", Find<DataGridView>(form, "LocalManifests").Visible);
+        if (mode == "LocalSource")
+        {
+            TextBox path = Find<TextBox>(form, "LocalManifestDirectory");
+            Assert.True(path.Visible);
+            Assert.True(path.Width > 200 && path.Height >= 20, "路径输入框必须有可见、可输入的尺寸");
+            Assert.True(form.RectangleToScreen(form.ClientRectangle).Contains(path.RectangleToScreen(path.ClientRectangle)));
+        }
+        Assert.False(Find<Button>(form, "Execute").Visible);
+        Assert.False(Find<Button>(form, "Import").Visible);
+        Assert.Equal(manual, Find<Button>(form, "ParseManualReference").Visible);
+        Assert.Empty(form.Controls.Find("ImportManualReference", true));
         Assert.False(Find<Button>(form, "Next").Enabled);
-        if (!manual) Assert.Contains(placeholder + "暂未实现", Find<Label>(form, "ReferencePlaceholder").Text);
+        if (mode == "NetworkSource") Assert.Contains(placeholder + "暂未实现", Find<Label>(form, "ReferencePlaceholder").Text);
         Rectangle client = form.RectangleToScreen(form.ClientRectangle);
-        foreach (string name in new[] { "NetworkSource", "LocalSource", "ManualSource", manual ? "Manifests" : "ReferencePlaceholder" })
+        foreach (string name in new[] { "NetworkSource", "LocalSource", "ManualSource", manual ? "Manifests" : mode == "LocalSource" ? "LocalManifests" : "ReferencePlaceholder" })
         {
             Control control = Assert.Single(form.Controls.Find(name, true));
             Assert.True(client.Contains(control.RectangleToScreen(control.ClientRectangle)), name + " 超出窗口范围");
@@ -357,7 +367,7 @@ public sealed class WizardTests
         Assert.True(Find<RadioButton>(form, "ManualSource").Checked, "显示窗口和设置焦点不应改变已有模式");
         Assert.NotNull(session.Reference);
         Assert.True(Find<Button>(form, "Next").Enabled);
-        Find<ListBox>(form, "Manifests").Items.Add("retain-manual-input.manifest");
+        Find<ManifestTable>(form, "Manifests").AddFiles([new LocalManifestFile("retain", @"D:\retain.manifest", 3, DateTime.UtcNow)]);
         Find<RadioButton>(form, "LocalSource").Checked = true;
         Assert.Null(session.Reference);
         Assert.NotNull(session.Game);
@@ -366,9 +376,773 @@ public sealed class WizardTests
         Assert.False(session.SelectionConfirmed);
         Assert.False(Find<Button>(form, "Next").Enabled);
         Find<RadioButton>(form, "ManualSource").Checked = true;
-        Assert.Single(Find<ListBox>(form, "Manifests").Items.Cast<string>());
-        Assert.True(Find<Button>(form, "Execute").Enabled);
+        Assert.Single(Find<DataGridView>(form, "Manifests").Rows.Cast<DataGridViewRow>());
+        Assert.True(Find<Button>(form, "ParseManualReference").Enabled);
         Assert.False(Find<Button>(form, "Next").Enabled);
+        form.Close();
+    });
+
+    [Fact]
+    public void LocalDirectoryDefaultsAndBrowserAlwaysStartAtLauncherDefault() => OnSta(() =>
+    {
+        using var form = new MainForm();
+        string expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "miHoYo", "HYP", "1_1", "modules", "sophon", "manifest");
+        TextBox path = Find<TextBox>(form, "LocalManifestDirectory");
+        Assert.Equal(expected, path.Text);
+        path.Text = @"D:\custom-manifests";
+        using var dialog = MainForm.CreateManifestDirectoryDialog();
+        Assert.Equal(expected, dialog.SelectedPath);
+        Assert.False(dialog.ShowNewFolderButton);
+    });
+
+    [Fact]
+    public void LocalGetPopulatesReadOnlyTableWithoutParsingAndPathChangeClearsIt() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string first = Path.Combine(directory, "old"), second = Path.Combine(directory, "new");
+        File.WriteAllText(first, "invalid manifest");
+        File.WriteAllText(second, "also invalid");
+        // These instants straddle New York's clock rollback: local wall time would sort incorrectly.
+        DateTime older = new(2026, 11, 1, 5, 50, 0, DateTimeKind.Utc);
+        DateTime newer = new(2026, 11, 1, 6, 10, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(first, older);
+        File.SetLastWriteTimeUtc(second, newer);
+        var session = new WizardSession();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, "LocalSource").Checked = true;
+        var path = Find<TextBox>(form, "LocalManifestDirectory");
+        path.Text = directory;
+        Find<Button>(form, "GetLocalManifests").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        var grid = Find<DataGridView>(form, "LocalManifests");
+        Assert.False(grid.Columns["Checked"]!.ReadOnly);
+        Assert.All(grid.Columns.Cast<DataGridViewColumn>().Skip(1), column => Assert.True(column.ReadOnly));
+        Assert.False(grid.Columns.Contains("Path"));
+        Assert.Equal(8, grid.Columns.Count);
+        Assert.False(grid.AllowUserToAddRows);
+        Assert.False(grid.AllowUserToDeleteRows);
+        Assert.Equal(2, grid.Rows.Count);
+        Assert.Equal("new", grid.Rows[0].Cells["Name"].Value);
+        Assert.Equal("old", grid.Rows[1].Cells["Name"].Value);
+        Assert.Equal(newer, grid.Rows[0].Cells["Modified"].Value);
+        Assert.Equal(DateTimeKind.Utc, ((DateTime)grid.Rows[0].Cells["Modified"].Value!).Kind);
+        Assert.Equal(newer.ToLocalTime().ToString("yyyy-MM-dd HH'时'"), grid.Rows[0].Cells["Modified"].FormattedValue);
+        Assert.Equal(12L, grid.Rows[0].Cells["Size"].Value);
+        Assert.Equal(SortOrder.Descending, grid.SortOrder);
+        Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Assert.Contains("尚未解析", Find<Label>(form, "LocalManifestSummary").Text);
+        using (var bitmap = new Bitmap(form.Width, form.Height))
+        {
+            form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+            bitmap.Save(Path.Combine(directory, "local-manifests-populated.png"));
+        }
+        path.Text = Path.Combine(directory, "missing");
+        Assert.Empty(grid.Rows.Cast<DataGridViewRow>());
+        Find<Button>(form, "GetLocalManifests").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Empty(grid.Rows.Cast<DataGridViewRow>());
+        Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        form.Close();
+    });
+
+    private static void PumpUntilLocalGetFinishes(MainForm form, WizardSession session)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        while ((session.IsBusy || Find<ProgressBar>(form, "OperationProgress").Visible || !Find<Button>(form, "GetLocalManifests").Enabled
+            || Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal))
+            && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+        Application.DoEvents();
+        Assert.False(session.IsBusy, "异步获取未按时完成");
+        Assert.False(Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal), "界面未完成结果处理");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CheckedManifestParsingStaysInMemoryAndInvalidatesWhenSelectionChanges(bool local) => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string source = Path.Combine(directory, "manifest");
+        var manifest = new Protos.SophonManifestProto();
+        manifest.Assets.Add(new Protos.SophonManifestAssetProperty
+        {
+            AssetName = "file", AssetSize = 3, AssetHashMd5 = "900150983cd24fb0d6963f7d28e17f72", AssetType = 0
+        });
+        byte[] bytes = Google.Protobuf.MessageExtensions.ToByteArray(manifest);
+        File.WriteAllBytes(source, bytes);
+        var session = new WizardSession();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, local ? "LocalSource" : "ManualSource").Checked = true;
+        var table = Find<ManifestTable>(form, local ? "LocalManifests" : "Manifests");
+        table.AddFiles([new LocalManifestFile("manifest", source, bytes.Length, DateTime.UtcNow)], check: true);
+        // An unchecked invalid file must never be read by parsing.
+        table.AddFiles([new LocalManifestFile("missing", Path.Combine(directory, "missing"), 0, DateTime.UtcNow)]);
+        Find<Button>(form, local ? "ParseLocalReference" : "ParseManualReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.NotNull(session.Reference);
+        Assert.Equal(1, session.Reference.FileCount);
+        Assert.Equal(source, Assert.Single(session.Reference.Sources).Path);
+        Assert.Equal(new[] { source }, Directory.GetFiles(directory, "*", SearchOption.AllDirectories));
+        Assert.False(Directory.Exists(Path.Combine(directory, ".temp")));
+        Find<Button>(form, local ? "ParseLocalReference" : "ParseManualReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Equal(new[] { source }, Directory.GetFiles(directory, "*", SearchOption.AllDirectories));
+        DataGridViewRow row = table.Rows.Cast<DataGridViewRow>().Single(row => ((ReferenceInput)row.Tag!).File.FullPath == source);
+        Assert.Equal("已解析", row.Cells["State"].Value);
+        Assert.Equal(1, row.Cells["Entries"].Value);
+        Assert.Equal("—", row.Cells["Game"].Value);
+        Assert.Equal("—", row.Cells["Version"].Value);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        row.Cells["Checked"].Value = false;
+        Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Assert.Equal(bytes, File.ReadAllBytes(source));
+        form.Close();
+    });
+
+    [Fact]
+    public void ParsingFailureUpdatesRowWithoutPublishingPartialReference() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string source = Path.Combine(directory, "invalid");
+        File.WriteAllBytes(source, [0xff]);
+        var session = new WizardSession();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, "LocalSource").Checked = true;
+        var table = Find<ManifestTable>(form, "LocalManifests");
+        table.AddFiles([new LocalManifestFile("invalid", source, 1, DateTime.UtcNow)], check: true);
+        Find<Button>(form, "ParseLocalReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Equal("失败", table.Rows[0].Cells["State"].Value);
+        Assert.Null(session.Reference);
+        Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
+        form.Close();
+    });
+
+    [Fact]
+    public void InMemoryScanAndComparisonDoNotCreateOutputsOrConsumeOldTemp()
+    {
+        Directory.CreateDirectory(Path.Combine(directory, ".temp"));
+        string sentinel = Path.Combine(directory, ".temp", "untrusted.json");
+        File.WriteAllText(sentinel, "untrusted");
+        string root = Path.Combine(directory, "game");
+        Directory.CreateDirectory(root);
+        string file = Path.Combine(root, "file");
+        File.WriteAllText(file, "abc");
+        FileListSnapshot light = DirectoryScanner.Scan(root);
+        FileListSnapshot heavy = DirectoryScanner.Scan(root, computeHashes: true);
+        Assert.Null(light.Files["file"].Hash);
+        Assert.Equal("900150983cd24fb0d6963f7d28e17f72", heavy.Files["file"].Hash);
+        Assert.Equal(1, FileComparer.Compare(light, heavy).Summary.MatchedSizeOnly);
+        Assert.Equal(new[] { sentinel, file }.Order(),
+            Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order());
+        Assert.Equal("untrusted", File.ReadAllText(sentinel));
+    }
+
+    [Fact]
+    public void InMemoryParsingDoesNotFollowLinkedTemp()
+    {
+        string program = Path.Combine(directory, "program"), outside = Path.Combine(directory, "outside");
+        Directory.CreateDirectory(program);
+        Directory.CreateDirectory(outside);
+        Directory.CreateSymbolicLink(Path.Combine(program, ".temp"), outside);
+        string source = WriteList("reference", null, [new ManifestFile("file", 1)]);
+        Assert.Equal(1, ManifestConverter.Read(source, TestContext.Current.CancellationToken).FileCount);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+    }
+
+    [Fact]
+    public void InMemoryScanDoesNotNeedAnOutsideOutputDirectory()
+    {
+        string program = Path.Combine(directory, "program");
+        Directory.CreateDirectory(program);
+        Assert.Equal(0, DirectoryScanner.Scan(directory).FileCount);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(program));
+    }
+
+    [Fact]
+    public void ReferenceTablesShareColumnsAndSkipPrecedesManifestActions() => OnSta(() =>
+    {
+        using var form = new MainForm
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, "ManualSource").Checked = true;
+        var manual = Find<ManifestTable>(form, "Manifests");
+        var local = Find<DataGridView>(form, "LocalManifests");
+        Assert.Equal(new[] { "Checked", "Name", "Modified", "Size", "State", "Game", "Version", "Entries" },
+            manual.Columns.Cast<DataGridViewColumn>().Select(column => column.Name));
+        Assert.Equal(manual.Columns.Cast<DataGridViewColumn>().Select(column => column.HeaderText),
+            local.Columns.Cast<DataGridViewColumn>().Select(column => column.HeaderText));
+        Button add = Find<Button>(form, "AddManifest");
+        Assert.Empty(form.Controls.Find("ImportManualReference", true));
+        Assert.Equal(add.Parent, Find<Button>(form, "ParseManualReference").Parent);
+        Assert.Equal("", manual.Columns[0].HeaderText);
+        Assert.Equal("大小", manual.Columns["Size"]!.HeaderText);
+        foreach (DataGridView table in new[] { manual, local })
+        {
+            Assert.False(table.AllowUserToResizeRows);
+            Assert.Equal(DataGridViewColumnHeadersHeightSizeMode.DisableResizing, table.ColumnHeadersHeightSizeMode);
+        }
+        manual.AddFiles([new LocalManifestFile("a", @"D:\a", 1024, DateTime.UtcNow)]);
+        manual.Rows[0].Selected = true;
+        Assert.Empty(manual.SelectedRows.Cast<DataGridViewRow>());
+        Assert.Empty(manual.SelectedCells.Cast<DataGridViewCell>());
+        Assert.Empty(form.Controls.Find("Status", true).OfType<TextBox>());
+        Assert.Empty(form.Controls.Find("ReferenceResult", true).OfType<TextBox>());
+        form.Close();
+    });
+
+    [Fact]
+    public void FailedMetadataEnumerationCannotPartiallyChangeCheckedFiles() => OnSta(() =>
+    {
+        using var table = new ManifestTable("test");
+        table.AddFiles([new LocalManifestFile("existing", @"D:\existing", 1, DateTime.UtcNow)], check: true);
+        int events = 0;
+        table.CheckedFilesChanged += () => events++;
+        IEnumerable<LocalManifestFile> FailingBatch()
+        {
+            yield return new LocalManifestFile("new", @"D:\new", 2, DateTime.UtcNow);
+            throw new FileNotFoundException("diagnostic text must not be shown");
+        }
+        Assert.Throws<FileNotFoundException>(() => table.AddFiles(FailingBatch(), check: true));
+        Assert.Single(table.Rows.Cast<DataGridViewRow>());
+        Assert.Equal("existing", Assert.Single(table.CheckedInputs).File.Name);
+        Assert.Equal(0, events);
+    });
+
+    [Fact]
+    public void DesktopErrorPresentationDoesNotExposeSystemExceptionMessage()
+    {
+        const string diagnostic = "private diagnostic stack or system text";
+        foreach (Exception error in new Exception[]
+        {
+            new FileNotFoundException(diagnostic), new DirectoryNotFoundException(diagnostic),
+            new IOException(diagnostic), new UnauthorizedAccessException(diagnostic),
+            new InvalidDataException(diagnostic), new ArgumentException(diagnostic)
+        })
+        {
+            string text = MainForm.DescribeDesktopError(error);
+            Assert.NotEmpty(text);
+            Assert.DoesNotContain(diagnostic, text);
+        }
+    }
+
+    [Theory]
+    [InlineData(0L, "0KB")]
+    [InlineData(1024L, "1KB")]
+    [InlineData(125952L, "123KB")]
+    [InlineData(1861222L, "1.77MB")]
+    [InlineData(1908408L, "1.82MB")]
+    [InlineData(102400L, "100KB")]
+    [InlineData(1048576L, "1MB")]
+    [InlineData(1073741824L, "1GB")]
+    public void ManifestSizesUseCompactUnits(long bytes, string expected)
+        => Assert.Equal(expected, ManifestTable.FormatSize(bytes));
+
+    [Fact]
+    public void GuiScanAndComparisonKeepResultsInMemory() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string root = Path.Combine(directory, "game");
+        Directory.CreateDirectory(root);
+        string file = Path.Combine(root, "file");
+        File.WriteAllText(file, "abc");
+        string reference = WriteList("reference", null, [new ManifestFile("file", 3)]);
+        var session = new WizardSession();
+        session.AcceptReference(ManifestConverter.Read(reference));
+        session.Next();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<TextBox>(form, "GameRoot").Text = root;
+        void Wait()
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while ((session.IsBusy || Find<ProgressBar>(form, "OperationProgress").Visible)
+                && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            Assert.False(session.IsBusy);
+            Assert.DoesNotContain("处理失败", Find<Label>(form, "Status").Text);
+        }
+        Find<Button>(form, "Execute").PerformClick();
+        Wait();
+        Assert.NotNull(session.Game);
+        Assert.Contains("仅保留在内存", Find<TextBox>(form, "ScanResult").Text);
+        Find<Button>(form, "Next").PerformClick();
+        Find<Button>(form, "Execute").PerformClick();
+        Wait();
+        Assert.Equal(1, session.Comparison!.Summary.MatchedSizeOnly);
+        Assert.Contains("仅保留在内存", Find<TextBox>(form, "ComparisonResult").Text);
+        Assert.Equal(new[] { file, reference }.Order(),
+            Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order());
+        Assert.Equal(root, Assert.Single(session.Game.Sources).Path);
+        form.Close();
+    });
+
+    [Fact]
+    public void InMemoryReferenceIsIndependentOfLaterInputEdits()
+    {
+        Directory.CreateDirectory(directory);
+        string source = WriteList("reference", null, [new ManifestFile("file", 3)]);
+        FileListSnapshot snapshot = ManifestConverter.Read(source, TestContext.Current.CancellationToken);
+        File.WriteAllText(source, "changed");
+        Assert.Equal(3, snapshot.Files["file"].Size);
+        Assert.Equal(source, Assert.Single(snapshot.Sources).Path);
+        Assert.Equal(3, FileComparer.Combine([snapshot, snapshot], TestContext.Current.CancellationToken).TotalSize);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1000, false)]
+    [InlineData(10000, false)]
+    [InlineData(10000, true)]
+    public void LargeManifestBatchIsPublishedOnceAndResizeWorkStaysBounded(int count, bool local) => OnSta(() =>
+    {
+        using var form = new MainForm
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, local ? "LocalSource" : "ManualSource").Checked = true;
+        ManifestTable table = Find<ManifestTable>(form, local ? "LocalManifests" : "Manifests");
+        int additions = 0, layouts = 0, formatting = 0;
+        table.RowsAdded += (_, _) => additions++;
+        table.Layout += (_, _) => layouts++;
+        table.CellFormatting += (_, _) => formatting++;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        table.AddFiles(Enumerable.Range(0, count).Select(index => new LocalManifestFile(
+            $"file-{index:D4}", $@"D:\manifests\file-{index:D4}", index, DateTime.UnixEpoch.AddMinutes(index))));
+        long addMs = watch.ElapsedMilliseconds;
+        int addLayouts = layouts;
+        layouts = formatting = 0;
+        using var bitmap = new Bitmap(1100, 800);
+        watch.Restart();
+        for (int i = 0; i < 30; i++)
+        {
+            form.ClientSize = new Size(1000 + i % 2 * 20, 760 + i % 2 * 20);
+            table.DrawToBitmap(bitmap, table.ClientRectangle);
+        }
+        string measurement = $"rows={count}, local={local}; add: {addMs}ms, events={additions}, layouts={addLayouts}; resize: {watch.ElapsedMilliseconds}ms, layouts={layouts}, formatting={formatting}";
+        Console.WriteLine(measurement);
+        Assert.True(additions == (count == 0 ? 0 : 1), measurement);
+        Assert.True(layouts <= 30 * 10, measurement);
+        if (count > 0) Assert.True(formatting > 0, measurement);
+        Assert.True(formatting <= 30 * table.Columns.Count * (table.Height / table.RowTemplate.Height + 2) * 2, measurement);
+        form.Close();
+    });
+
+    [Fact]
+    public void BusyTableKeepsInformationReadOnlyAndBlocksSelectAll() => OnSta(() =>
+    {
+        using var table = new ManifestTable("test");
+        table.AddFiles([new LocalManifestFile("file", @"D:\file", 1, DateTime.UtcNow)]);
+        table.SetBusy(true);
+        table.ToggleAll();
+        Assert.Empty(table.CheckedInputs);
+        Assert.False(Find<CheckBox>(table, "SelectAllManifests").Enabled);
+        table.SetBusy(false);
+        Assert.False(table.Columns[0].ReadOnly);
+        Assert.All(table.Columns.Cast<DataGridViewColumn>().Skip(1), column => Assert.True(column.ReadOnly));
+        table.ToggleAll();
+        Assert.Single(table.CheckedInputs);
+    });
+
+    [Fact]
+    public void DifferenceRenderWithUnchangedDataKeepsNativeNodes() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        using var panel = new DifferencePanel(session);
+        TreeView tree = Find<TreeView>(panel, "GameTree");
+        TreeNode first = tree.Nodes[0];
+        panel.Render();
+        Assert.Same(first, tree.Nodes[0]);
+        session.InvalidateComparison();
+        panel.Render();
+        Assert.Empty(tree.Nodes.Cast<TreeNode>());
+    });
+
+    [Fact]
+    public void GettingLocalManifestsDoesNotTogglePageContainersOrRefreshHiddenResults() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "candidate"), "metadata only");
+        var session = new WizardSession();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, "LocalSource").Checked = true;
+        Find<TextBox>(form, "LocalManifestDirectory").Text = directory;
+        int containerChanges = 0, hiddenUpdates = 0;
+        void Watch(Control parent)
+        {
+            foreach (Control child in parent.Controls)
+            {
+                if (child is Panel or UserControl)
+                    child.EnabledChanged += (_, _) => containerChanges++;
+                Watch(child);
+            }
+        }
+        Watch(form);
+        Find<TextBox>(form, "ComparisonResult").TextChanged += (_, _) => hiddenUpdates++;
+        Find<Button>(form, "GetLocalManifests").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Equal(0, containerChanges);
+        Assert.Equal(0, hiddenUpdates);
+        Assert.Single(Find<ManifestTable>(form, "LocalManifests").Rows.Cast<DataGridViewRow>());
+        form.Close();
+    });
+
+    [Fact]
+    public void StatusTextFitsItsAllocatedRowWhileProgressChanges() => OnSta(() =>
+    {
+        using var form = new MainForm
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false,
+            Font = new Font(SystemFonts.MessageBoxFont!.FontFamily, 14)
+        };
+        form.Show();
+        form.ClientSize = new Size(784, 700);
+        Label label = Find<Label>(form, "Status");
+        ProgressBar bar = Find<ProgressBar>(form, "OperationProgress");
+        bar.Visible = true;
+        bar.Style = ProgressBarStyle.Continuous;
+        for (int i = 0; i < 30; i++)
+        {
+            bar.Value = i;
+            label.Text = $"正在解析：已处理 {i:N0}/1,746 份文件（最多 16 线程）…正在等待正在执行的解析退出，请稍候。";
+            form.PerformLayout();
+            Size needed = label.GetPreferredSize(new Size(label.Width, 0));
+            Assert.True(label.Height >= needed.Height, $"status height={label.Height}, needed={needed.Height}, bounds={label.Bounds}");
+            Assert.True(label.Top >= bar.Bottom);
+        }
+        form.Close();
+    });
+
+    [Fact]
+    public void ParsingThreadOptionsAreNotShown() => OnSta(() =>
+    {
+        using var form = new MainForm();
+        Assert.Empty(form.Controls.Find("ManualParsingThreads", true));
+        Assert.Empty(form.Controls.Find("LocalParsingThreads", true));
+        Assert.Equal(1, ReferenceParser.DefaultConcurrency);
+    });
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void ParsingUsesOneWorkerAndDisplaysCompletedFileProgress(bool local, bool cancel) => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        using var enteredSecond = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int calls = 0;
+        var parser = new ReferenceParser((input, token) =>
+        {
+            if (Interlocked.Increment(ref calls) == 2)
+            {
+                enteredSecond.Set();
+                if (!release.Wait(TimeSpan.FromSeconds(10), token)) throw new TimeoutException();
+            }
+            return ManifestConverter.Read(input, token);
+        });
+        var session = new WizardSession();
+        using var form = new MainForm(session, parser)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, local ? "LocalSource" : "ManualSource").Checked = true;
+        var table = Find<ManifestTable>(form, local ? "LocalManifests" : "Manifests");
+        for (int i = 0; i < 3; i++)
+        {
+            string path = WriteList("progress-" + i, null, [new ManifestFile("file", 3)]);
+            var file = new FileInfo(path);
+            table.AddFiles([new LocalManifestFile(file.Name, path, file.Length, file.LastWriteTimeUtc)], check: true);
+        }
+        try
+        {
+            Find<Button>(form, local ? "ParseLocalReference" : "ParseManualReference").PerformClick();
+            ProgressBar bar = Find<ProgressBar>(form, "OperationProgress");
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while ((!enteredSecond.IsSet || bar.Value != 1) && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            Assert.True(enteredSecond.IsSet);
+            Assert.Equal(ProgressBarStyle.Continuous, bar.Style);
+            Assert.Equal(3, bar.Maximum);
+            Assert.Equal(1, bar.Value);
+            Assert.Equal(2, Volatile.Read(ref calls));
+            Assert.Contains("1/3", Find<Label>(form, "Status").Text);
+            Assert.DoesNotContain("线程", Find<Label>(form, "Status").Text);
+            if (cancel) Find<Button>(form, "CancelParsing").PerformClick();
+            else release.Set();
+            PumpUntilLocalGetFinishes(form, session);
+            Assert.Equal(cancel ? 1 : 3, bar.Value);
+            Assert.Equal(cancel ? 2 : 3, calls);
+            Assert.Equal(!cancel, session.Reference is not null);
+            Assert.False(bar.Visible);
+        }
+        finally { release.Set(); }
+        form.Close();
+    });
+
+    [Fact]
+    public void ParsingCancellationDropsOldReferenceAndRestoresUiForRetry() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string path = WriteList("reference", null, [new ManifestFile("file", 3)]);
+        var session = new WizardSession();
+        WeakReference oldReference = InstallOldReference(session, path);
+        using var entered = new ManualResetEventSlim();
+        int calls = 0;
+        var parser = new ReferenceParser((input, token) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                entered.Set();
+                if (!token.WaitHandle.WaitOne(TimeSpan.FromSeconds(10))) throw new TimeoutException();
+                token.ThrowIfCancellationRequested();
+            }
+            return ManifestConverter.Read(input, token);
+        });
+        using var form = new MainForm(session, parser)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        var table = Find<ManifestTable>(form, "Manifests");
+        var file = new FileInfo(path);
+        table.AddFiles([new LocalManifestFile(file.Name, path, file.Length, file.LastWriteTimeUtc)], check: true);
+        Find<Button>(form, "ParseManualReference").PerformClick();
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+        Assert.Null(session.Reference);
+        Assert.Null(session.Comparison);
+        // A collection is only used here to verify ownership, never as application memory management.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.False(oldReference.IsAlive, "重新解析开始后仍持有旧参考快照");
+        Assert.Contains("尚无有效参考", Find<Label>(form, "ReferenceResult").Text);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Button cancel = Find<Button>(form, "CancelParsing");
+        Assert.True(cancel.Visible && cancel.Enabled);
+        Assert.False(Find<RadioButton>(form, "LocalSource").Enabled);
+        cancel.PerformClick();
+        Assert.False(cancel.Enabled);
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.False(cancel.Visible);
+        Assert.Null(session.Reference);
+        Assert.Equal("已取消", table.Rows[0].Cells["State"].Value);
+        Assert.Contains("已取消解析", Find<Label>(form, "Status").Text);
+        Find<Button>(form, "ParseManualReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.NotNull(session.Reference);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        Assert.False(cancel.Visible);
+        form.Close();
+    });
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference InstallOldReference(WizardSession session, string path)
+    {
+        FileListSnapshot snapshot = ManifestConverter.Read(path, TestContext.Current.CancellationToken);
+        session.AcceptReference(snapshot);
+        return new WeakReference(snapshot);
+    }
+
+    [Fact]
+    public void RapidWidthChangesKeepWrappedReferenceNotesAboveTables() => OnSta(() =>
+    {
+        using var form = new MainForm
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        foreach (bool local in new[] { true, false })
+        {
+            Find<RadioButton>(form, local ? "LocalSource" : "ManualSource").Checked = true;
+            var table = Find<ManifestTable>(form, local ? "LocalManifests" : "Manifests");
+            for (int i = 0; i < 120; i++)
+            {
+                form.ClientSize = new Size(i % 2 == 0 ? 1500 : 784, 700);
+                if (i % 7 == 0) Application.DoEvents();
+                Control parent = table.Parent!;
+                Control input = parent.Controls.Cast<Control>().Single(control => control != table);
+                Assert.True(table.Top >= input.Bottom,
+                    $"local={local}, width={form.Width}, tableTop={table.Top}, inputBottom={input.Bottom}");
+                foreach (Label label in input.Controls.OfType<Label>())
+                {
+                    Size preferred = label.GetPreferredSize(new Size(label.Width, 0));
+                    Assert.True(label.Height >= preferred.Height,
+                        $"text={label.Text}; actual={label.Size}; preferred={preferred}");
+                    Assert.True(label.Bottom <= input.Height, $"labelBottom={label.Bottom}, inputHeight={input.Height}");
+                }
+            }
+        }
+        form.Close();
+    });
+
+    [Fact]
+    public void ManifestTablesUseDifferentDefaultSortsAndOnlyLocalTimeSortHasHourBands() => OnSta(() =>
+    {
+        using var form = new MainForm();
+        var manual = Find<ManifestTable>(form, "Manifests");
+        var local = Find<ManifestTable>(form, "LocalManifests");
+        DateTime hour = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Local).ToUniversalTime();
+        LocalManifestFile[] files = [
+            new("z", @"D:\z", 1, hour.AddMinutes(5)),
+            new("a", @"D:\a", 1, hour.AddHours(-1)),
+            new("m", @"D:\m", 1, hour.AddMinutes(40)),
+            new("b", @"D:\b", 1, hour.AddDays(-1))];
+        manual.AddFiles(files);
+        local.AddFiles(files);
+        Assert.Equal("Name", manual.SortedColumn!.Name);
+        Assert.Equal(SortOrder.Ascending, manual.SortOrder);
+        Assert.Equal(new[] { "a", "b", "m", "z" }, manual.Rows.Cast<DataGridViewRow>().Select(row => row.Cells["Name"].Value));
+        Assert.Equal("Modified", local.SortedColumn!.Name);
+        Assert.Equal(SortOrder.Descending, local.SortOrder);
+        Color[] Colors(ManifestTable table)
+        {
+            var colors = new Color[table.Rows.Count];
+            DataGridViewCellFormattingEventHandler capture = (_, args) => colors[args.RowIndex] = args.CellStyle!.BackColor;
+            table.CellFormatting += capture;
+            foreach (DataGridViewRow row in table.Rows) _ = row.Cells["Name"].FormattedValue;
+            table.CellFormatting -= capture;
+            return colors;
+        }
+        Color[] grouped = Colors(local);
+        Assert.Equal(grouped[0], grouped[1]);
+        Assert.NotEqual(grouped[1], grouped[2]);
+        Assert.NotEqual(grouped[2], grouped[3]);
+        local.Sort(local.Columns["Name"]!, System.ComponentModel.ListSortDirection.Ascending);
+        Assert.Single(Colors(local).Distinct());
+        manual.Sort(manual.Columns["Modified"]!, System.ComponentModel.ListSortDirection.Descending);
+        Assert.Single(Colors(manual).Distinct());
+        local.Sort(local.Columns["Modified"]!, System.ComponentModel.ListSortDirection.Ascending);
+        Color[] ascending = Colors(local);
+        Assert.NotEqual(ascending[0], ascending[1]);
+        Assert.Equal(ascending[2], ascending[3]);
+        local.Rows.Clear();
+        local.AddFiles(files.Take(2));
+        Assert.NotEqual(Colors(local)[0], Colors(local)[1]);
+    });
+
+    [Fact]
+    public void HeaderCheckboxTracksThreeStatesAndTogglesWholeTableOnce() => OnSta(() =>
+    {
+        using var table = new ManifestTable("test");
+        CheckBox header = Find<CheckBox>(table, "SelectAllManifests");
+        Assert.False(header.Enabled);
+        Assert.Equal(CheckState.Unchecked, header.CheckState);
+        table.ToggleAll();
+        table.AddFiles([
+            new LocalManifestFile("a", @"D:\a", 1, DateTime.UtcNow),
+            new LocalManifestFile("b", @"D:\b", 2, DateTime.UtcNow)]);
+        int changes = 0;
+        table.CheckedFilesChanged += () => changes++;
+        Assert.True(header.Enabled);
+        table.Rows[0].Cells[0].Value = true;
+        Assert.Equal(CheckState.Indeterminate, header.CheckState);
+        Assert.Equal(1, changes);
+        table.ToggleAll();
+        Assert.Equal(CheckState.Checked, header.CheckState);
+        Assert.Equal(2, table.CheckedInputs.Length);
+        Assert.Equal(2, changes);
+        table.ToggleAll();
+        Assert.Equal(CheckState.Unchecked, header.CheckState);
+        Assert.Empty(table.CheckedInputs);
+        Assert.Equal(3, changes);
+        table.AddFiles([new LocalManifestFile("c", @"D:\c", 3, DateTime.UtcNow)], check: true);
+        Assert.Equal(CheckState.Indeterminate, header.CheckState);
+        table.Rows.Clear();
+        Assert.False(header.Enabled);
+        Assert.Equal(CheckState.Unchecked, header.CheckState);
+    });
+
+    [Fact]
+    public void SwitchingSourceParsesOnlyActiveTableEvenWhenBothKeepCheckedRows() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        var session = new WizardSession();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        void AddJson(string tableName, string name)
+        {
+            string path = WriteList(name, null, [new ManifestFile(name, 1)]);
+            var file = new FileInfo(path);
+            Find<ManifestTable>(form, tableName).AddFiles([
+                new LocalManifestFile(file.Name, path, file.Length, file.LastWriteTimeUtc)], check: true);
+        }
+        AddJson("Manifests", "manual-file");
+        AddJson("LocalManifests", "local-file");
+        Find<RadioButton>(form, "ManualSource").Checked = true;
+        Find<Button>(form, "ParseManualReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Equal(new[] { "manual-file" }, session.Reference!.Files.Keys);
+        Find<RadioButton>(form, "LocalSource").Checked = true;
+        Assert.Null(session.Reference);
+        Assert.All(Find<ManifestTable>(form, "Manifests").Rows.Cast<DataGridViewRow>(), row =>
+        {
+            Assert.Equal("未解析", row.Cells["State"].Value);
+            Assert.Null(row.Cells["Entries"].Value);
+        });
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Find<Button>(form, "ParseLocalReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Equal(new[] { "local-file" }, session.Reference!.Files.Keys);
+        Assert.Single(Find<ManifestTable>(form, "Manifests").CheckedInputs);
+        Assert.True(Find<Button>(form, "Next").Enabled,
+            $"busy={session.IsBusy}; advance={session.CanAdvance}; step={session.Step}; local={Find<RadioButton>(form, "LocalSource").Checked}; network={Find<RadioButton>(form, "NetworkSource").Checked}; status={Find<Label>(form, "Status").Text}");
+        form.Close();
+    });
+
+    [Fact]
+    public void JsonRowsWithSameSideConflictDoNotEnableNext() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        var session = new WizardSession();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, "ManualSource").Checked = true;
+        var table = Find<ManifestTable>(form, "Manifests");
+        foreach (int size in new[] { 3, 4 })
+        {
+            string path = WriteList("conflict-" + size, null, [new ManifestFile("file", size)]);
+            var file = new FileInfo(path);
+            table.AddFiles([new LocalManifestFile(file.Name, path, file.Length, file.LastWriteTimeUtc)], check: true);
+        }
+        Find<Button>(form, "ParseManualReference").PerformClick();
+        PumpUntilLocalGetFinishes(form, session);
+        Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Assert.Contains("同侧冲突", Find<Label>(form, "Status").Text);
+        Assert.All(table.Rows.Cast<DataGridViewRow>(), row => Assert.Equal("已解析", row.Cells["State"].Value));
         form.Close();
     });
 

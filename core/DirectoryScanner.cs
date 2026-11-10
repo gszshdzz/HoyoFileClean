@@ -39,6 +39,22 @@ public static class DirectoryScanner
             ?? throw new CoreException(CoreErrorCode.OutputFileNameRequired, output);
         ValidateDirectoryPath(root);
         ValidateDirectoryPath(outputParent);
+        FileListSnapshot snapshot = Scan(root, excludedDirectories, excludedFiles, computeHashes, progress);
+        FileListSource source = snapshot.Sources[0];
+        ValidateDirectoryPath(outputParent);
+        JsonFileOutput.WriteNew(output, new ScanFileList(source.HashAlgorithm,
+            snapshot.FileCount, snapshot.TotalSize, snapshot.Files.Values.ToArray(), source.Scan!));
+        return new ScanSummary(snapshot.FileCount, snapshot.TotalSize, source.Scan!.SkippedLinks);
+    }
+
+    public static FileListSnapshot Scan(string rootPath,
+        IEnumerable<string>? excludedDirectories = null,
+        IEnumerable<string>? excludedFiles = null,
+        bool computeHashes = false,
+        Action<ScanProgress>? progress = null)
+    {
+        string root = NormalizeRootPath(rootPath);
+        ValidateDirectoryPath(root);
         HashSet<string> excludedDirs = NormalizeExclusions(root, excludedDirectories);
         HashSet<string> excludedFilePaths = NormalizeExclusions(root, excludedFiles);
         var skippedLinks = new List<string>();
@@ -60,14 +76,11 @@ public static class DirectoryScanner
             ComputeHashes(root, files, totalSize, progress);
         }
         IReadOnlyList<string> links = skippedLinks.AsReadOnly();
-        var details = new ScanDetails(root,
+        var details = new ScanScope(root,
             excludedDirs.OrderBy(path => path, StringComparer.Ordinal).ToArray(),
             excludedFilePaths.OrderBy(path => path, StringComparer.Ordinal).ToArray(), links,
             computeHashes ? "heavy" : "light");
-        var result = new ScanFileList(computeHashes ? "MD5" : null, files.Count, totalSize, files, details);
-        ValidateDirectoryPath(outputParent);
-        JsonFileOutput.WriteNew(output, result);
-        return new ScanSummary(files.Count, totalSize, links);
+        return FileComparer.FromFiles(root, files, totalSize, computeHashes ? "MD5" : null, details);
     }
 
     private static List<ManifestFile> ReadFileList(
@@ -250,9 +263,5 @@ public static class DirectoryScanner
 
     private sealed record ScanFileList(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HashAlgorithm,
-        int FileCount, long TotalSize, IReadOnlyList<ManifestFile> Files, ScanDetails Scan);
-
-    private sealed record ScanDetails(
-        string Root, IReadOnlyList<string> ExcludedDirectories, IReadOnlyList<string> ExcludedFiles,
-        IReadOnlyList<string> SkippedLinks, string Mode);
+        int FileCount, long TotalSize, IReadOnlyList<ManifestFile> Files, ScanScope Scan);
 }

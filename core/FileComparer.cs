@@ -112,6 +112,79 @@ public static class FileComparer
     };
 
     public static FileListSnapshot ReadInputs(IEnumerable<string> paths)
+        => ReadInputs(paths, File.OpenRead);
+
+    internal static FileListSnapshot ReadInputs(IEnumerable<string> paths, Func<string, Stream> open,
+        CancellationToken cancellationToken = default)
+        => ReadLists(paths, input =>
+        {
+            try
+            {
+                using var stream = open(input);
+                return JsonSerializer.Deserialize<FileList>(stream, ReaderOptions()) ?? throw new JsonException();
+            }
+            catch (JsonException error)
+            {
+                throw new CoreException(CoreErrorCode.ListJsonInvalid, input, innerException: error);
+            }
+        }, cancellationToken);
+
+    internal static FileListSnapshot FromFiles(string source, IReadOnlyList<ManifestFile> files,
+        long totalSize, string? hashAlgorithm, ScanScope? scan = null, CancellationToken cancellationToken = default)
+        => ReadLists([source], _ => new FileList(files.Count, totalSize, files.ToList(), hashAlgorithm, scan), cancellationToken);
+
+    public static FileListSnapshot Combine(IEnumerable<FileListSnapshot> snapshots, CancellationToken cancellationToken = default)
+    {
+        var accumulator = new SnapshotAccumulator();
+        int order = 0;
+        foreach (FileListSnapshot snapshot in snapshots)
+        {
+            accumulator.Add(snapshot, order++, cancellationToken);
+        }
+        return accumulator.Build(cancellationToken);
+    }
+
+    // A batch owns this accumulator; callers synchronize Add when parsing in parallel.
+    public sealed class SnapshotAccumulator
+    {
+        private bool built;
+        private readonly Dictionary<string, ManifestFile> files = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> fileOrder = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<(int Order, FileListSource Source)> sources = [];
+
+        public void Add(FileListSnapshot snapshot, int order, CancellationToken cancellationToken)
+        {
+            if (built) throw new InvalidOperationException("The snapshot has already been published.");
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (FileListSource source in snapshot.Sources) sources.Add((order, source));
+            MergeFiles(files, snapshot.Files.Values, snapshot.Sources[0].Path, cancellationToken);
+            foreach (ManifestFile file in snapshot.Files.Values)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!fileOrder.TryGetValue(file.Path, out int previous) || order < previous)
+                {
+                    // Parallel completion order must not change the first input's path spelling.
+                    files.Remove(file.Path);
+                    files.Add(file.Path, file);
+                    fileOrder[file.Path] = order;
+                }
+            }
+        }
+
+        public FileListSnapshot Build(CancellationToken cancellationToken)
+        {
+            if (built) throw new InvalidOperationException("The snapshot has already been published.");
+            if (sources.Count == 0) throw new CoreException(CoreErrorCode.InputsRequired);
+            FilePathRules.ValidatePaths(files.Keys);
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = new FileListSnapshot(sources.OrderBy(item => item.Order).Select(item => item.Source).ToList(), files);
+            built = true;
+            return snapshot;
+        }
+    }
+
+    private static FileListSnapshot ReadLists(IEnumerable<string> paths, Func<string, FileList> read,
+        CancellationToken cancellationToken)
     {
         string[] inputs = paths.Select(Path.GetFullPath).ToArray();
         if (inputs.Length == 0)
@@ -120,20 +193,10 @@ public static class FileComparer
         }
         var files = new Dictionary<string, ManifestFile>(StringComparer.OrdinalIgnoreCase);
         var sources = new List<FileListSource>();
-        var options = ReaderOptions();
         foreach (string input in inputs)
         {
-            FileList list;
-            try
-            {
-                using var stream = File.OpenRead(input);
-                list = JsonSerializer.Deserialize<FileList>(stream, options)
-                    ?? throw new JsonException();
-            }
-            catch (JsonException error)
-            {
-                throw new CoreException(CoreErrorCode.ListJsonInvalid, input, innerException: error);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            FileList list = read(input);
             bool hasHashes = list.HashAlgorithm == "MD5";
             if ((list.HashAlgorithm is not null && !hasHashes)
                 || (list.Scan is not null && list.Scan.Mode != (hasHashes ? "heavy" : "light")))
@@ -144,6 +207,7 @@ public static class FileComparer
             long totalSize = 0;
             foreach (ManifestFile? file in list.Files)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (file is null || file.Size < 0 || (hasHashes ? !IsMd5(file.Hash) : file.Hash is not null))
                 {
                     throw new CoreException(CoreErrorCode.FileMetadataInvalid, input: input);
@@ -175,23 +239,29 @@ public static class FileComparer
                 };
             }
             sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope));
-            foreach (ManifestFile file in normalized)
-            {
-                if (files.TryGetValue(file.Path, out ManifestFile? existing)
-                    && (existing.Size != file.Size || existing.Hash != file.Hash))
-                {
-                    throw new CoreException(CoreErrorCode.InputConflict, file.Path, input);
-                }
-                files.TryAdd(file.Path, file);
-            }
+            MergeFiles(files, normalized, input, cancellationToken);
         }
         FilePathRules.ValidatePaths(files.Keys);
+        cancellationToken.ThrowIfCancellationRequested();
         return new FileListSnapshot(sources, files);
     }
 
     private static IReadOnlyList<string> NormalizeScope(IEnumerable<string> paths, string input)
         => Array.AsReadOnly(paths.Select(path => FilePathRules.NormalizeRelative(
             path ?? throw new CoreException(CoreErrorCode.ScopePathMissing, input: input), input)).ToArray());
+
+    private static void MergeFiles(Dictionary<string, ManifestFile> files, IEnumerable<ManifestFile> incoming, string input,
+        CancellationToken cancellationToken)
+    {
+        foreach (ManifestFile file in incoming)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (files.TryGetValue(file.Path, out ManifestFile? existing)
+                && (existing.Size != file.Size || existing.Hash != file.Hash))
+                throw new CoreException(CoreErrorCode.InputConflict, file.Path, input);
+            files.TryAdd(file.Path, file);
+        }
+    }
 
     private static bool IsMd5(string? value)
         => value is { Length: 32 } && value.All(character => character is >= '0' and <= '9'

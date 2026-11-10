@@ -16,47 +16,59 @@ public sealed partial class MainForm
 
     private async Task ConvertAsync()
     {
-        string[] inputs = manifests.Items.Cast<string>().ToArray();
-        if (inputs.Length == 0) { status.Text = "请先添加 manifest，或使用跳过导入已有 JSON。"; return; }
-        using var dialog = new FolderBrowserDialog { Description = "选择转换输出目录（每份 manifest 独立写为 原文件名.json，不覆盖）", UseDescriptionForTitle = true };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        string[] outputs = inputs.Select(input => Path.Combine(dialog.SelectedPath, Path.GetFileName(input) + ".json")).ToArray();
+        if (session.IsBusy) return;
+        ManifestTable table = localSource.Checked ? localManifests : manifests;
+        ReferenceInput[] inputs = table.CheckedInputs;
+        if (inputs.Length == 0) { status.Text = "请先勾选需要解析的文件。"; return; }
         session.InvalidateReference();
         referenceOrigin = reportOrigin = "";
-        await RunWorkAsync(() =>
+        differences.Render();
+        RefreshView();
+        table.ShowResults(inputs.Select(input => (input, "待解析", (int?)null)));
+        using var cancellation = new CancellationTokenSource();
+        parsingCancellation = cancellation;
+        var reporter = new ParsingProgress();
+        using var refreshProgress = new System.Windows.Forms.Timer { Interval = 100 };
+        refreshProgress.Tick += (_, _) =>
         {
-            if (outputs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != outputs.Length)
-                throw new IOException("所选 manifest 有相同文件名，输出名称冲突。请分批转换到不同目录，再导入这些 JSON。");
-            foreach (string output in outputs)
-                if (File.Exists(output) || Directory.Exists(output)) throw new IOException("输出已存在，不能覆盖：" + output);
-            var written = new List<string>();
-            try
-            {
-                for (int i = 0; i < inputs.Length; i++)
-                {
-                    ManifestConverter.Convert(inputs[i], outputs[i]);
-                    written.Add(outputs[i]);
-                }
-                return FileComparer.ReadInputs(outputs);
-            }
-            catch (Exception error) when (error is not OutOfMemoryException)
-            {
-                throw new InvalidDataException("本批解析失败，不启用下一步。已生成的独立 JSON 不会删除或覆盖：\r\n"
-                    + (written.Count > 0 ? string.Join("\r\n", written) : "无") + "\r\n原始错误：" + error.Message, error);
-            }
-        }, result =>
+            if (parsingCancellation != cancellation || !session.IsBusy || cancellation.IsCancellationRequested) return;
+            int completed = reporter.Completed;
+            if (completed <= progress.Value) return;
+            progress.Value = Math.Clamp(Math.Max(progress.Value, completed), 0, inputs.Length);
+            status.Text = progress.Value == inputs.Length
+                ? $"文件已处理 {inputs.Length:N0}/{inputs.Length:N0}，正在合并校验…"
+                : $"正在解析：已处理 {progress.Value:N0}/{inputs.Length:N0} 份文件…";
+        };
+        refreshProgress.Start();
+        await RunWorkAsync(() => referenceParser.Parse(inputs.Select(input => input.File.FullPath).ToArray(),
+            cancellation.Token, progress: reporter), result =>
         {
-            session.AcceptReference(result);
-            referenceOrigin = "manifest 来源：\r\n" + string.Join("\r\n", inputs) + "\r\n\r\n";
-        }, "正在转换 manifest…");
+            cancellation.Token.ThrowIfCancellationRequested();
+            progress.Value = inputs.Length;
+            table.ShowResults(inputs.Select((input, i) => (input,
+                result.Items[i].Error is null ? "已解析" : "失败", result.Items[i].Entries)));
+            if (result.Items.Any(item => item.Error is not null))
+                throw new InvalidDataException("部分文件解析失败，请取消勾选失败项或修正输入后重新解析。",
+                    result.Items.First(item => item.Error is not null).Error);
+            if (result.CombinedError is not null)
+                throw new InvalidDataException("所选清单存在同侧冲突或无法共同载入，请检查选择。", result.CombinedError);
+            session.AcceptReference(result.Snapshot!);
+            referenceOrigin = "来源：\r\n" + string.Join("\r\n", inputs.Select(input => input.File.FullPath)) + "\r\n\r\n";
+        }, $"正在解析：已处理 0/{inputs.Length:N0} 份文件…", totalFiles: inputs.Length,
+        onFinished: () =>
+        {
+            refreshProgress.Stop();
+            progress.Value = Math.Clamp(reporter.Completed, 0, inputs.Length);
+            if (cancellation.IsCancellationRequested)
+                table.ShowResults(inputs.Select(input => (input, "已取消", (int?)null)));
+            parsingCancellation = null;
+        });
     }
 
     private async Task ScanAsync()
     {
         string root = gameRoot.Text.Trim();
         if (!Path.IsPathFullyQualified(root)) { status.Text = "请输入或浏览选择游戏目录的完整路径。"; return; }
-        string? output = ChooseOutput("保存扫描 JSON（必须位于游戏目录之外）", "scan.json");
-        if (output is null) return;
         bool hashes = heavy.Checked;
         string[] dirs = ReadLines(excludedDirectories), files = ReadLines(excludedFiles);
         var reporter = new Progress<ScanProgress>(value =>
@@ -70,58 +82,41 @@ public sealed partial class MainForm
         scanOrigin = reportOrigin = "";
         await RunWorkAsync(() =>
         {
-            DirectoryScanner.Scan(root, output, dirs, files, hashes, value => ((IProgress<ScanProgress>)reporter).Report(value));
-            return FileComparer.ReadInputs([output]);
+            return DirectoryScanner.Scan(root, dirs, files, hashes,
+                value => ((IProgress<ScanProgress>)reporter).Report(value));
         }, result =>
         {
             session.AcceptGame(result, root);
-            scanOrigin = "本次实际扫描；结果已保存。\r\n";
+            scanOrigin = "本次实际扫描；结果仅保留在内存。\r\n";
         }, hashes ? "正在枚举文件，随后计算 MD5…" : "正在轻扫（只读取路径与大小）…");
     }
 
     private async Task CompareAsync()
     {
         if (session.Game is not { } game || session.Reference is not { } reference) return;
-        string? output = ChooseOutput("保存比较报告 JSON", "comparison.json");
-        if (output is null) return;
         session.InvalidateComparison();
         reportOrigin = "";
-        await RunWorkAsync(() =>
-        {
-            ComparisonResult result = FileComparer.Compare(game, reference);
-            FileComparer.WriteReport(output, result);
-            return result;
-        }, result =>
+        await RunWorkAsync(() => FileComparer.Compare(game, reference), result =>
         {
             session.AcceptComparison(result);
-            reportOrigin = "比较报告：" + output + "\r\n";
+            reportOrigin = "比较结果仅保留在内存。\r\n";
         }, "正在比较两侧清单…");
     }
 
     private async Task ImportAsync()
     {
-        if (session.IsBusy || session.Step > 2) return;
-        if (session.Step == 0 && !manualSource.Checked) return;
+        if (session.IsBusy || session.Step is not (1 or 2)) return;
         int step = session.Step;
         using var dialog = new OpenFileDialog
         {
-            Title = step switch { 0 => "导入一份或多份参考清单 JSON", 1 => "导入已有扫描 JSON", _ => "导入比较报告并核对当前两侧" },
+            Title = step == 1 ? "导入已有扫描 JSON" : "导入比较报告并核对当前两侧",
             Filter = "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*",
-            Multiselect = step == 0
+            Multiselect = false
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         string[] inputs = dialog.FileNames;
         switch (step)
         {
-            case 0:
-                session.InvalidateReference();
-                referenceOrigin = reportOrigin = "";
-                await RunWorkAsync(() => FileComparer.ReadInputs(inputs), result =>
-                {
-                    session.AcceptReference(result);
-                    referenceOrigin = "已导入参考 JSON；未推断游戏名称、版本或完整覆盖范围。\r\n";
-                }, "正在校验参考清单…");
-                break;
             case 1:
                 string root = gameRoot.Text.Trim();
                 session.InvalidateGame();
@@ -150,39 +145,60 @@ public sealed partial class MainForm
         }
     }
 
-    private async Task RunWorkAsync<T>(Func<T> work, Action<T> apply, string message)
+    private async Task RunWorkAsync<T>(Func<T> work, Action<T> apply, string message,
+        string completedMessage = "处理完成，请核对本步摘要后点击下一步。", int? totalFiles = null, Action? onFinished = null)
     {
         Task operation = session.RunAsync(work, apply);
         status.Text = message;
-        progress.Style = ProgressBarStyle.Marquee;
+        progress.Value = 0;
+        progress.Maximum = totalFiles ?? 100;
+        progress.Style = totalFiles is null ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
         progress.Visible = true;
         differences.Render();
         RefreshView();
+        string outcome;
         try
         {
             await operation;
-            status.Text = "处理完成，请核对本步摘要后点击下一步。";
+            outcome = completedMessage;
+        }
+        catch (OperationCanceledException) when (parsingCancellation is { IsCancellationRequested: true })
+        {
+            outcome = "已取消解析，本批结果已丢弃，请重新解析。";
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            status.Text = "处理失败，未启用本步结果：\r\n" + error;
+            outcome = "处理失败，未启用本步结果：" + DescribeDesktopError(error);
         }
         finally
         {
-            progress.Visible = false;
+            onFinished?.Invoke();
             differences.Render();
             RefreshView();
+            progress.Visible = false;
         }
+        status.Text = outcome;
     }
 
-    private string? ChooseOutput(string title, string fileName)
+    private static LocalManifestFile ReadReferenceMetadata(string path)
     {
-        using var dialog = new SaveFileDialog { Title = title, Filter = "JSON 文件 (*.json)|*.json", FileName = fileName, DefaultExt = "json", AddExtension = true, OverwritePrompt = false };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return null;
-        if (!File.Exists(dialog.FileName) && !Directory.Exists(dialog.FileName)) return dialog.FileName;
-        status.Text = "输出已存在，不能覆盖。请重新操作并选择新的文件名：" + dialog.FileName;
-        return null;
+        var file = new FileInfo(path);
+        return new LocalManifestFile(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc);
     }
+
+    internal static string DescribeDesktopError(Exception error) => error switch
+    {
+        CoreException { Code: CoreErrorCode.InputConflict } => "所选清单存在同侧冲突，请检查选择。",
+        CoreException { Code: CoreErrorCode.OutputInsideScanRoot } => "程序临时目录不能位于扫描目录内，请调整程序位置或扫描范围。",
+        CoreException => "清单或路径无效，请检查所选文件。",
+        FileNotFoundException => "所选文件不存在，请重新获取或添加。",
+        DirectoryNotFoundException => "目录不存在，请检查目录。",
+        UnauthorizedAccessException or System.Security.SecurityException => "没有访问权限，请检查程序及输入目录权限。",
+        InvalidDataException => "部分文件无效或所选清单存在同侧冲突，请检查表格与选择。",
+        IOException => "文件读写失败，请检查目录、链接、文件占用及剩余空间。",
+        ArgumentException or NotSupportedException => "目录或参数无效，请检查输入。",
+        _ => "操作未完成，请检查输入后重试。"
+    };
 
     private static string[] ReadLines(TextBox box) => box.Lines.Select(line => line.Trim()).Where(line => line.Length > 0).ToArray();
 }

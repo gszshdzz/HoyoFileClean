@@ -15,7 +15,11 @@ public sealed partial class MainForm : Form
     private readonly ReferenceParser referenceParser;
     private CancellationTokenSource? parsingCancellation;
     private readonly Button parseManualReference = MakeButton("解析", "ParseManualReference");
-    private readonly ProgressBar progress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
+    private readonly ProgressBar parsingProgress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
+    private readonly ProgressBar comparisonProgress = new() { Name = "ComparisonProgress", Dock = DockStyle.Fill, Visible = false };
+    private ProgressBar progress => session.Step == 2 ? comparisonProgress : parsingProgress;
+    private string gameStatus = "游戏扫描：尚无有效结果。";
+    private int displayedStep = -1;
     private readonly Label status = new() { Name = "Status", Dock = DockStyle.Fill, AutoSize = true,
         BackColor = SystemColors.Control, Padding = new Padding(0, 3, 0, 3) };
     private readonly ManifestTable manifests = new("Manifests");
@@ -28,9 +32,6 @@ public sealed partial class MainForm : Form
     private readonly Label referencePlaceholder = new() { Name = "ReferencePlaceholder", AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 12, 0, 0) };
     private readonly TextBox gameRoot = new() { Name = "GameRoot", Width = 570 };
     private readonly CheckBox heavy = new() { Text = "MD5 重扫（读取文件内容，耗时更长）", AutoSize = true, Name = "HeavyScan" };
-    private readonly TextBox excludedDirectories = InputLines("ExcludedDirectories");
-    private readonly TextBox excludedFiles = InputLines("ExcludedFiles");
-    private readonly TextBox scanResult = OutputBox("ScanResult");
     private readonly TextBox comparisonResult = OutputBox("ComparisonResult");
     private readonly DifferencePanel differences;
     private string referenceOrigin = "";
@@ -51,11 +52,10 @@ public sealed partial class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         differences = new DifferencePanel(session);
         pages = [BuildReferencePage(), BuildScanPage(), BuildComparisonPage(), BuildDifferencePage()];
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var flow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Padding = new Padding(0, 0, 0, 12) };
@@ -71,10 +71,10 @@ public sealed partial class MainForm : Form
         buttons.Controls.AddRange([back, skip, execute, next, cancelParsing, close]);
         layout.Controls.Add(flow, 0, 0);
         layout.Controls.Add(content, 0, 1);
-        layout.Controls.Add(progress, 0, 2);
-        layout.Controls.Add(status, 0, 3);
-        layout.Controls.Add(buttons, 0, 4);
+        layout.Controls.Add(status, 0, 2);
+        layout.Controls.Add(buttons, 0, 3);
         Controls.Add(layout);
+        status.TextChanged += (_, _) => { if (session.Step == 1) gameStatus = status.Text; };
         back.Click += (_, _) => { session.Back(); RefreshView(); };
         next.Click += (_, _) => { session.Next(); RefreshView(); if (session.Step == 3) differences.Render(); };
         skip.Click += async (_, _) => await ImportAsync();
@@ -88,8 +88,6 @@ public sealed partial class MainForm : Form
         };
         gameRoot.TextChanged += (_, _) => GameChanged();
         heavy.CheckedChanged += (_, _) => GameChanged();
-        excludedDirectories.TextChanged += (_, _) => GameChanged();
-        excludedFiles.TextChanged += (_, _) => GameChanged();
         FormClosing += (_, args) =>
         {
             if (!session.IsBusy) return;
@@ -154,33 +152,7 @@ public sealed partial class MainForm : Form
         }
         var page = new Panel { Dock = DockStyle.Fill };
         page.Controls.Add(layout);
-        return page;
-    }
-
-    private Panel BuildScanPage()
-    {
-        Button browse = MakeButton("浏览目录…", "BrowseGame");
-        browse.Click += (_, _) =>
-        {
-            using var dialog = new FolderBrowserDialog { Description = "明确选择本次扫描的游戏目录", UseDescriptionForTitle = true };
-            if (dialog.ShowDialog(this) == DialogResult.OK) gameRoot.Text = dialog.SelectedPath;
-        };
-        var pathRow = Buttons(gameRoot, browse);
-        pathRow.WrapContents = true;
-        var exclusions = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 2 };
-        exclusions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        exclusions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        exclusions.Controls.Add(Note("排除目录（每行一项）"), 0, 0);
-        exclusions.Controls.Add(Note("排除文件（每行一项）"), 1, 0);
-        exclusions.Controls.Add(excludedDirectories, 0, 1);
-        exclusions.Controls.Add(excludedFiles, 1, 1);
-        var input = Vertical();
-        input.Controls.Add(Note("游戏目录：默认轻扫，只读取路径与大小。跳过＝导入已有扫描 JSON，仍须核对指定目录。"));
-        input.Controls.Add(pathRow);
-        input.Controls.Add(heavy);
-        input.Controls.Add(exclusions);
-        input.Controls.Add(Note("排除项支持目录内的相对路径或完整路径，不支持通配符。链接／重解析点不跟随。"));
-        return Page(input, scanResult);
+        return WithPageProgress(page, parsingProgress);
     }
 
     private Panel BuildComparisonPage()
@@ -188,7 +160,18 @@ public sealed partial class MainForm : Form
         var input = Vertical();
         input.Controls.Add(Note("请核对下方两侧来源、文件数、大小、哈希和范围。A＝游戏文件，B＝参考清单。"));
         input.Controls.Add(Note("跳过＝导入已有报告，并核对两侧身份和报告内容；不会自动打开报告记录的路径。"));
-        return Page(input, comparisonResult);
+        return WithPageProgress(Page(input, comparisonResult), comparisonProgress);
+    }
+
+    private static Panel WithPageProgress(Control page, ProgressBar bar)
+    {
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(page, 0, 0);
+        layout.Controls.Add(bar, 0, 1);
+        return layout;
     }
 
     private Panel BuildDifferencePage()
@@ -210,12 +193,19 @@ public sealed partial class MainForm : Form
     {
         session.InvalidateGame();
         scanOrigin = reportOrigin = "";
+        ResetScanProgress();
+        if (session.Step == 1) status.Text = "游戏输入已变更，尚无有效结果，请重新扫描或导入。";
         differences.Render();
         RefreshView();
     }
 
     private void RefreshView()
     {
+        if (displayedStep != session.Step)
+        {
+            displayedStep = session.Step;
+            status.Text = session.Step == 1 ? gameStatus : "";
+        }
         for (int i = 0; i < pages.Length; i++)
         {
             pages[i].Visible = i == session.Step;
@@ -223,7 +213,8 @@ public sealed partial class MainForm : Form
             steps[i].Text = (i == session.Step ? "当前 → " : "") + new[] { "1 参考清单", "2 游戏扫描", "3 确认与比较", "4 差异与选择" }[i];
         }
         back.Enabled = !session.IsBusy && session.Step > 0;
-        skip.Visible = execute.Visible = session.Step is 1 or 2;
+        skip.Visible = session.Step == 2;
+        execute.Visible = session.Step == 2;
         next.Visible = session.Step < 3;
         skip.Enabled = execute.Enabled = !session.IsBusy;
         manualReferencePage.Visible = manualSource.Checked;
@@ -237,10 +228,13 @@ public sealed partial class MainForm : Form
         close.Enabled = !session.IsBusy;
         cancelParsing.Visible = parsingCancellation is not null;
         cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };
-        execute.Text = session.Step switch { 0 => "解析", 1 => "扫描", _ => "比较" };
+        execute.Text = session.Step switch { 0 => "解析", 1 => importGameSource.Checked ? "导入" : "扫描", _ => "比较" };
+        scanOptions.Visible = scanGameSource.Checked;
+        gameJsonRow.Visible = importGameSource.Checked;
+        heavy.Visible = scanGameSource.Checked;
+        readGame.Text = importGameSource.Checked ? "导入" : "扫描";
         referenceResult.Text = session.Reference is { } reference
             ? $"有效参考：{reference.FileCount:N0} 个条目，共 {reference.TotalSize:N0} 字节。" : "尚无有效参考结果。";
-        scanResult.Text = scanOrigin + ResultText.Describe(session.Game, "游戏扫描");
         comparisonResult.Text = "【左侧／A：游戏文件】\r\n" + scanOrigin + ResultText.Describe(session.Game, "游戏扫描")
             + "\r\n\r\n【右侧／B：参考清单】\r\n" + referenceOrigin + ResultText.Describe(session.Reference, "参考清单")
             + "\r\n\r\n【比较结果】\r\n" + reportOrigin + ResultText.Describe(session.Comparison);
@@ -254,7 +248,7 @@ public sealed partial class MainForm : Form
                 table.SetBusy(busy);
             else
             {
-                if (control is ButtonBase or ComboBox || control is TextBox { ReadOnly: false })
+                if (control is ButtonBase or ComboBox or ListBox || control is TextBox { ReadOnly: false })
                     control.Enabled = !busy;
                 SetInputsBusy(control, busy);
             }
@@ -265,7 +259,6 @@ public sealed partial class MainForm : Form
     private static Label Note(string text)
         => new() { Text = text, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 5) };
     private static TextBox OutputBox(string name) => new() { Name = name, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
-    private static TextBox InputLines(string name) => new() { Name = name, Multiline = true, ScrollBars = ScrollBars.Vertical, Height = 64, Dock = DockStyle.Fill };
     private static TableLayoutPanel Vertical()
     {
         var panel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,

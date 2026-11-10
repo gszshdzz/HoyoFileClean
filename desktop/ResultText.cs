@@ -4,6 +4,18 @@ namespace HoyoFileClean.Desktop;
 
 internal static class ResultText
 {
+    internal static string DescribeGameStatus(FileListSnapshot snapshot, bool imported)
+    {
+        ScanScope scan = snapshot.Sources[0].Scan!;
+        string mode = scan.Mode == "heavy" ? "MD5 重扫" : "轻扫（未校验内容）";
+        string text = imported ? $"已导入历史扫描（{mode}，未重新扫描）。" : $"{mode}完成；结果仅保留在内存。";
+        int excluded = scan.ExcludedDirectories.Count + scan.ExcludedFiles.Count;
+        if (excluded > 0) text += $" 排除 {excluded:N0} 项。";
+        if (scan.SkippedLinks.Count > 0) text += $" 跳过链接／重解析点 {scan.SkippedLinks.Count:N0} 项（未跟随）。";
+        if (excluded > 0 || scan.SkippedLinks.Count > 0) text += " 上述范围未扫描。";
+        return text;
+    }
+
     public static string Describe(FileListSnapshot? snapshot, string title)
     {
         if (snapshot is null) return title + "：尚无有效结果。";

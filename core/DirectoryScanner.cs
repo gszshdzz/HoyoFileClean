@@ -190,6 +190,12 @@ public static class DirectoryScanner
         Report(files.Count, force: true);
     }
 
+    public static IReadOnlyList<string> NormalizeExclusionPaths(string rootPath, IEnumerable<string> paths)
+    {
+        if (!Path.IsPathFullyQualified(rootPath)) throw new ArgumentException("A full scan root is required.", nameof(rootPath));
+        return NormalizeExclusions(NormalizeRootPath(rootPath), paths).OrderBy(path => path, StringComparer.Ordinal).ToArray();
+    }
+
     private static HashSet<string> NormalizeExclusions(string root, IEnumerable<string>? paths)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

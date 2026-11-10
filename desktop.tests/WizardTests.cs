@@ -857,11 +857,20 @@ public sealed class WizardTests
         Raise("OnDragDrop", moveOnly);
         string third = Path.Combine(directory, "third");
         File.WriteAllText(third, "keep");
-        Raise("OnDragDrop", Drag([third, directory]));
-        Assert.Equal(2, table.Rows.Count);
-        Assert.Contains("无法添加文件", Find<Label>(form, "Status").Text);
-        Raise("OnDragDrop", Drag([third, Path.Combine(directory, "missing")]));
-        Assert.Equal(2, table.Rows.Count);
+        string priorStatus = Find<Label>(form, "Status").Text;
+        foreach (string[] invalidPaths in new[]
+        {
+            new[] { directory }, new[] { third, directory },
+            new[] { third, Path.Combine(directory, "missing") }
+        })
+        {
+            DragEventArgs invalid = Drag(invalidPaths);
+            Raise("OnDragEnter", invalid);
+            Assert.Equal(DragDropEffects.None, invalid.Effect);
+            Raise("OnDragDrop", invalid);
+            Assert.Equal(2, table.Rows.Count);
+            Assert.Equal(priorStatus, Find<Label>(form, "Status").Text);
+        }
         using var release = new ManualResetEventSlim();
         Task work = session.RunAsync(() => release.Wait(TimeSpan.FromSeconds(10)), _ => { });
         try

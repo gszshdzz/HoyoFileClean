@@ -190,17 +190,21 @@ public sealed partial class MainForm
 
     private void ManualFilesDragEnter(DragEventArgs args)
     {
-        args.Effect = CanAddManualFiles && (args.AllowedEffect & DragDropEffects.Copy) != 0
-            && args.Data is ITypedDataObject data && data.TryGetData(DataFormats.FileDrop, out string[]? paths)
-            && paths is { Length: > 0 }
-            ? DragDropEffects.Copy : DragDropEffects.None;
+        args.Effect = DroppedManualFiles(args) is not null ? DragDropEffects.Copy : DragDropEffects.None;
     }
 
     private void ManualFilesDragDrop(DragEventArgs args)
     {
-        if (!CanAddManualFiles || (args.AllowedEffect & DragDropEffects.Copy) == 0) return;
+        if (DroppedManualFiles(args) is { } paths) AddManualFiles(paths);
+    }
+
+    private string[]? DroppedManualFiles(DragEventArgs args)
+    {
+        if (!CanAddManualFiles || (args.AllowedEffect & DragDropEffects.Copy) == 0) return null;
         if (args.Data is ITypedDataObject data && data.TryGetData(DataFormats.FileDrop, out string[]? paths)
-            && paths is { Length: > 0 }) AddManualFiles(paths);
+            && paths is { Length: > 0 } && paths.All(path => !string.IsNullOrWhiteSpace(path)
+                && Path.IsPathFullyQualified(path) && File.Exists(path))) return paths;
+        return null;
     }
 
     private void AddManualFiles(IEnumerable<string> paths)

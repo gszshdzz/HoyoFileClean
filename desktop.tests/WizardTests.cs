@@ -19,6 +19,11 @@ public sealed class WizardTests
         form.Show();
         Application.DoEvents();
         Assert.True(Find<RadioButton>(form, "ScanGameSource").Checked);
+        Control sourceRow = Find<RadioButton>(form, "ScanGameSource").Parent!;
+        Button scanButton = Find<Button>(form, "ReadGame");
+        Assert.NotSame(sourceRow, scanButton.Parent);
+        Assert.True(scanButton.RectangleToScreen(scanButton.ClientRectangle).Top >=
+            Find<TextBox>(form, "GameRoot").RectangleToScreen(Find<TextBox>(form, "GameRoot").ClientRectangle).Bottom);
         foreach (string name in new[] { "GameRoot", "GameJson", "ExclusionJson", "ExcludedDirectoryInput", "ExcludedFileInput" })
         {
             TextBox input = Find<TextBox>(form, name);

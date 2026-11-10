@@ -24,7 +24,7 @@ public sealed partial class MainForm
     {
         var input = CompactGameInputs();
         heavy.Text = "MD5 重扫";
-        input.Controls.Add(Buttons(scanGameSource, importGameSource, heavy, readGame));
+        input.Controls.Add(Buttons(scanGameSource, importGameSource));
         Button browse = MakeButton("浏览…", "BrowseGame");
         browse.Click += (_, _) => BrowseDirectory(gameRoot);
         input.Controls.Add(LabeledRow("游戏根目录", gameRoot, browse));
@@ -36,6 +36,7 @@ public sealed partial class MainForm
         EnablePathDrop(gameJson, directory: false);
         gameJson.TextChanged += (_, _) => GameChanged();
         readGame.Click += async (_, _) => await ExecuteAsync();
+        input.Controls.Add(Buttons(readGame, heavy));
 
         var options = CompactGameInputs();
         Button browseRules = MakeButton("浏览…", "BrowseExclusionJson");
@@ -57,12 +58,17 @@ public sealed partial class MainForm
         scanOptions = new Panel { Dock = DockStyle.Fill };
         scanOptions.Controls.Add(GameReadingRows([options, lists], 1));
         scanFileStatus.Padding = scanByteStatus.Padding = Padding.Empty;
-        var results = GameReadingRows([scanFileStatus, scanFileProgress, scanByteStatus, scanByteProgress]);
-        results.AutoSize = true;
-        results.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        results.Dock = DockStyle.Top;
-        results.RowStyles[1] = new RowStyle(SizeType.Absolute, 22);
-        results.RowStyles[3] = new RowStyle(SizeType.Absolute, 22);
+        scanFileStatus.Margin = scanByteStatus.Margin = Padding.Empty;
+        var results = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 2 };
+        results.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        results.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        results.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        results.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        results.Controls.Add(scanFileStatus, 0, 0);
+        results.Controls.Add(scanFileProgress, 1, 0);
+        results.Controls.Add(scanByteStatus, 0, 1);
+        results.Controls.Add(scanByteProgress, 1, 1);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));

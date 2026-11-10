@@ -112,21 +112,20 @@ public static class DirectoryScanner
             {
                 string relative = FilePathRules.NormalizeRelative(RelativePath(root, entry.FullName));
                 FileAttributes attributes = entry.Attributes;
+                bool isDirectory = (attributes & FileAttributes.Directory) != 0;
+                // Explicit exclusions take precedence over reporting unscanned links.
+                if ((isDirectory ? excludedDirs : excludedFiles).Contains(relative))
+                {
+                    continue;
+                }
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                 {
                     skippedLinks.Add(relative);
                     continue;
                 }
-                if ((attributes & FileAttributes.Directory) != 0)
+                if (isDirectory)
                 {
-                    if (!excludedDirs.Contains(relative))
-                    {
-                        directories.Push(entry.FullName);
-                    }
-                    continue;
-                }
-                if (excludedFiles.Contains(relative))
-                {
+                    directories.Push(entry.FullName);
                     continue;
                 }
                 // 使用目录枚举缓存的大小，不打开文件正文。

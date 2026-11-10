@@ -750,6 +750,78 @@ public sealed class WizardTests
     });
 
     [Fact]
+    public void ManualTableFileDropAddsCheckedFilesWithoutParsingAndRejectsInvalidBatches() => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        string first = Path.Combine(directory, "first"), second = Path.Combine(directory, "second.json");
+        File.WriteAllText(first, "not parsed on drop");
+        File.WriteAllText(second, "invalid json is still a candidate");
+        var session = new WizardSession();
+        using var form = new MainForm(session);
+        ManifestTable table = Find<ManifestTable>(form, "Manifests");
+        Assert.True(table.AllowDrop);
+        Assert.False(Find<ManifestTable>(form, "LocalManifests").AllowDrop);
+        DragEventArgs Drag(string[] paths, DragDropEffects allowed = DragDropEffects.Copy)
+            => new(new DataObject(DataFormats.FileDrop, paths), 0, 0, 0, allowed, DragDropEffects.None);
+        void Raise(string name, DragEventArgs args)
+            => typeof(Control).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(table, [args]);
+        DragEventArgs files = Drag([first, second]);
+        Raise("OnDragEnter", files);
+        Assert.Equal(DragDropEffects.None, files.Effect);
+        Raise("OnDragDrop", files);
+        Assert.Empty(table.Rows.Cast<DataGridViewRow>());
+        Find<RadioButton>(form, "ManualSource").Checked = true;
+        Raise("OnDragEnter", files);
+        Assert.Equal(DragDropEffects.Copy, files.Effect);
+        Raise("OnDragDrop", files);
+        Assert.Equal(2, table.CheckedInputs.Length);
+        Assert.Null(session.Reference);
+        Assert.All(table.Rows.Cast<DataGridViewRow>(), row => Assert.Equal("未解析", row.Cells["State"].Value));
+        Raise("OnDragDrop", files);
+        Assert.Equal(2, table.Rows.Count);
+        DragEventArgs text = new(new DataObject(DataFormats.Text, "not a file"), 0, 0, 0,
+            DragDropEffects.Copy, DragDropEffects.Copy);
+        Raise("OnDragEnter", text);
+        Assert.Equal(DragDropEffects.None, text.Effect);
+        Raise("OnDragDrop", text);
+        DragEventArgs moveOnly = Drag([first], DragDropEffects.Move);
+        Raise("OnDragEnter", moveOnly);
+        Assert.Equal(DragDropEffects.None, moveOnly.Effect);
+        Raise("OnDragDrop", moveOnly);
+        string third = Path.Combine(directory, "third");
+        File.WriteAllText(third, "keep");
+        Raise("OnDragDrop", Drag([third, directory]));
+        Assert.Equal(2, table.Rows.Count);
+        Assert.Contains("无法添加文件", Find<Label>(form, "Status").Text);
+        Raise("OnDragDrop", Drag([third, Path.Combine(directory, "missing")]));
+        Assert.Equal(2, table.Rows.Count);
+        using var release = new ManualResetEventSlim();
+        Task work = session.RunAsync(() => release.Wait(TimeSpan.FromSeconds(10)), _ => { });
+        try
+        {
+            DragEventArgs busy = Drag([third]);
+            Raise("OnDragEnter", busy);
+            Assert.Equal(DragDropEffects.None, busy.Effect);
+            Raise("OnDragDrop", busy);
+            Assert.Equal(2, table.Rows.Count);
+        }
+        finally
+        {
+            release.Set();
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (!work.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            work.GetAwaiter().GetResult();
+        }
+        session.AcceptReference(FileComparer.ReadInputs([WriteList("valid", null, [new ManifestFile("file", 1)])]));
+        Raise("OnDragDrop", Drag([third]));
+        Assert.Equal(3, table.CheckedInputs.Length);
+        Assert.Null(session.Reference);
+        Assert.Equal("not parsed on drop", File.ReadAllText(first));
+        Assert.Equal("keep", File.ReadAllText(third));
+    });
+
+    [Fact]
     public void BusyTableKeepsInformationReadOnlyAndBlocksSelectAll() => OnSta(() =>
     {
         using var table = new ManifestTable("test");

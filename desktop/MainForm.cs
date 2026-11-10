@@ -110,14 +110,11 @@ public sealed partial class MainForm : Form
         {
             using var dialog = new OpenFileDialog { Title = "选择清单（manifest 或 JSON）", Multiselect = true, Filter = "所有文件 (*.*)|*.*" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            try
-            {
-                manifests.AddFiles(dialog.FileNames.Select(ReadReferenceMetadata), check: true);
-                ReferenceChanged();
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { status.Text = "无法添加文件：" + DescribeDesktopError(error); }
+            AddManualFiles(dialog.FileNames);
         };
+        manifests.AllowDrop = true;
+        manifests.DragEnter += (_, args) => ManualFilesDragEnter(args);
+        manifests.DragDrop += (_, args) => ManualFilesDragDrop(args);
         remove.Click += (_, _) =>
         {
             foreach (DataGridViewRow row in manifests.Rows.Cast<DataGridViewRow>().Where(row => row.Cells[0].Value is true).ToArray())
@@ -125,7 +122,7 @@ public sealed partial class MainForm : Form
             ReferenceChanged();
         };
         var input = Vertical();
-        input.Controls.Add(Note("添加 manifest 或清单 JSON，勾选后统一解析。"));
+        input.Controls.Add(Note("添加或拖入 manifest／清单 JSON 到下方表格，勾选后统一解析。"));
         input.Controls.Add(Buttons(add, remove, parseManualReference));
         parseManualReference.Click += async (_, _) => await ExecuteAsync();
         input.Controls.Add(referenceResult);

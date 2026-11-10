@@ -186,6 +186,38 @@ public sealed partial class MainForm
         return new LocalManifestFile(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc);
     }
 
+    private bool CanAddManualFiles => !session.IsBusy && session.Step == 0 && manualSource.Checked;
+
+    private void ManualFilesDragEnter(DragEventArgs args)
+    {
+        args.Effect = CanAddManualFiles && (args.AllowedEffect & DragDropEffects.Copy) != 0
+            && args.Data is ITypedDataObject data && data.TryGetData(DataFormats.FileDrop, out string[]? paths)
+            && paths is { Length: > 0 }
+            ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    private void ManualFilesDragDrop(DragEventArgs args)
+    {
+        if (!CanAddManualFiles || (args.AllowedEffect & DragDropEffects.Copy) == 0) return;
+        if (args.Data is ITypedDataObject data && data.TryGetData(DataFormats.FileDrop, out string[]? paths)
+            && paths is { Length: > 0 }) AddManualFiles(paths);
+    }
+
+    private void AddManualFiles(IEnumerable<string> paths)
+    {
+        if (!CanAddManualFiles) return;
+        try
+        {
+            // AddFiles materializes metadata first: a directory/missing file rejects the batch,
+            // never recursively imports a folder or leaves a partially changed table.
+            manifests.AddFiles(paths.Select(ReadReferenceMetadata), check: true);
+            ReferenceChanged();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException or System.Security.SecurityException)
+        { status.Text = "无法添加文件：" + DescribeDesktopError(error); }
+    }
+
     internal static string DescribeDesktopError(Exception error) => error switch
     {
         CoreException { Code: CoreErrorCode.InputConflict } => "所选清单存在同侧冲突，请检查选择。",

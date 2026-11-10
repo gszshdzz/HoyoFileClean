@@ -230,7 +230,9 @@ public sealed class WizardTests
         form.PerformLayout();
         Assert.False(Find<Button>(form, "Next").Enabled);
         Assert.False(Find<Button>(form, "Back").Enabled);
-        Assert.True(Find<Button>(form, "Execute").Enabled);
+        Assert.False(Find<Button>(form, "Execute").Enabled);
+        Assert.False(Find<Button>(form, "Import").Enabled);
+        Assert.True(Find<RadioButton>(form, "NetworkSource").Checked);
         Assert.False(Find<CheckBox>(form, "HeavyScan").Checked);
         Assert.True(Find<TextBox>(form, "ReferenceResult").ReadOnly);
     });
@@ -299,6 +301,74 @@ public sealed class WizardTests
         Assert.Equal(0, session.Step);
         Assert.NotNull(session.Reference);
         Assert.True(next.Enabled);
+        form.Close();
+    });
+
+    [Theory]
+    [InlineData("NetworkSource", "网络获取", false)]
+    [InlineData("LocalSource", "本地获取", false)]
+    [InlineData("ManualSource", "", true)]
+    public void ReferenceModesShowOnlyTheirOwnInterface(string mode, string placeholder, bool manual) => OnSta(() =>
+    {
+        using var form = new MainForm
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000),
+            ShowInTaskbar = false, Size = new Size(800, 650)
+        };
+        form.Show();
+        Find<RadioButton>(form, mode).Checked = true;
+        Application.DoEvents();
+        Assert.True(Find<RadioButton>(form, mode).Checked);
+        Assert.Single(new[] { "NetworkSource", "LocalSource", "ManualSource" },
+            name => Find<RadioButton>(form, name).Checked);
+        Assert.Equal(manual, Find<ListBox>(form, "Manifests").Visible);
+        Assert.Equal(manual, Find<TextBox>(form, "ReferenceResult").Visible);
+        Assert.Equal(!manual, Find<Label>(form, "ReferencePlaceholder").Visible);
+        Assert.Equal(manual, Find<Button>(form, "Execute").Enabled);
+        Assert.Equal(manual, Find<Button>(form, "Import").Enabled);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        if (!manual) Assert.Contains(placeholder + "暂未实现", Find<Label>(form, "ReferencePlaceholder").Text);
+        Rectangle client = form.RectangleToScreen(form.ClientRectangle);
+        foreach (string name in new[] { "NetworkSource", "LocalSource", "ManualSource", manual ? "Manifests" : "ReferencePlaceholder" })
+        {
+            Control control = Assert.Single(form.Controls.Find(name, true));
+            Assert.True(client.Contains(control.RectangleToScreen(control.ClientRectangle)), name + " 超出窗口范围");
+        }
+        Directory.CreateDirectory(directory);
+        using var bitmap = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+        bitmap.Save(Path.Combine(directory, "reference-mode-" + mode + ".png"));
+        form.Close();
+    });
+
+    [Fact]
+    public void SwitchingReferenceModeInvalidatesReferenceAndDownstreamButKeepsScan() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        session.Select("game-only", true);
+        session.ConfirmSelection(true);
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        Assert.True(Find<RadioButton>(form, "ManualSource").Checked);
+        Assert.NotNull(session.Reference);
+        form.Show();
+        Assert.True(Find<RadioButton>(form, "ManualSource").Checked, "显示窗口和设置焦点不应改变已有模式");
+        Assert.NotNull(session.Reference);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        Find<ListBox>(form, "Manifests").Items.Add("retain-manual-input.manifest");
+        Find<RadioButton>(form, "LocalSource").Checked = true;
+        Assert.Null(session.Reference);
+        Assert.NotNull(session.Game);
+        Assert.Null(session.Comparison);
+        Assert.Equal(0, session.SelectedCount);
+        Assert.False(session.SelectionConfirmed);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Find<RadioButton>(form, "ManualSource").Checked = true;
+        Assert.Single(Find<ListBox>(form, "Manifests").Items.Cast<string>());
+        Assert.True(Find<Button>(form, "Execute").Enabled);
+        Assert.False(Find<Button>(form, "Next").Enabled);
         form.Close();
     });
 

@@ -5,6 +5,7 @@ public sealed partial class MainForm
     private async Task ExecuteAsync()
     {
         if (session.IsBusy) return;
+        if (session.Step == 0 && !manualSource.Checked) return;
         switch (session.Step)
         {
             case 0: await ConvertAsync(); break;
@@ -100,6 +101,7 @@ public sealed partial class MainForm
     private async Task ImportAsync()
     {
         if (session.IsBusy || session.Step > 2) return;
+        if (session.Step == 0 && !manualSource.Checked) return;
         int step = session.Step;
         using var dialog = new OpenFileDialog
         {

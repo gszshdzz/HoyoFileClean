@@ -485,6 +485,49 @@ public sealed class WizardTests
         form.Close();
     });
 
+    [Theory]
+    [InlineData("Network", "Local")]
+    [InlineData("Network", "Manual")]
+    [InlineData("Local", "Manual")]
+    [InlineData("Local", "Network")]
+    [InlineData("Manual", "Network")]
+    [InlineData("Manual", "Local")]
+    public void ReferenceModeSwitchAlwaysCoversContentBeforeHidingOldPage(string from, string to) => OnSta(() =>
+    {
+        using var form = new MainForm
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<RadioButton>(form, from + "Source").Checked = true;
+        Application.DoEvents();
+        Control[] pages = new[] { "NetworkManifests", "LocalManifests", "Manifests" }
+            .Select(name => Find<ManifestTable>(form, name).Parent!).ToArray();
+        Control target = Find<ManifestTable>(form, to == "Manual" ? "Manifests" : to + "Manifests").Parent!;
+        var coverage = new List<bool>();
+        var replacements = new List<bool>();
+        foreach (Control page in pages)
+            page.VisibleChanged += (_, _) =>
+            {
+                coverage.Add(pages.Any(item => item.Visible));
+                if (!page.Visible)
+                    replacements.Add(target.Visible && target.Parent!.Controls.GetChildIndex(target) == 0);
+            };
+        Find<RadioButton>(form, to + "Source").Checked = true;
+        Application.DoEvents();
+        Assert.NotEmpty(coverage);
+        Assert.All(coverage, Assert.True);
+        Assert.NotEmpty(replacements);
+        Assert.All(replacements, Assert.True);
+        Assert.Same(target, Assert.Single(pages, page => page.Visible));
+        int changes = coverage.Count;
+        // Selection invalidation refreshes the view without changing the active source.
+        Find<ManifestTable>(form, to == "Manual" ? "Manifests" : to + "Manifests")
+            .AddFiles([new LocalManifestFile("candidate", @"C:\candidate", 1, DateTime.UtcNow)], check: true);
+        Assert.Equal(changes, coverage.Count);
+        form.Close();
+    });
+
     [Fact]
     public void SwitchingReferenceModeInvalidatesReferenceAndDownstreamButKeepsScan() => OnSta(() =>
     {

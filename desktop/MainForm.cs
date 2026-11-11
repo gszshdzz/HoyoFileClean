@@ -225,9 +225,7 @@ public sealed partial class MainForm : Form
         execute.Visible = session.Step == 2;
         next.Visible = session.Step < 3;
         skip.Enabled = execute.Enabled = !session.IsBusy;
-        manualReferencePage.Visible = manualSource.Checked;
-        localReferencePage.Visible = localSource.Checked;
-        networkReferencePage.Visible = networkSource.Checked;
+        ShowReferencePage(networkSource.Checked ? networkReferencePage : localSource.Checked ? localReferencePage : manualReferencePage);
         queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedIndex >= 0;
         getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
         parseNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkManifests.CheckedInputs.Length > 0;
@@ -249,6 +247,15 @@ public sealed partial class MainForm : Form
         comparisonResult.Text = "【左侧／A：游戏文件】\r\n" + scanOrigin + ResultText.Describe(session.Game, "游戏扫描")
             + "\r\n\r\n【右侧／B：参考清单】\r\n" + referenceOrigin + ResultText.Describe(session.Reference, "参考清单")
             + "\r\n\r\n【比较结果】\r\n" + reportOrigin + ResultText.Describe(session.Comparison);
+    }
+
+    private void ShowReferencePage(Panel target)
+    {
+        if (referenceModeContent.Controls.GetChildIndex(target) == 0 && target.Visible) return;
+        target.Visible = true;
+        target.BringToFront();
+        foreach (Control page in referenceModeContent.Controls)
+            if (page != target) page.Visible = false;
     }
 
     private static void SetInputsBusy(Control parent, bool busy)

@@ -305,10 +305,10 @@ public sealed class WizardTests
     });
 
     [Theory]
-    [InlineData("NetworkSource", "网络获取", false)]
-    [InlineData("LocalSource", "本地获取", false)]
-    [InlineData("ManualSource", "", true)]
-    public void ReferenceModesShowOnlyTheirOwnInterface(string mode, string placeholder, bool manual) => OnSta(() =>
+    [InlineData("NetworkSource", false)]
+    [InlineData("LocalSource", false)]
+    [InlineData("ManualSource", true)]
+    public void ReferenceModesShowOnlyTheirOwnInterface(string mode, bool manual) => OnSta(() =>
     {
         using var form = new MainForm
         {
@@ -323,7 +323,7 @@ public sealed class WizardTests
             name => Find<RadioButton>(form, name).Checked);
         Assert.Equal(manual, Find<DataGridView>(form, "Manifests").Visible);
         Assert.Equal(manual, Find<Label>(form, "ReferenceResult").Visible);
-        Assert.Equal(mode == "NetworkSource", Find<Label>(form, "ReferencePlaceholder").Visible);
+        Assert.Equal(mode == "NetworkSource", Find<DataGridView>(form, "NetworkManifests").Visible);
         Assert.Equal(mode == "LocalSource", Find<DataGridView>(form, "LocalManifests").Visible);
         if (mode == "LocalSource")
         {
@@ -337,9 +337,9 @@ public sealed class WizardTests
         Assert.Equal(manual, Find<Button>(form, "ParseManualReference").Visible);
         Assert.Empty(form.Controls.Find("ImportManualReference", true));
         Assert.False(Find<Button>(form, "Next").Enabled);
-        if (mode == "NetworkSource") Assert.Contains(placeholder + "暂未实现", Find<Label>(form, "ReferencePlaceholder").Text);
+        if (mode == "NetworkSource") Assert.Contains("不会自动联网", Find<Label>(form, "NetworkSummary").Text);
         Rectangle client = form.RectangleToScreen(form.ClientRectangle);
-        foreach (string name in new[] { "NetworkSource", "LocalSource", "ManualSource", manual ? "Manifests" : mode == "LocalSource" ? "LocalManifests" : "ReferencePlaceholder" })
+        foreach (string name in new[] { "NetworkSource", "LocalSource", "ManualSource", manual ? "Manifests" : mode == "LocalSource" ? "LocalManifests" : "NetworkManifests" })
         {
             Control control = Assert.Single(form.Controls.Find(name, true));
             Assert.True(client.Contains(control.RectangleToScreen(control.ClientRectangle)), name + " 超出窗口范围");
@@ -377,7 +377,7 @@ public sealed class WizardTests
         Assert.False(Find<Button>(form, "Next").Enabled);
         Find<RadioButton>(form, "ManualSource").Checked = true;
         Assert.Single(Find<DataGridView>(form, "Manifests").Rows.Cast<DataGridViewRow>());
-        Assert.True(Find<Button>(form, "ParseManualReference").Enabled);
+        Assert.False(Find<Button>(form, "ParseManualReference").Enabled, "保留行尚未勾选，不能解析");
         Assert.False(Find<Button>(form, "Next").Enabled);
         form.Close();
     });

@@ -9,7 +9,9 @@ public enum CoreErrorCode
     InputsRequired, ListJsonInvalid, ListHashModeInvalid, ListSummaryInvalid,
     InputConflict, ScopePathMissing, ReportJsonInvalid, ReportInputsMismatch, ReportContentMismatch,
     ScanDirectoryIsLink, ScanDirectoryMissing, ScanFileTypeChanged, ScanFileSizeChanged,
-    ExclusionPathInvalid, ExclusionOutsideRoot, DevicePathUnsupported, DirectoryIsLink, DirectoryMissing
+    ExclusionPathInvalid, ExclusionOutsideRoot, DevicePathUnsupported, DirectoryIsLink, DirectoryMissing,
+    ManifestNetworkMetadataInvalid, ManifestChannelUnavailable, ManifestDownloadMismatch,
+    ManifestNetworkSizeLimit, ManifestNetworkUnsupported, ManifestVersionUnavailable, ManifestPackageUnavailable
 }
 
 // Diagnostic data only. Front ends own wording, localization and recovery advice.

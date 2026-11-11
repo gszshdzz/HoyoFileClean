@@ -17,7 +17,7 @@ public sealed partial class MainForm
     private async Task ConvertAsync()
     {
         if (session.IsBusy) return;
-        ManifestTable table = localSource.Checked ? localManifests : manifests;
+        ManifestTable table = networkSource.Checked ? networkManifests : localSource.Checked ? localManifests : manifests;
         ReferenceInput[] inputs = table.CheckedInputs;
         if (inputs.Length == 0) { status.Text = "请先勾选需要解析的文件。"; return; }
         session.InvalidateReference();
@@ -40,7 +40,12 @@ public sealed partial class MainForm
                 : $"正在解析：已处理 {progress.Value:N0}/{inputs.Length:N0} 份文件…";
         };
         refreshProgress.Start();
-        await RunWorkAsync(() => referenceParser.Parse(inputs.Select(input => input.File.FullPath).ToArray(),
+        ReferenceParser parser = networkSource.Checked ? new ReferenceParser((path, token) =>
+        {
+            ReferenceInput input = inputs.Single(item => item.File.FullPath == path);
+            return NetworkManifestClient.Read(input.Remote!, input.Content!, token);
+        }) : referenceParser;
+        await RunWorkAsync(() => parser.Parse(inputs.Select(input => input.File.FullPath).ToArray(),
             cancellation.Token, progress: reporter), result =>
         {
             cancellation.Token.ThrowIfCancellationRequested();
@@ -222,11 +227,17 @@ public sealed partial class MainForm
     {
         CoreException { Code: CoreErrorCode.InputConflict } => "所选清单存在同侧冲突，请检查选择。",
         CoreException { Code: CoreErrorCode.OutputInsideScanRoot } => "程序临时目录不能位于扫描目录内，请调整程序位置或扫描范围。",
+        CoreException { Code: CoreErrorCode.ManifestChannelUnavailable or CoreErrorCode.ManifestVersionUnavailable } => "官方未提供所选区服／版本的清单，未改用最新版或其他区服。",
+        CoreException { Code: CoreErrorCode.ManifestDownloadMismatch } => "清单长度、压缩方式或 MD5 校验失败，请重新获取。",
+        CoreException { Code: CoreErrorCode.ManifestNetworkSizeLimit } => "网络清单或元数据超过大小上限。",
+        CoreException { Code: CoreErrorCode.ManifestNetworkMetadataInvalid or CoreErrorCode.ManifestNetworkUnsupported } => "官方清单元数据、地址或格式不受支持。",
         CoreException => "清单或路径无效，请检查所选文件。",
         FileNotFoundException => "所选文件不存在，请重新获取或添加。",
         DirectoryNotFoundException => "目录不存在，请检查目录。",
         UnauthorizedAccessException or System.Security.SecurityException => "没有访问权限，请检查程序及输入目录权限。",
         InvalidDataException => "部分文件无效或所选清单存在同侧冲突，请检查表格与选择。",
+        HttpRequestException => "官方网络请求失败，请检查网络或稍后重试。",
+        OperationCanceledException => "网络请求已取消或超时，请重试。",
         IOException => "文件读写失败，请检查目录、链接、文件占用及剩余空间。",
         ArgumentException or NotSupportedException => "目录或参数无效，请检查输入。",
         _ => "操作未完成，请检查输入后重试。"

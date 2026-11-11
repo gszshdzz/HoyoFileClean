@@ -25,7 +25,6 @@ public sealed partial class MainForm : Form
     private readonly RadioButton manualSource = new() { Name = "ManualSource", Text = "手动输入", AutoSize = true };
     private readonly Panel referenceModeContent = new() { Dock = DockStyle.Fill };
     private Panel manualReferencePage = null!;
-    private readonly Label referencePlaceholder = new() { Name = "ReferencePlaceholder", AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 12, 0, 0) };
     private readonly TextBox gameRoot = new() { Name = "GameRoot", Width = 570 };
     private readonly CheckBox heavy = new() { Text = "MD5 重扫（读取文件内容，耗时更长）", AutoSize = true, Name = "HeavyScan" };
     private readonly TextBox excludedDirectories = InputLines("ExcludedDirectories");
@@ -39,10 +38,12 @@ public sealed partial class MainForm : Form
 
     public MainForm() : this(new WizardSession()) { }
 
-    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null)
+    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null)
     {
         this.session = session;
         this.referenceParser = referenceParser ?? new ReferenceParser();
+        this.networkClient = networkClient ?? new NetworkManifestClient(networkHttp);
+        Disposed += (_, _) => networkHttp.Dispose();
         Text = "HoyoFileClean — 文件差异向导（删除仅演示）";
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
@@ -131,7 +132,8 @@ public sealed partial class MainForm : Form
         referenceModeContent.Controls.Add(manualReferencePage);
         localReferencePage = BuildLocalReferencePage();
         referenceModeContent.Controls.Add(localReferencePage);
-        referenceModeContent.Controls.Add(referencePlaceholder);
+        networkReferencePage = BuildNetworkReferencePage();
+        referenceModeContent.Controls.Add(networkReferencePage);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -148,6 +150,7 @@ public sealed partial class MainForm : Form
                 if (!option.Checked) return;
                 manifests.ResetResults();
                 localManifests.ResetResults();
+                networkManifests.ResetResults();
                 status.Text = "";
                 ReferenceChanged();
             };
@@ -228,12 +231,16 @@ public sealed partial class MainForm : Form
         skip.Enabled = execute.Enabled = !session.IsBusy;
         manualReferencePage.Visible = manualSource.Checked;
         localReferencePage.Visible = localSource.Checked;
-        referencePlaceholder.Visible = networkSource.Checked;
-        referencePlaceholder.Text = "网络获取暂未实现。请切换到“本地获取”查看启动器清单，或使用“手动输入”。";
-        parseManualReference.Enabled = !session.IsBusy && manualSource.Checked;
+        networkReferencePage.Visible = networkSource.Checked;
+        queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedIndex >= 0;
+        getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
+        parseNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkManifests.CheckedInputs.Length > 0;
+        networkVersion.Enabled = !session.IsBusy && customNetworkVersion.Checked;
+        parseManualReference.Enabled = !session.IsBusy && manualSource.Checked && manifests.CheckedInputs.Length > 0;
+        parseLocalReference.Enabled = !session.IsBusy && localSource.Checked && localManifests.CheckedInputs.Length > 0;
         if (session.Step == 0) skip.Enabled = execute.Enabled = !session.IsBusy && manualSource.Checked;
         if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
-        next.Enabled = session.CanAdvance && (session.Step != 0 || !networkSource.Checked);
+        next.Enabled = session.CanAdvance;
         close.Enabled = !session.IsBusy;
         cancelParsing.Visible = parsingCancellation is not null;
         cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };
@@ -254,7 +261,7 @@ public sealed partial class MainForm : Form
                 table.SetBusy(busy);
             else
             {
-                if (control is ButtonBase or ComboBox || control is TextBox { ReadOnly: false })
+                if (control is ButtonBase or ComboBox or ListBox || control is TextBox { ReadOnly: false })
                     control.Enabled = !busy;
                 SetInputsBusy(control, busy);
             }

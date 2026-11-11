@@ -99,6 +99,63 @@ public sealed class CliPresentationTests
         Assert.Equal(input, error.Path);
     }
 
+    [Theory]
+    [InlineData("--network")]
+    [InlineData("--network --game genshin --region china")]
+    [InlineData("--network --game genshin --version latest")]
+    [InlineData("--network --region china --version latest")]
+    [InlineData("--network --game genshin --region china --version 7.1")]
+    [InlineData("--network --game genshin --region china --version latest --version 7.1.0")]
+    public void NetworkConvertRequiresExplicitValidSelection(string arguments)
+    {
+        var result = Run(new[] { "convert", "unused.json" }.Concat(arguments.Split(' ')).ToArray());
+        Assert.Equal(2, result.Code);
+        Assert.Contains("--network", result.Output);
+        Assert.Empty(result.Error);
+    }
+
+    [Theory]
+    [InlineData("hk4e", "cn", "zh-cn")]
+    [InlineData("future-game", "future-region", "future-package")]
+    public void NetworkConvertRefusesExistingOutputBeforeConnecting(string game, string region, string package)
+    {
+        Directory.CreateDirectory(directory);
+        string output = Path.Combine(directory, "keep.json");
+        File.WriteAllText(output, "keep");
+        var result = Run(["convert", output, "--network", "--game", game, "--region", region, "--version", "latest", "--package", package]);
+        Assert.Equal(1, result.Code);
+        Assert.Contains("OutputExists", result.Error);
+        Assert.Equal("keep", File.ReadAllText(output));
+    }
+
+    [Fact]
+    public void NetworkUsageHasGenericPlaceholdersAndExamplesBelow()
+    {
+        string help = Run(["--help"]).Output;
+        string usage = Assert.Single(help.Split('\n'), line => line.Contains("convert <output.json> --network"));
+        Assert.Contains("--game <game> --region <region> --version <version>", usage);
+        Assert.Contains("--package <package>", usage);
+        Assert.DoesNotContain("hk4e", usage);
+        Assert.DoesNotContain("zh-cn", usage);
+        Assert.Contains("提示示例", help);
+    }
+
+    [Theory]
+    [InlineData("game")]
+    [InlineData("gamwe")]
+    public void NetworkConvertRejectsMoreThanOnePackageBeforeAnyWork(string secondPackage)
+    {
+        Directory.CreateDirectory(directory);
+        string output = Path.Combine(directory, "keep.json");
+        File.WriteAllText(output, "keep");
+        var result = Run(["convert", output, "--game", "hk4e", "--region", "cn", "--version", "latest",
+            "--package", "game", "--package", secondPackage, "--network"]);
+        Assert.Equal(2, result.Code);
+        Assert.Contains("--package 最多指定一次", result.Error);
+        Assert.DoesNotContain("OutputExists", result.Error);
+        Assert.Equal("keep", File.ReadAllText(output));
+    }
+
     private string WriteList(string name, string path, long size)
     {
         Directory.CreateDirectory(directory);

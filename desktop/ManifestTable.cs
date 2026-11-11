@@ -45,7 +45,7 @@ internal sealed class ManifestTable : DataGridView
         ColumnWidthChanged += (_, _) => PositionSelectAll();
         ColumnHeadersHeightChanged += (_, _) => PositionSelectAll();
         RowsAdded += (_, _) => { if (!updating) { RefreshSelectAll(); RebuildHourBands(); } };
-        RowsRemoved += (_, _) => { if (!updating) { RefreshSelectAll(); RebuildHourBands(); } };
+        RowsRemoved += (_, _) => { if (!updating) { RefreshSelectAll(); RebuildHourBands(); CheckedFilesChanged?.Invoke(); } };
         Sorted += (_, _) => { if (!updating) RebuildHourBands(); };
         CurrentCellDirtyStateChanged += (_, _) =>
         {
@@ -200,10 +200,31 @@ internal sealed class ManifestTable : DataGridView
             RebuildHourBands();
             ResumeLayout();
         }
+        CheckedFilesChanged?.Invoke();
     }
 
     internal ReferenceInput[] CheckedInputs => Rows.Cast<DataGridViewRow>()
         .Where(row => row.Cells[0].Value is true).Select(row => (ReferenceInput)row.Tag!).ToArray();
+
+    internal void AddNetworkFiles(IEnumerable<ReferenceInput> inputs, string game, string version)
+    {
+        DataGridViewRow[] rows = inputs.Select(input =>
+        {
+            var row = new DataGridViewRow { Tag = input };
+            row.CreateCells(this, input.Remote!.MatchingField == "game", input.File.Name, "—",
+                input.File.Size, "未解析", game, version);
+            return row;
+        }).ToArray();
+        updating = true;
+        try
+        {
+            Rows.AddRange(rows);
+            Sort(Columns["Name"]!, ListSortDirection.Ascending);
+            ClearSelection();
+        }
+        finally { updating = false; RefreshSelectAll(); }
+        CheckedFilesChanged?.Invoke();
+    }
 
     internal void ResetResults()
     {
@@ -238,4 +259,4 @@ internal sealed class ManifestTable : DataGridView
     }
 }
 
-internal sealed record ReferenceInput(LocalManifestFile File);
+internal sealed record ReferenceInput(LocalManifestFile File, RemoteManifest? Remote = null, byte[]? Content = null);

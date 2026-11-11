@@ -4,6 +4,11 @@ namespace HoyoFileClean.Desktop;
 
 internal static class ResultText
 {
+    internal static string DisplaySource(string source)
+        => Uri.TryCreate(source, UriKind.Absolute, out var url) && url.Scheme is "https" or "http"
+            ? new UriBuilder(url) { UserName = "", Password = "", Query = "", Fragment = "" }.Uri.AbsoluteUri
+            : source;
+
     internal static string DescribeGameStatus(FileListSnapshot snapshot, bool imported)
     {
         ScanScope scan = snapshot.Sources[0].Scan!;
@@ -25,7 +30,7 @@ internal static class ResultText
         foreach (FileListSource source in snapshot.Sources)
         {
             text.AppendLine();
-            text.AppendLine("来源：" + source.Path);
+            text.AppendLine("来源：" + DisplaySource(source.Path));
             text.AppendLine($"文件数：{source.FileCount:N0}；大小：{source.TotalSize:N0} 字节；哈希：{source.HashAlgorithm ?? "无（仅路径与大小）"}");
             if (source.Scan is { } scan)
             {

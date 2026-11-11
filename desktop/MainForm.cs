@@ -28,7 +28,6 @@ public sealed partial class MainForm : Form
     private readonly RadioButton manualSource = new() { Name = "ManualSource", Text = "手动输入", AutoSize = true };
     private readonly Panel referenceModeContent = new() { Dock = DockStyle.Fill };
     private Panel manualReferencePage = null!;
-    private readonly Label referencePlaceholder = new() { Name = "ReferencePlaceholder", AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 12, 0, 0) };
     private readonly TextBox gameRoot = new() { Name = "GameRoot", Width = 570 };
     private readonly CheckBox heavy = new() { Text = "MD5 重扫（读取文件内容，耗时更长）", AutoSize = true, Name = "HeavyScan" };
     private readonly TextBox comparisonResult = OutputBox("ComparisonResult");
@@ -39,10 +38,12 @@ public sealed partial class MainForm : Form
 
     public MainForm() : this(new WizardSession()) { }
 
-    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null)
+    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null)
     {
         this.session = session;
         this.referenceParser = referenceParser ?? new ReferenceParser();
+        this.networkClient = networkClient ?? new NetworkManifestClient(networkHttp);
+        Disposed += (_, _) => networkHttp.Dispose();
         Text = "HoyoFileClean — 文件差异向导（删除仅演示）";
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
@@ -127,7 +128,8 @@ public sealed partial class MainForm : Form
         referenceModeContent.Controls.Add(manualReferencePage);
         localReferencePage = BuildLocalReferencePage();
         referenceModeContent.Controls.Add(localReferencePage);
-        referenceModeContent.Controls.Add(referencePlaceholder);
+        networkReferencePage = BuildNetworkReferencePage();
+        referenceModeContent.Controls.Add(networkReferencePage);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -144,6 +146,7 @@ public sealed partial class MainForm : Form
                 if (!option.Checked) return;
                 manifests.ResetResults();
                 localManifests.ResetResults();
+                networkManifests.ResetResults();
                 ReferenceChanged();
             };
         }
@@ -182,7 +185,7 @@ public sealed partial class MainForm : Form
     {
         session.InvalidateReference();
         referenceOrigin = reportOrigin = "";
-        if (session.Step == 0) status.Text = "参考输入已变更，尚无有效结果，请重新解析。";
+        if (session.Step == 0) status.Text = networkSource.Checked ? DescribeNetworkInput() : "参考输入已变更，尚无有效结果，请重新解析。";
         differences.Render();
         RefreshView();
     }
@@ -204,7 +207,8 @@ public sealed partial class MainForm : Form
             displayedStep = session.Step;
             status.Text = session.Step switch
             {
-                0 => session.Reference is not null ? "参考清单已就绪，可核对后点击下一步。" : "请选择来源，获取并解析参考清单。",
+                0 => session.Reference is not null ? "参考清单已就绪，可核对后点击下一步。"
+                    : networkSource.Checked ? DescribeNetworkInput() : "请选择来源，获取并解析参考清单。",
                 1 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : "游戏扫描：尚无有效结果，请扫描或导入。",
                 2 => session.Comparison is not null ? "比较结果已就绪，可点击下一步查看差异。" : "请核对两侧摘要，再比较或导入报告。",
                 _ => "请核对差异与扫描范围；删除仅演示，不会删除或移动文件。"
@@ -223,11 +227,15 @@ public sealed partial class MainForm : Form
         skip.Enabled = execute.Enabled = !session.IsBusy;
         manualReferencePage.Visible = manualSource.Checked;
         localReferencePage.Visible = localSource.Checked;
-        referencePlaceholder.Visible = networkSource.Checked;
-        referencePlaceholder.Text = "网络获取暂未实现。请切换到“本地获取”查看启动器清单，或使用“手动输入”。";
-        parseManualReference.Enabled = !session.IsBusy && manualSource.Checked;
+        networkReferencePage.Visible = networkSource.Checked;
+        queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedIndex >= 0;
+        getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
+        parseNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkManifests.CheckedInputs.Length > 0;
+        networkVersion.Enabled = !session.IsBusy && customNetworkVersion.Checked;
+        parseManualReference.Enabled = !session.IsBusy && manualSource.Checked && manifests.CheckedInputs.Length > 0;
+        parseLocalReference.Enabled = !session.IsBusy && localSource.Checked && localManifests.CheckedInputs.Length > 0;
         if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
-        next.Enabled = session.CanAdvance && (session.Step != 0 || !networkSource.Checked);
+        next.Enabled = session.CanAdvance;
         close.Enabled = !session.IsBusy;
         cancelParsing.Visible = parsingCancellation is not null;
         cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };

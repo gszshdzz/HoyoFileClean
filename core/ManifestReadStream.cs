@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace HoyoFileClean;
 
 // Forward-only, non-owning wrappers: decoding stays bounded even when the parser skips fields.
@@ -20,9 +22,11 @@ internal abstract class ForwardReadStream : Stream
     }
 }
 
-internal sealed class ManifestReadStream(Stream input, long limit, CancellationToken cancellationToken) : ForwardReadStream
+internal sealed class ManifestReadStream(Stream input, long limit, CancellationToken cancellationToken,
+    long? expectedSize = null, string? expectedMd5 = null) : ForwardReadStream
 {
     private long consumed;
+    private readonly IncrementalHash? hash = expectedMd5 is null ? null : IncrementalHash.CreateHash(HashAlgorithmName.MD5);
 
     public override int Read(Span<byte> buffer)
     {
@@ -31,7 +35,22 @@ internal sealed class ManifestReadStream(Stream input, long limit, CancellationT
         int count = input.Read(buffer[..(int)Math.Min(buffer.Length, limit - consumed + 1)]);
         consumed += count;
         if (consumed > limit) throw new CoreException(CoreErrorCode.ManifestDecodedSizeLimit);
+        hash?.AppendData(buffer[..count]);
         return count;
+    }
+
+    internal void ValidateContent()
+    {
+        if (expectedSize is not null && consumed != expectedSize)
+            throw new CoreException(CoreErrorCode.ManifestDownloadMismatch);
+        if (hash is not null && !Convert.ToHexString(hash.GetHashAndReset()).Equals(expectedMd5, StringComparison.OrdinalIgnoreCase))
+            throw new CoreException(CoreErrorCode.ManifestDownloadMismatch);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) hash?.Dispose();
+        base.Dispose(disposing);
     }
 }
 

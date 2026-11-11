@@ -131,7 +131,8 @@ public static class FileComparer
 
     internal static FileListSnapshot FromFiles(string source, IReadOnlyList<ManifestFile> files,
         long totalSize, string? hashAlgorithm, ScanScope? scan = null, CancellationToken cancellationToken = default)
-        => ReadLists([source], _ => new FileList(files.Count, totalSize, files.ToList(), hashAlgorithm, scan), cancellationToken);
+        => ReadLists([source], _ => new FileList(files.Count, totalSize, files.ToList(), hashAlgorithm, scan), cancellationToken,
+            preserveSource: true);
 
     public static FileListSnapshot Combine(IEnumerable<FileListSnapshot> snapshots, CancellationToken cancellationToken = default)
     {
@@ -184,9 +185,9 @@ public static class FileComparer
     }
 
     private static FileListSnapshot ReadLists(IEnumerable<string> paths, Func<string, FileList> read,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool preserveSource = false)
     {
-        string[] inputs = paths.Select(Path.GetFullPath).ToArray();
+        string[] inputs = preserveSource ? paths.ToArray() : paths.Select(Path.GetFullPath).ToArray();
         if (inputs.Length == 0)
         {
             throw new CoreException(CoreErrorCode.InputsRequired);

@@ -19,6 +19,8 @@ internal static class CliOutput
 
     public static void Saved(string path) => Console.WriteLine($"输出：{Path.GetFullPath(path)}");
 
+    public static void ArgumentError(string message) => Console.Error.WriteLine("参数错误：" + message);
+
     public static void Error(Exception error)
     {
         string message = error is CoreException core ? Describe(core.Code) : error switch
@@ -30,6 +32,8 @@ internal static class CliOutput
             NotSupportedException => "路径格式或操作不受支持。",
             System.Security.Cryptography.CryptographicException => "计算文件哈希失败。",
             InvalidDataException => "输入数据无效。",
+            HttpRequestException => "官方网络请求失败，请检查网络或稍后重试。",
+            OperationCanceledException => "网络操作已取消或超时。",
             IOException => "文件读写或结果发布失败；请检查路径、文件占用和可用空间。",
             _ => "处理失败。"
         };
@@ -37,8 +41,8 @@ internal static class CliOutput
         if (error is CoreException details)
         {
             Console.Error.WriteLine("错误代码：" + details.Code);
-            if (details.Path is not null) Console.Error.WriteLine("路径：" + details.Path);
-            if (details.Input is not null) Console.Error.WriteLine("输入：" + details.Input);
+            if (details.Path is not null) Console.Error.WriteLine("路径：" + DisplaySource(details.Path));
+            if (details.Input is not null) Console.Error.WriteLine("输入：" + DisplaySource(details.Input));
         }
         else
         {
@@ -46,6 +50,11 @@ internal static class CliOutput
             Console.Error.WriteLine($"诊断代码：0x{error.HResult:X8}");
         }
     }
+
+    private static string DisplaySource(string source)
+        => Uri.TryCreate(source, UriKind.Absolute, out var url) && url.Scheme is "https" or "http"
+            ? new UriBuilder(url) { UserName = "", Password = "", Query = "", Fragment = "" }.Uri.AbsoluteUri
+            : source;
 
     private static string Describe(CoreErrorCode code) => code switch
     {
@@ -79,19 +88,29 @@ internal static class CliOutput
         CoreErrorCode.DevicePathUnsupported => "扫描不支持此设备卷路径，请使用普通盘符或 UNC 路径。",
         CoreErrorCode.DirectoryIsLink => "目录路径包含链接或重解析点，已停止。",
         CoreErrorCode.DirectoryMissing => "路径不是目录。",
+        CoreErrorCode.ManifestNetworkMetadataInvalid => "官方清单元数据无效。",
+        CoreErrorCode.ManifestChannelUnavailable => "官方接口未提供所选游戏、区服或版本的清单。",
+        CoreErrorCode.ManifestVersionUnavailable => "官方返回版本与指定版本不符，未改用其他版本。",
+        CoreErrorCode.ManifestPackageUnavailable => "所选版本没有指定的资源包。",
+        CoreErrorCode.ManifestDownloadMismatch => "清单下载长度、压缩方式或 MD5 不符。",
+        CoreErrorCode.ManifestNetworkSizeLimit => "网络清单或元数据超过大小上限。",
+        CoreErrorCode.ManifestNetworkUnsupported => "清单地址或格式不受支持；仅允许官方 HTTPS 清单。",
         _ => "处理失败，核心返回了未识别的错误代码。"
     };
 
     public static void Usage()
     {
         Console.WriteLine("用法：HoyoFileClean convert <manifest> <output.json>");
+        Console.WriteLine("      HoyoFileClean convert <output.json> --network --game <game> --region <region> --version <version> [--package <package>]");
         Console.WriteLine("      HoyoFileClean scan <root> <output.json> [--hash] [--exclude-dir <path> ...] [--exclude-file <path> ...]");
         Console.WriteLine("      HoyoFileClean compare <output.json> --a <list.json> ... --b <list.json> ...");
         Console.WriteLine("支持本地 Sophon 构建清单，程序自动识别输入，无需手动处理。");
         Console.WriteLine("默认轻扫只读路径和大小；--hash 复用列表计算 MD5，交互终端低频刷新进度。");
         Console.WriteLine("排除选项可跟多个路径，也可重复；路径相对扫描根目录，或为根目录内的绝对路径，不支持通配符。");
         Console.WriteLine("scan 只读、不跟随链接，输出必须在扫描根目录之外；所有命令均不覆盖已有输出。");
-        Console.WriteLine("convert 只转换当前清单，不访问游戏目录、不联网。");
+        Console.WriteLine("convert 默认转换本地清单；--network 仅连接官方服务器，游戏、区服、版本必填，默认只转本体；--package 最多指定一次。不访问游戏目录。");
+        Console.WriteLine("网络参数使用官方返回的游戏／区服标识与资源包 matching_field；未知值会请求官方查询，不使用固定可选值名单。");
+        Console.WriteLine("提示示例（不是限制）：原神 --game hk4e --region cn；国际服 --region global；语音包 --package zh-cn。版本可用 latest 或三段版本号。");
         Console.WriteLine("compare 两侧平等，均可输入多份清单；差异正常输出，同一侧冲突报错，不移动文件。");
     }
 }

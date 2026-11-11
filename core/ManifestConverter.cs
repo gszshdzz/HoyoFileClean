@@ -49,12 +49,22 @@ public static class ManifestConverter
         isJson = false;
         cancellationToken.ThrowIfCancellationRequested();
         using var input = File.OpenRead(inputPath);
+        return Read(input, Path.GetFullPath(inputPath), out isJson, cancellationToken);
+    }
+
+    internal static FileListSnapshot Read(Stream input, string inputPath, out bool isJson,
+        CancellationToken cancellationToken, long? decodedSize = null, string? decodedMd5 = null,
+        bool? expectedCompression = null)
+    {
+        isJson = false;
         Span<byte> header = stackalloc byte[4];
         int headerLength = input.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
         input.Position = 0;
         bool compressed = headerLength == 4
             && (header.SequenceEqual(new byte[] { 0x28, 0xb5, 0x2f, 0xfd })
                 || (header[0] is >= 0x50 and <= 0x5f && header[1] == 0x2a && header[2] == 0x4d && header[3] == 0x18));
+        if (expectedCompression is not null && compressed != expectedCompression)
+            throw new CoreException(CoreErrorCode.ManifestDownloadMismatch, inputPath);
         if (compressed && input.Length > MaxCompressedSize)
         {
             throw new CoreException(CoreErrorCode.ManifestCompressedSizeLimit, inputPath);
@@ -65,7 +75,7 @@ public static class ManifestConverter
             {
                 input.Position = 0;
                 return new PrefixReadStream(Stream.Null, input);
-            });
+            }, decodedSize, decodedMd5, allowJson: expectedCompression is null);
         }
         try
         {
@@ -74,7 +84,7 @@ public static class ManifestConverter
             {
                 input.Position = 0;
                 return new DecompressionStream(input);
-            });
+            }, decodedSize, decodedMd5, allowJson: expectedCompression is null);
         }
         catch (Exception error) when (error is ZstdException or EndOfStreamException)
         {
@@ -83,20 +93,22 @@ public static class ManifestConverter
     }
 
     private static FileListSnapshot ReadDecoded(Stream decoded, string inputPath, out bool isJson,
-        CancellationToken cancellationToken, Func<Stream> replayDecoded)
+        CancellationToken cancellationToken, Func<Stream> replayDecoded,
+        long? decodedSize = null, string? decodedMd5 = null, bool allowJson = true)
     {
-        using var limited = new ManifestReadStream(decoded, MaxDecodedSize, cancellationToken);
-        try { return ReadContent(limited, inputPath, out isJson, cancellationToken, replayDecoded); }
+        using var limited = new ManifestReadStream(decoded, MaxDecodedSize, cancellationToken, decodedSize, decodedMd5);
+        try { return ReadContent(limited, inputPath, out isJson, cancellationToken, replayDecoded, allowJson); }
         finally
         {
             // Preserve the original decode-limit/invalid-compression precedence even if parsing
             // rejects an early byte. Draining does not retain any decoded content.
             limited.CopyTo(Stream.Null);
+            limited.ValidateContent();
         }
     }
 
     private static FileListSnapshot ReadContent(Stream limited, string inputPath, out bool isJson,
-        CancellationToken cancellationToken, Func<Stream> replayDecoded)
+        CancellationToken cancellationToken, Func<Stream> replayDecoded, bool allowJson)
     {
         isJson = false;
         // Probe only format-leading bytes. Replay them for protobuf; strip only a JSON BOM.
@@ -130,6 +142,7 @@ public static class ManifestConverter
             .SequenceEqual(new byte[] { 0xef, 0xbb, 0xbf }) ? 3 : 0;
         if (first == (byte)'{')
         {
+            if (!allowJson) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported, inputPath);
             isJson = true;
             // JSON does not need its leading whitespace replayed.
             if (prefixOverflow)

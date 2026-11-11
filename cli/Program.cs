@@ -12,6 +12,20 @@ try
     switch (args[0])
     {
         case "convert":
+            if (args.Contains("--network", StringComparer.Ordinal))
+            {
+                if (!NetworkConvertOptions.TryParse(args, out var options, out string? argumentError))
+                {
+                    if (argumentError is not null) CliOutput.ArgumentError(argumentError);
+                    PrintUsage();
+                    return 2;
+                }
+                using HttpClient http = NetworkManifestClient.CreateHttpClient();
+                CliOutput.Conversion(await new NetworkManifestClient(http).ConvertAsync(options!.Game, options.Region,
+                    options.Version, options.OutputPath, options.Package is { } package ? [package] : null));
+                CliOutput.Saved(options.OutputPath);
+                return 0;
+            }
             if (args.Length != 3)
             {
                 PrintUsage();
@@ -145,6 +159,7 @@ try
     return 0;
 }
 catch (Exception error) when (error is CoreException or IOException or InvalidDataException
+    or HttpRequestException or OperationCanceledException
     or UnauthorizedAccessException or ArgumentException or NotSupportedException
     or System.Security.SecurityException or System.Security.Cryptography.CryptographicException)
 {

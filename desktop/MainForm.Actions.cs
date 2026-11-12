@@ -86,8 +86,7 @@ public sealed partial class MainForm
         scanOrigin = reportOrigin = "";
         ResetScanProgress();
         scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Marquee;
-        scanFileStatus.Text = "文件数量：正在枚举，总数尚未知…";
-        scanByteStatus.Text = "文件大小：正在枚举，总大小尚未知…";
+        scanProgressPanel.Visible = true;
         await RunWorkAsync(() =>
         {
             return DirectoryScanner.Scan(root, dirs, files, hashes,
@@ -102,11 +101,10 @@ public sealed partial class MainForm
 
     private void StopScanProgress()
     {
+        scanProgressPanel.Visible = false;
         scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Continuous;
         if (session.Game is not null) return;
         scanFileProgress.Value = scanByteProgress.Value = 0;
-        scanFileStatus.Text = "文件数量：未完成，结果不可用";
-        scanByteStatus.Text = "文件大小：未完成，结果不可用";
     }
 
     private async Task ImportGameAsync()
@@ -125,8 +123,6 @@ public sealed partial class MainForm
         }, result =>
         {
             session.AcceptGame(result, root);
-            scanFileStatus.Text = $"文件数量：历史记录 {result.FileCount:N0} 个（未扫描）";
-            scanByteStatus.Text = $"文件大小：历史记录 {result.TotalSize:N0} 字节（未读取）";
             scanOrigin = "已导入历史扫描 JSON；未重新扫描，也不证明目录当前状态未变化。模式与范围来自记录。\r\n";
         }, "正在校验扫描 JSON 与指定目录…");
     }

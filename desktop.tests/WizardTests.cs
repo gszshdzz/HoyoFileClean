@@ -96,7 +96,7 @@ public sealed class WizardTests
         {
             Assert.True(list.Height > 30, string.Join(" / ", Ancestors(list).Select(c => $"{c.GetType().Name}:{c.Size}")));
             Assert.True(list.RectangleToScreen(list.ClientRectangle).Bottom <=
-                Find<ProgressBar>(form, "ScanFileProgress").RectangleToScreen(Rectangle.Empty).Top);
+                Find<Label>(form, "Status").RectangleToScreen(Rectangle.Empty).Top);
         }
         DragEventArgs Raise(ListBox list, string method, params string[] paths)
         {
@@ -391,7 +391,7 @@ public sealed class WizardTests
         string[] controls = step switch
         {
             0 => ["Manifests", "ReferenceResult", "Next", "ParseManualReference"],
-            1 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "ScanFileProgress", "ScanByteProgress", "Next", "ReadGame"],
+            1 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "Next", "ReadGame"],
             2 => ["ComparisonResult", "Next", "Execute"],
             _ => ["GameTree", "ReferenceTree", "ConfirmSelection", "DemonstrateDelete"]
         };
@@ -1514,6 +1514,78 @@ public sealed class WizardTests
     }
 
     [Fact]
+    public void ScanProgressIsHiddenBeforeReadingAndWhileImporting() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        session.Next();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Assert.False(Find<ProgressBar>(form, "ScanFileProgress").Visible);
+        Assert.False(Find<ProgressBar>(form, "ScanByteProgress").Visible);
+        Find<RadioButton>(form, "ImportGameSource").Checked = true;
+        Assert.False(Find<ProgressBar>(form, "ScanFileProgress").Visible);
+        Assert.False(Find<ProgressBar>(form, "ScanByteProgress").Visible);
+    });
+
+    [Theory]
+    [InlineData(false, 650)]
+    [InlineData(true, 650)]
+    [InlineData(false, 1000)]
+    [InlineData(true, 1000)]
+    public void ScanProgressOnlyShowsDuringScanningWithoutDuplicateCounters(bool hashes, int height) => OnSta(() =>
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "file"), "abc");
+        WizardSession session = Ready();
+        session.Next();
+        using var form = new MainForm(session)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false,
+            Size = new Size(800, height)
+        };
+        form.Show();
+        Find<TextBox>(form, "GameRoot").Text = directory;
+        Find<CheckBox>(form, "HeavyScan").Checked = hashes;
+        ProgressBar file = Find<ProgressBar>(form, "ScanFileProgress"), bytes = Find<ProgressBar>(form, "ScanByteProgress");
+        Button scan = Find<Button>(form, "ReadGame");
+        int busyChecks = 0;
+        bool fileVisible = false, bytesVisible = false, barsFit = false, listsFit = false;
+        string[] labels = [];
+        scan.EnabledChanged += (_, _) =>
+        {
+            if (scan.Enabled) return;
+            busyChecks++;
+            fileVisible = file.Visible;
+            bytesVisible = bytes.Visible;
+            labels = file.Parent!.Controls.OfType<Label>().Select(label => label.Text).ToArray();
+            Rectangle client = form.RectangleToScreen(form.ClientRectangle);
+            barsFit = new[] { file, bytes }.All(bar => client.Contains(bar.RectangleToScreen(bar.ClientRectangle)));
+            listsFit = new[] { "ExcludedDirectories", "ExcludedFiles" }.All(name =>
+                Find<ListBox>(form, name).RectangleToScreen(Find<ListBox>(form, name).ClientRectangle).Bottom <=
+                file.RectangleToScreen(Rectangle.Empty).Top);
+        };
+        scan.PerformClick();
+        WaitForPageWork(form, session, "ReadGame");
+        Assert.Equal(1, busyChecks);
+        Assert.True(fileVisible);
+        Assert.True(bytesVisible);
+        Assert.True(barsFit);
+        Assert.True(listsFit);
+        Assert.Equal(new[] { "文件数量", "文件大小" }, labels);
+        Assert.NotNull(session.Game);
+        Assert.False(file.Visible);
+        Assert.False(bytes.Visible);
+        Assert.Contains(hashes ? "MD5 重扫完成" : "轻扫（未校验内容）完成", Find<Label>(form, "Status").Text);
+        Find<Button>(form, "Back").PerformClick();
+        Find<Button>(form, "Next").PerformClick();
+        Assert.False(file.Visible);
+        Assert.False(bytes.Visible);
+    });
+
+    [Fact]
     public void FailedRescanClearsBothPreviousCompletedBars() => OnSta(() =>
     {
         Directory.CreateDirectory(directory);
@@ -1534,6 +1606,8 @@ public sealed class WizardTests
         WaitForPageWork(form, session, "ReadGame");
         Assert.Equal(100, Find<ProgressBar>(form, "ScanFileProgress").Value);
         Assert.Equal(100, Find<ProgressBar>(form, "ScanByteProgress").Value);
+        Assert.False(Find<ProgressBar>(form, "ScanFileProgress").Visible);
+        Assert.False(Find<ProgressBar>(form, "ScanByteProgress").Visible);
         Directory.Move(root, root + "-moved");
         scan.PerformClick();
         WaitForPageWork(form, session, "ReadGame");
@@ -1541,6 +1615,8 @@ public sealed class WizardTests
         Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
         Assert.Equal(0, Find<ProgressBar>(form, "ScanFileProgress").Value);
         Assert.Equal(0, Find<ProgressBar>(form, "ScanByteProgress").Value);
+        Assert.False(Find<ProgressBar>(form, "ScanFileProgress").Visible);
+        Assert.False(Find<ProgressBar>(form, "ScanByteProgress").Visible);
         form.Close();
     });
 
@@ -1626,6 +1702,12 @@ public sealed class WizardTests
         Find<RadioButton>(form, "ImportGameSource").Checked = true;
         Find<TextBox>(form, "GameRoot").Text = root;
         Find<TextBox>(form, "GameJson").Text = Path.Combine(directory, "game.json");
+        bool showedScanProgress = false;
+        foreach (string name in new[] { "ScanFileProgress", "ScanByteProgress" })
+        {
+            ProgressBar bar = Find<ProgressBar>(form, name);
+            bar.VisibleChanged += (_, _) => showedScanProgress |= bar.Visible;
+        }
         Find<Button>(form, "ReadGame").PerformClick();
         WaitForPageWork(form, session, "ReadGame");
         Assert.NotNull(session.Game);
@@ -1637,6 +1719,8 @@ public sealed class WizardTests
         Assert.Contains("已导入历史扫描", status.Text);
         Assert.Contains("未重新扫描", status.Text);
         Assert.Equal(0, Find<ProgressBar>(form, "ScanFileProgress").Value);
+        Assert.False(Find<ProgressBar>(form, "ScanFileProgress").Visible);
+        Assert.False(Find<ProgressBar>(form, "ScanByteProgress").Visible);
         Find<TextBox>(form, "GameJson").Text = Path.Combine(directory, "missing.json");
         Find<Button>(form, "ReadGame").PerformClick();
         WaitForPageWork(form, session, "ReadGame");
@@ -1647,6 +1731,7 @@ public sealed class WizardTests
         Find<Button>(form, "Next").PerformClick();
         Assert.Contains("尚无有效结果", status.Text);
         Assert.DoesNotContain("已导入历史扫描", status.Text);
+        Assert.False(showedScanProgress);
         form.Close();
     });
 

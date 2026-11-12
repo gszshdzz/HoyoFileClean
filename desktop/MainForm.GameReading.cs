@@ -14,8 +14,8 @@ public sealed partial class MainForm
     private readonly ListBox excludedFiles = new() { Name = "ExcludedFiles", Dock = DockStyle.Fill, SelectionMode = SelectionMode.MultiExtended, HorizontalScrollbar = true, IntegralHeight = false };
     private readonly ProgressBar scanFileProgress = new() { Name = "ScanFileProgress", Dock = DockStyle.Fill };
     private readonly ProgressBar scanByteProgress = new() { Name = "ScanByteProgress", Dock = DockStyle.Fill };
-    private readonly Label scanFileStatus = Note("文件数量：尚未读取");
-    private readonly Label scanByteStatus = Note("文件大小：尚未读取");
+    private readonly TableLayoutPanel scanProgressPanel = new() { Dock = DockStyle.Top, AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 2, Visible = false };
     private Panel scanOptions = null!;
     private TableLayoutPanel gameJsonRow = null!;
     private readonly Button readGame = MakeButton("扫描", "ReadGame");
@@ -57,10 +57,10 @@ public sealed partial class MainForm
         lists.Controls.Add(BuildExclusionEditor(false), 1, 0);
         scanOptions = new Panel { Dock = DockStyle.Fill };
         scanOptions.Controls.Add(GameReadingRows([options, lists], 1));
+        Label scanFileStatus = Note("文件数量"), scanByteStatus = Note("文件大小");
         scanFileStatus.Padding = scanByteStatus.Padding = Padding.Empty;
         scanFileStatus.Margin = scanByteStatus.Margin = Padding.Empty;
-        var results = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 2 };
+        TableLayoutPanel results = scanProgressPanel;
         results.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         results.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         results.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -260,10 +260,9 @@ public sealed partial class MainForm
 
     private void ResetScanProgress()
     {
+        scanProgressPanel.Visible = false;
         scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Continuous;
         scanFileProgress.Value = scanByteProgress.Value = 0;
-        scanFileStatus.Text = "文件数量：尚未读取";
-        scanByteStatus.Text = "文件大小：尚未读取";
     }
 
     private void ShowScanProgress(ScanProgress value)
@@ -271,7 +270,5 @@ public sealed partial class MainForm
         scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Continuous;
         scanFileProgress.Value = value.TotalFiles == 0 ? 100 : (int)Math.Clamp(100.0 * value.CompletedFiles / value.TotalFiles, 0, 100);
         scanByteProgress.Value = value.TotalBytes == 0 ? scanFileProgress.Value : (int)Math.Clamp(100.0 * value.ProcessedBytes / value.TotalBytes, 0, 100);
-        scanFileStatus.Text = $"文件数量：{value.CompletedFiles:N0} / {value.TotalFiles:N0}";
-        scanByteStatus.Text = $"文件大小：{value.ProcessedBytes:N0} / {value.TotalBytes:N0} 字节";
     }
 }

@@ -19,9 +19,9 @@ public sealed class NetworkTimingTests
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(15));
                 long start = Stopwatch.GetTimestamp();
-                var games = await network.GetGameVersionsAsync(service.Channel, cancellationToken: timeout.Token);
+                var games = await network.GetGameVersionsAsync(service, cancellationToken: timeout.Token);
                 Assert.NotEmpty(games);
-                Console.WriteLine($"{service.Name} pass {pass}: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms, {games.Count} branches");
+                Console.WriteLine($"{service.Id} pass {pass}: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms, {games.Count} branches");
             }
         }
     }
@@ -68,7 +68,8 @@ public sealed class NetworkTimingTests
         for (int pass = 1; pass <= 2; pass++)
         {
             long start = Stopwatch.GetTimestamp();
-            RemoteManifestCatalog catalog = await network.GetCatalogAsync(GenshinChannel.China, TestContext.Current.CancellationToken);
+            NetworkService service = NetworkManifestClient.Services.Single(item => item.Id == "china");
+            RemoteManifestCatalog catalog = await network.GetCatalogAsync(service, "hk4e_cn", TestContext.Current.CancellationToken);
             Console.WriteLine($"pass {pass} catalog total: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms");
             start = Stopwatch.GetTimestamp();
             foreach (RemoteManifest manifest in catalog.Manifests)

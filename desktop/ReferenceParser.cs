@@ -6,8 +6,8 @@ internal sealed record ReferenceParseBatch(ReferenceParseItem[] Items, FileListS
 // Workers merge each file immediately. Failed batches retain summaries, not parsed file lists.
 internal sealed class ReferenceParser
 {
-    internal const int DefaultConcurrency = 1;
-    internal const int MaximumConcurrency = 128;
+    internal const int DefaultConcurrency = Maintenance.DefaultParsingConcurrency;
+    internal const int MaximumConcurrency = Maintenance.MaximumParsingConcurrency;
     private readonly Func<string, CancellationToken, FileListSnapshot> read;
 
     public ReferenceParser() : this(ManifestConverter.Read) { }

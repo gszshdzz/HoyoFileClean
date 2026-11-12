@@ -10,6 +10,8 @@ namespace HoyoFileClean.Tests;
 
 public sealed class NetworkManifestTests
 {
+    private static NetworkService China => NetworkManifestClient.Services.Single(service => service.Id == "china");
+    private static NetworkService Global => NetworkManifestClient.Services.Single(service => service.Id == "global");
     private const string Cdn = "https://autopatchcn.yuanshen.com/test/manifest";
     private static byte[] Payload(string path = "Data/file") => new SophonManifestProto
     {
@@ -42,13 +44,102 @@ public sealed class NetworkManifestTests
     private static HttpResponseMessage Json(string text) => Bytes(Encoding.UTF8.GetBytes(text));
 
     [Theory]
+    [InlineData("{\"retcode\":1}")]
+    [InlineData("{\"retcode\":1,\"data\":{}}")]
+    public async Task OfficialErrorDoesNotRequireSuccessPayload(string response)
+    {
+        using HttpClient http = Client(_ => Json(response));
+        CoreException error = await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http)
+            .GetGameVersionsAsync(China, TestContext.Current.CancellationToken));
+        Assert.Equal(CoreErrorCode.ManifestChannelUnavailable, error.Code);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("{\"game_branches\":null}")]
+    [InlineData("{\"game_branches\":[null]}")]
+    [InlineData("{\"game_branches\":[{\"game\":null}]}")]
+    public async Task InvalidTypedBranchPayloadUsesStructuredError(string data)
+    {
+        using HttpClient http = Client(_ => Json("{\"retcode\":0,\"data\":" + data + "}"));
+        CoreException error = await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http)
+            .GetGameVersionsAsync(China, TestContext.Current.CancellationToken));
+        Assert.Equal(CoreErrorCode.ManifestNetworkMetadataInvalid, error.Code);
+    }
+
+    [Theory]
+    [InlineData("http://future.example/branches", "https://future.example/build")]
+    [InlineData("https://future.example/branches", "http://future.example/build")]
+    [InlineData("https://future.example:444/branches", "https://future.example/build")]
+    [InlineData("https://future.example/branches?launcher_id=old", "https://future.example/build")]
+    public async Task InvalidServiceObjectDoesNotSend(string branchUrl, string buildUrl)
+    {
+        var service = new NetworkService("future", "Future", new Uri(branchUrl), new Uri(buildUrl), "launcher");
+        using HttpClient http = Client(_ => throw new InvalidOperationException("Must not send"));
+        CoreException error = await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http)
+            .GetGameVersionsAsync(service, TestContext.Current.CancellationToken));
+        Assert.Equal(CoreErrorCode.NetworkConfigurationInvalid, error.Code);
+    }
+
+    [Theory]
+    [InlineData("opaque")]
+    [InlineData("game_with_many_region_parts")]
+    public async Task ArbitraryServicePreservesRawIdentityAndRequiresExplicitBranch(string biz)
+    {
+        var service = new NetworkService("future", "Future", new Uri("https://future.example/branches"),
+            new Uri("https://future.example/build"), "a&b");
+        int builds = 0;
+        using HttpClient http = Client(request =>
+        {
+            Assert.Equal("future.example", request.RequestUri!.Host);
+            if (request.RequestUri.AbsolutePath == "/branches")
+            {
+                Assert.Equal("?launcher_id=a%26b", request.RequestUri.Query);
+                return Json("""
+                    {"retcode":0,"data":{"game_branches":[
+                    {"game":{"id":"first","biz":"BIZ"},"main":{"tag":"1.0.0","branch":"main","password":"p","package_id":"one"}},
+                    {"game":{"id":"second","biz":"BIZ"},"main":{"tag":"1.0.0","branch":"main","password":"p","package_id":"two"}}]}}
+                    """.Replace("BIZ", biz));
+            }
+            builds++;
+            Assert.Contains("package_id=two", request.RequestUri.Query);
+            return Json(CatalogJson());
+        });
+        var network = new NetworkManifestClient(http);
+        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(service, TestContext.Current.CancellationToken);
+        Assert.All(games, game => Assert.Equal(biz, game.Game.Biz));
+        Assert.Equal(new[] { "first", "second" }, games.Select(game => game.Id));
+        CoreException error = await Assert.ThrowsAsync<CoreException>(() => network.GetCatalogAsync(service, biz, TestContext.Current.CancellationToken));
+        Assert.Equal(CoreErrorCode.ManifestGameAmbiguous, error.Code);
+        Assert.Equal(0, builds);
+        await Assert.ThrowsAsync<CoreException>(() => network.GetCatalogAsync(service, biz, TestContext.Current.CancellationToken, gameId: "missing"));
+        Assert.Equal(0, builds);
+        await network.GetCatalogAsync(service, biz, TestContext.Current.CancellationToken, gameId: "second");
+        Assert.Equal(1, builds);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task MissingPackageDoesNotRequestOrWrite(string? package)
+    {
+        using HttpClient http = Client(_ => throw new InvalidOperationException("Must not send"));
+        string output = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Temp", "opencode", Guid.NewGuid().ToString("N") + ".json");
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => new NetworkManifestClient(http)
+            .ConvertAsync(China, "hk4e_cn", null, output, package!, TestContext.Current.CancellationToken));
+        Assert.False(File.Exists(output));
+    }
+
+    [Theory]
     [InlineData("\"9223372036854775808\"")]
     [InlineData("9223372036854775808")]
     public async Task OverflowingBranchRetcodeIsReportedAsInvalidMetadata(string retcode)
     {
         using HttpClient http = Client(_ => Json("{\"retcode\":" + retcode + ",\"data\":{\"game_branches\":[]}}"));
         CoreException error = await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http)
-            .GetGamesAsync(GenshinChannel.China, TestContext.Current.CancellationToken));
+            .GetGamesAsync(China, TestContext.Current.CancellationToken));
         Assert.Equal(CoreErrorCode.ManifestNetworkMetadataInvalid, error.Code);
     }
 
@@ -130,7 +221,7 @@ public sealed class NetworkManifestTests
         using HttpClient http = Client(_ => throw new InvalidOperationException("Must not send"));
         using var cancel = new CancellationTokenSource();
         cancel.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new NetworkManifestClient(http).GetCatalogAsync(GenshinChannel.China, cancel.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new NetworkManifestClient(http).GetCatalogAsync(China, "hk4e_cn", cancel.Token));
     }
 
     private sealed class ForwardStream(byte[] bytes, Action? beforeRead = null) : Stream
@@ -207,9 +298,9 @@ public sealed class NetworkManifestTests
     }
 
     [Theory]
-    [InlineData(GenshinChannel.China, "hk4e_cn", "hyp-api.mihoyo.com", "api-takumi.mihoyo.com")]
-    [InlineData(GenshinChannel.Global, "hk4e_global", "sg-hyp-api.hoyoverse.com", "sg-public-api.hoyoverse.com")]
-    public async Task CatalogSelectsGameAndCurrentBranch(GenshinChannel channel, string biz, string host, string buildHost)
+    [InlineData("china", "hk4e_cn", "hyp-api.mihoyo.com", "api-takumi.mihoyo.com")]
+    [InlineData("global", "hk4e_global", "sg-hyp-api.hoyoverse.com", "sg-public-api.hoyoverse.com")]
+    public async Task CatalogSelectsGameAndCurrentBranch(string serviceId, string biz, string host, string buildHost)
     {
         int requests = 0;
         using HttpClient http = Client(request =>
@@ -229,7 +320,8 @@ public sealed class NetworkManifestTests
             Assert.Contains("tag=1.0.0", request.RequestUri.Query);
             return Json(CatalogJson());
         });
-        RemoteManifestCatalog catalog = await new NetworkManifestClient(http).GetCatalogAsync(channel, TestContext.Current.CancellationToken);
+        NetworkService service = NetworkManifestClient.Services.Single(item => item.Id == serviceId);
+        RemoteManifestCatalog catalog = await new NetworkManifestClient(http).GetCatalogAsync(service, biz, TestContext.Current.CancellationToken);
         Assert.Equal("1.0.0", catalog.Version);
         Assert.Equal("build", catalog.BuildId);
         Assert.Equal(new[] { "game", "zh-cn" }, catalog.Manifests.Select(m => m.MatchingField));
@@ -254,8 +346,8 @@ public sealed class NetworkManifestTests
                 : Json(CatalogJson());
         });
         var network = new NetworkManifestClient(http);
-        RemoteGameVersion game = Assert.Single(await network.GetGameVersionsAsync(GenshinChannel.China, "hk4e", TestContext.Current.CancellationToken));
-        Assert.Equal(new RemoteGame("hk4e", "cn"), game.Game);
+        RemoteGameVersion game = (await network.GetGameVersionsAsync(China, TestContext.Current.CancellationToken)).Single(item => item.Biz == "hk4e_cn");
+        Assert.Equal(new RemoteGame("hk4e_cn", ""), game.Game);
         Assert.Equal("1.0.0", game.Version);
         Assert.Single(paths);
         RemoteManifestCatalog catalog = await network.GetCatalogAsync(game, TestContext.Current.CancellationToken);
@@ -283,7 +375,7 @@ public sealed class NetworkManifestTests
             return Json(CatalogJson());
         });
         var network = new NetworkManifestClient(http);
-        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(GenshinChannel.China,
+        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(China,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, requests);
         Assert.Equal(new[] { "future_cn", "future_cn", "another_cn" }, games.Select(game => game.Biz));
@@ -311,7 +403,7 @@ public sealed class NetworkManifestTests
             return Bytes(new byte[10]);
         });
         var network = new NetworkManifestClient(http);
-        RemoteGameVersion game = Assert.Single(await network.GetGameVersionsAsync(GenshinChannel.China,
+        RemoteGameVersion game = Assert.Single(await network.GetGameVersionsAsync(China,
             cancellationToken: TestContext.Current.CancellationToken));
         RemoteManifestCatalog catalog = await network.GetCatalogAsync(game, TestContext.Current.CancellationToken);
         RemoteManifest manifest = catalog.Manifests[0];
@@ -348,14 +440,14 @@ public sealed class NetworkManifestTests
         using HttpClient http = Client(request => request.RequestUri!.Host == "hyp-api.mihoyo.com"
             ? Json("""{"retcode":0,"data":{"game_branches":[{"game":{"biz":"hk4e_cn"},"main":{"branch":"main","password":"p","package_id":"pkg","tag":"1.0.0"}}]}}""")
             : Json(build));
-        await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http).GetCatalogAsync(GenshinChannel.China, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http).GetCatalogAsync(China, "hk4e_cn", TestContext.Current.CancellationToken));
     }
 
     [Theory]
-    [InlineData("newgame", "newregion", true)]
-    [InlineData("missing", "newregion", false)]
-    [InlineData("newgame", "missing", false)]
-    public async Task GameAndRegionAreResolvedFromOfficialResponse(string game, string region, bool found)
+    [InlineData("newgame_newregion", true)]
+    [InlineData("missing", false)]
+    [InlineData("newgame", false)]
+    public async Task CompleteBizIsMatchedWithoutSplitting(string biz, bool found)
     {
         int requests = 0;
         using HttpClient http = Client(request =>
@@ -368,20 +460,20 @@ public sealed class NetworkManifestTests
             return Json(CatalogJson().Replace("zh-cn", "new-package"));
         });
         var network = new NetworkManifestClient(http);
-        IReadOnlyList<RemoteGame> games = await network.GetGamesAsync(GenshinChannel.China, TestContext.Current.CancellationToken);
-        Assert.Equal(new RemoteGame("newgame", "newregion"), Assert.Single(games));
+        IReadOnlyList<RemoteGame> games = await network.GetGamesAsync(China, TestContext.Current.CancellationToken);
+        Assert.Equal(new RemoteGame("newgame_newregion", ""), Assert.Single(games));
         requests = 0;
         if (found)
         {
-            RemoteManifestCatalog catalog = await network.GetCatalogAsync(game, region, TestContext.Current.CancellationToken);
+            RemoteManifestCatalog catalog = await network.GetCatalogAsync(China, biz, TestContext.Current.CancellationToken);
             Assert.Contains(catalog.Manifests, item => item.MatchingField == "new-package");
         }
         else
         {
-            CoreException error = await Assert.ThrowsAsync<CoreException>(() => network.GetCatalogAsync(game, region, TestContext.Current.CancellationToken));
+            CoreException error = await Assert.ThrowsAsync<CoreException>(() => network.GetCatalogAsync(China, biz, TestContext.Current.CancellationToken));
             Assert.Equal(CoreErrorCode.ManifestChannelUnavailable, error.Code);
         }
-        Assert.Equal(found ? 3 : 2, requests);
+        Assert.Equal(found ? 2 : 1, requests);
     }
 
     [Theory]
@@ -399,11 +491,11 @@ public sealed class NetworkManifestTests
         var client = new NetworkManifestClient(http);
         if (wrongVersion)
         {
-            CoreException error = await Assert.ThrowsAsync<CoreException>(() => client.GetCatalogAsync(GenshinChannel.China,
+            CoreException error = await Assert.ThrowsAsync<CoreException>(() => client.GetCatalogAsync(China, "hk4e_cn",
                 TestContext.Current.CancellationToken, "1.0.0"));
             Assert.Equal(CoreErrorCode.ManifestVersionUnavailable, error.Code);
         }
-        else Assert.Equal("1.0.0", (await client.GetCatalogAsync(GenshinChannel.China,
+        else Assert.Equal("1.0.0", (await client.GetCatalogAsync(China, "hk4e_cn",
             TestContext.Current.CancellationToken, "1.0.0")).Version);
     }
 
@@ -433,11 +525,11 @@ public sealed class NetworkManifestTests
             response.RequestMessage = request;
             return response;
         }));
-        RemoteManifestCatalog catalog = await new NetworkManifestClient(http).GetCatalogAsync("hk4e", "global", deadline.Token);
-        Assert.Equal(GenshinChannel.Global, catalog.Channel);
+        RemoteManifestCatalog catalog = await new NetworkManifestClient(http).GetCatalogAsync(Global, "hk4e_global", deadline.Token);
+        Assert.Equal(Global, catalog.Service);
         Assert.Equal("1.0.0", catalog.Version);
         Assert.False(deadline.IsCancellationRequested);
-        Assert.Equal(stalled, chinaCancelled);
+        Assert.False(chinaCancelled);
     }
 
     [Fact]
@@ -460,14 +552,14 @@ public sealed class NetworkManifestTests
             return response;
         }));
         CoreException error = await Assert.ThrowsAsync<CoreException>(() => new NetworkManifestClient(http)
-            .GetCatalogAsync("hk4e", "global", deadline.Token));
+            .GetCatalogAsync(Global, "hk4e_global", deadline.Token));
         Assert.Equal(CoreErrorCode.ManifestVersionUnavailable, error.Code);
-        Assert.True(chinaCancelled);
+        Assert.False(chinaCancelled);
         Assert.False(deadline.IsCancellationRequested);
     }
 
     [Fact]
-    public async Task DynamicCatalogRetainsFailureWhenBothServicesFail()
+    public async Task SelectedServiceFailureDoesNotQueryOtherServices()
     {
         int calls = 0;
         using HttpClient http = Client(_ =>
@@ -476,32 +568,33 @@ public sealed class NetworkManifestTests
             throw new HttpRequestException("Both services unavailable.");
         });
         await Assert.ThrowsAsync<HttpRequestException>(() => new NetworkManifestClient(http)
-            .GetCatalogAsync("hk4e", "global", TestContext.Current.CancellationToken));
-        Assert.Equal(2, calls);
+            .GetCatalogAsync(Global, "hk4e_global", TestContext.Current.CancellationToken));
+        Assert.Equal(1, calls);
     }
 
     [Fact]
-    public async Task DynamicCatalogCallerCancellationStopsBothRequests()
+    public async Task SelectedServiceCallerCancellationStopsRequest()
     {
         int started = 0, stopped = 0;
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         using var http = new HttpClient(new Handler(async (_, token) =>
         {
-            if (Interlocked.Increment(ref started) == 2) cancel.Cancel();
+            Interlocked.Increment(ref started);
+            cancel.Cancel();
             try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
             finally { Interlocked.Increment(ref stopped); }
             return new HttpResponseMessage();
         }));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new NetworkManifestClient(http)
-            .GetCatalogAsync("hk4e", "global", cancel.Token));
-        Assert.Equal(2, started);
-        Assert.Equal(2, stopped);
+            .GetCatalogAsync(Global, "hk4e_global", cancel.Token));
+        Assert.Equal(1, started);
+        Assert.Equal(1, stopped);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task NetworkConversionDefaultsToMainAndCanSelectPackages(bool selectVoice)
+    public async Task NetworkConversionDownloadsOnlyExplicitPackage(bool selectVoice)
     {
         byte[] main = Payload("main"), voice = Payload("voice");
         var downloads = new List<string>();
@@ -529,10 +622,10 @@ public sealed class NetworkManifestTests
             "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "network.json");
-        ConversionSummary summary = await new NetworkManifestClient(http).ConvertAsync(GenshinChannel.China, "1.0.0", output,
-            selectVoice ? ["game", "future-package"] : null, TestContext.Current.CancellationToken);
-        Assert.Equal(selectVoice ? new[] { "game", "future-package" } : new[] { "game" }, downloads);
-        Assert.Equal(selectVoice ? 2 : 1, summary.FileCount);
+        ConversionSummary summary = await new NetworkManifestClient(http).ConvertAsync(China, "hk4e_cn", "1.0.0", output,
+            selectVoice ? "future-package" : "game", TestContext.Current.CancellationToken);
+        Assert.Equal(new[] { selectVoice ? "future-package" : "game" }, downloads);
+        Assert.Equal(1, summary.FileCount);
         Assert.Equal(summary.FileCount, FileComparer.ReadInputs([output]).FileCount);
     }
 
@@ -541,7 +634,7 @@ public sealed class NetworkManifestTests
     {
         using HttpClient http = NetworkManifestClient.CreateHttpClient();
         var network = new NetworkManifestClient(http);
-        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(GenshinChannel.China,
+        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(China,
             cancellationToken: TestContext.Current.CancellationToken);
         RemoteManifestCatalog? starRail = null;
         foreach (RemoteGameVersion game in games)
@@ -563,12 +656,13 @@ public sealed class NetworkManifestTests
     {
         using HttpClient http = NetworkManifestClient.CreateHttpClient();
         var client = new NetworkManifestClient(http);
-        foreach (GenshinChannel channel in Enum.GetValues<GenshinChannel>())
+        foreach (NetworkService service in NetworkManifestClient.Services)
         {
-            RemoteManifestCatalog catalog = await client.GetCatalogAsync(channel, TestContext.Current.CancellationToken, "7.1.0");
+            string biz = service.Id == "china" ? "hk4e_cn" : "hk4e_global";
+            RemoteManifestCatalog catalog = await client.GetCatalogAsync(service, biz, TestContext.Current.CancellationToken, "7.1.0");
             Assert.Equal("7.1.0", catalog.Version);
             FileListSnapshot main = await client.ReadAsync(catalog.Manifests.Single(m => m.MatchingField == "game"), TestContext.Current.CancellationToken);
-            Console.WriteLine($"{channel} custom {catalog.Version}: {main.FileCount} files, MD5 verified");
+            Console.WriteLine($"{service.Id} custom {catalog.Version}: {main.FileCount} files, MD5 verified");
         }
     }
 
@@ -578,15 +672,16 @@ public sealed class NetworkManifestTests
     {
         using HttpClient http = NetworkManifestClient.CreateHttpClient();
         var network = new NetworkManifestClient(http);
-        foreach (GenshinChannel channel in Enum.GetValues<GenshinChannel>())
+        foreach (NetworkService service in NetworkManifestClient.Services)
         {
-            RemoteManifestCatalog catalog = await network.GetCatalogAsync(channel, TestContext.Current.CancellationToken);
+            string biz = service.Id == "china" ? "hk4e_cn" : "hk4e_global";
+            RemoteManifestCatalog catalog = await network.GetCatalogAsync(service, biz, TestContext.Current.CancellationToken);
             var accumulator = new FileComparer.SnapshotAccumulator();
             int order = 0;
             foreach (RemoteManifest manifest in catalog.Manifests)
             {
                 FileListSnapshot snapshot = await network.ReadAsync(manifest, TestContext.Current.CancellationToken);
-                Console.WriteLine($"{channel} {catalog.Version} {manifest.MatchingField}: {snapshot.FileCount} files, {snapshot.TotalSize} bytes, MD5 verified");
+                Console.WriteLine($"{service.Id} {catalog.Version} {manifest.MatchingField}: {snapshot.FileCount} files, {snapshot.TotalSize} bytes, MD5 verified");
                 Assert.True(snapshot.FileCount > 0);
                 accumulator.Add(snapshot, order++, TestContext.Current.CancellationToken);
             }

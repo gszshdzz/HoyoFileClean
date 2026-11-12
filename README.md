@@ -43,6 +43,14 @@ dotnet run --project desktop\HoyoFileClean.Desktop.csproj
 
 桌面的解析、扫描和比较直接传递经过校验的内存快照，不生成中间 JSON，也不创建或读取 `.temp`，重复操作不累积临时文件；关闭窗口后结果释放，后续改写输入文件不改变已载入快照。旧版遗留的 `.temp` 不自动删除，本次也未清理。需要持久化结果时使用 CLI：转换、扫描、比较仍按指定路径输出完整 JSON，字段结构、拒绝覆盖、扫描输出必须在扫描根目录之外等规则不变。GUI 内存结果的来源记录为原始清单路径／实际扫描根目录，不再使用随机临时路径；导入报告仍需匹配当前来源并复核内容，旧临时路径报告可能不再匹配。
 
+#### 集中维护入口
+
+- `core/Models/`：官方 JSON 协议、网络结果及清单／报告／排除规则的数据定义；protobuf 仍在 `Protos/Sophon.proto`。
+- `config/Maintenance.cs`：编译前集中维护默认目录、大小限制、超时、连接节拍、线程数、刷新与缓冲参数，不是用户设置。
+- `presentation/Languages/zh-CN.json`：CLI／GUI 共用文案，直接按字符串 ID 调用，不维护手工 ID 枚举；默认语言在 `config/PresentationOptions.cs`。按当前界面语言加载已嵌入资源，缺少翻译时回退默认语言。只有中文翻译已提供，无语言切换控件；原始标识和路径不翻译，状态逻辑不比较文案。
+
+完整改动列表和统一验收步骤见 [docs/configuration-maintenance.md](docs/configuration-maintenance.md)。
+
 #### 内部分层
 
 - `core/`：转换、扫描、清单读取校验、比较与安全 JSON 写出，不依赖控制台或 Windows Forms；返回数据和结构化错误，不定义用户提示。
@@ -97,9 +105,9 @@ manifest 转换采用受限流式读取，不复制或保留完整解压数组�
 游戏读取合并审查增加失败重扫、规则导入失败保留原结果、历史导入跨页返回、导入失败失效及进度条页面归属检查。桌面测试 85 项，错误、失败、跳过均为 0，另有 1 项显式诊断未运行。最小窗口断言不证明所有 DPI、字体与提示换行组合都不会遮挡；高度不足的滚动兜底方案仅记录，尚未实现，见 `.scratch/desktop-ui/issues/16-game-reading-merge-review.md`。
 ### 网络获取 manifest
 
-桌面游戏、版本、包体及下载地址均由所选官方服务响应驱动，不内置游戏或包名筛选，不维护逐游戏 CDN 名单。原神及星铁样本已真实验证长度、MD5 和解析；国服四款游戏的构建目录已验证可列出，但不宣称所有游戏、所有包的格式均已验证，压缩、加密和格式通用校验仍保留。可以使用当前版本或手填三段版本号，不枚举历史版本；版本不符不得回退。入口 URL（含 launcher_id）、显示名称和兼容入口默认 biz 位于 `config/network-services.json`，构建／发布时复制到程序目录的同名相对路径；配置缺失／无效会报错，无硬编码回退。当前配置两服是已知入口，不冒充自动发现全部渠道；完整渠道来源方案仍待定，预下载不在本轮范围。
+桌面游戏、版本、包体及下载地址均由所选官方服务响应驱动，不内置游戏或包名筛选，不维护逐游戏 CDN 名单。原神及星铁样本已真实验证长度、MD5 和解析；国服四款游戏的构建目录已验证可列出，但不宣称所有游戏、所有包的格式均已验证，压缩、加密和格式通用校验仍保留。可以使用当前版本或手填三段版本号，不枚举历史版本；版本不符不得回退。服务的 `Id`、`NameTextId`、`BranchUrl`、`BuildUrl`、`LauncherId` 位于 `config/network-services.json`，构建／发布时复制到程序目录的同名相对路径；显示名称引用语言 ID，`launcher_id` 从独立配置项统一编码拼接，两个接口 URL 不预带查询串。配置缺失／无效会报错，无硬编码回退。不再有默认 biz 或服务器枚举，新增入口只改服务配置和名称资源，不需改业务逻辑；配置供维护者管理，不是用户设置。当前配置两服是已知入口，不冒充自动发现全部渠道；完整渠道来源方案仍待定，预下载不在本轮范围。
 
-**桌面：**来源切换下方按“区服／游戏／版本”排列，列表保持六行可见、更多时滚动。先选择国服或国际服，点击“查询游戏列表”：仅请求所选服务一次 `getGameBranches`，不请求另一服，不请求构建或下载。显示响应中的原始 `biz`，同一 biz 的多条分支保留并附原始 `game.id` 区分，不猜游戏或渠道名称；版本选项显示所选分支当前版本。查询游戏列表后下方表格为空。
+**桌面：**来源切换下方按“区服／游戏／版本”排列，列表保持六行可见、更多时滚动。先选择配置中的服务，点击“查询游戏列表”：仅请求所选服务一次 `getGameBranches`，不请求其他服务，不请求构建或下载。显示响应中的完整原始 `biz`，同一 biz 的多条分支保留并附原始 `game.id` 区分，不拆分标识或猜游戏、渠道名称；版本选项显示所选分支当前版本。每次查询游戏列表后游戏均未选中，下方表格为空；用户明确选中游戏后才能查询 manifest，双击实际游戏项目等同明确选中并查询。
 
 选择游戏及当前／自定义版本后，点击“查询 manifest 列表”：复用已查询分支，只请求该游戏与版本一次 `getBuild`，成功后显示全部包，全部默认不选；必须显式勾选才可获取并解析，不依据 game、语言或其他包名推测用户选择。不使用当前分支 categories 冒充历史版本包列表。选择变化不自动联网：切换游戏／版本会清空旧表格与参考结果，需显式重查 manifest 列表；切换区服会同时清空游戏列表。重新查询或请求失败不沿用旧列表。
 
@@ -109,25 +117,26 @@ manifest 转换采用受限流式读取，不复制或保留完整解压数组�
 
 三个网络步骤期间，页内动作同行最右侧的“取消网络操作”可中断当前请求、正文读取及合并解析，丢弃本批参考结果；底部导航栏不插入网络取消。关闭按钮及窗口关闭仍可用，会先取消操作、收尾后自动关闭。不改变扫描或离线解析原有的退出行为。左键双击区服实际项目等同“查询游戏列表”，双击游戏实际项目等同“查询 manifest 列表”；双击空白处不操作，忙碌时不重复请求，普通改选仍不自动联网。
 
-**CLI：**`--network` 是 `convert` 的可选参数；选用后 `--game`、`--region`、`--version` 全部必填，本地 manifest 参数不再提供，只提供输出 JSON 路径。帮助主格式使用 `<game>`、`<region>`、`<version>`、`<package>` 占位，不将具体名单写成限制。游戏／区服取自官方分支目录 `game.biz` 的游戏与区服部分（最后一个 `_` 分隔），资源包取自构建目录的 `matching_field`。这些值只有请求官方后才判断是否存在，不在参数解析阶段硬编码拒绝；旧的自定别名 `genshin`／`china` 不再使用。版本可写 `latest` 或三段具体版本号。
+**CLI：**`--network` 是 `convert` 的可选参数；选用后 `--service`、`--biz`、`--version`、`--package` 全部必填，本地 manifest 参数不再提供，只提供输出 JSON 路径。`service` 使用配置中的 `Id`（不是内置服务器枚举），`biz` 使用完整官方 `game.biz`，资源包使用构建目录的原始 `matching_field`，不猜测或拆分。仅查询指定服务；同一 biz 有多个分支时，须用 `--game-id` 指定原始 `game.id`，否则明确报错，不选择第一项。版本可写 `latest` 或三段具体版本号。旧 `--game`／`--region` 拆分参数和隐式默认本体已移除。
 
 以下只是已验证的示例，不是允许值名单；接受新增标识不等于已验证所有格式，通用格式、压缩、加密及请求来源校验仍保留，不增加逐游戏 CDN 限制。
 
 ```powershell
-dotnet run -- convert "reference.json" --network --game hk4e --region cn --version latest
-dotnet run -- convert "reference-old.json" --network --game hk4e --region global --version 7.1.0 --package zh-cn
+dotnet run -- convert "reference.json" --network --service china --biz hk4e_cn --version latest --package game
+dotnet run -- convert "reference-old.json" --network --service global --biz hk4e_global --version 7.1.0 --package zh-cn
 ```
 
-不传 `--package` 时使用协议中的默认本体字段 `game`，不存在则报不可用，不猜另一个包。`--package` 最多指定一次，每条 CLI 命令只转换一个包；重复同值或不同值都在联网／写出前报参数错误，退出码 `2`。语音 `zh-cn`／`en-us`／`ja-jp`／`ko-kr` 只是示例，不是硬编码名单。只下载选中的包，输出一份可供现有比较模块读取的 JSON。未知选项、缺少／重复必选参数、空值及版本格式错误也返回退出码 `2`；官方返回中没有指定游戏／区服／资源包，以及请求、校验或写出失败返回 `1`，不发布部分结果；已有输出在联网前拒绝，仍不覆盖。GUI 多项勾选与核心多清单合并能力保持不变。
+不传 `--package` 时在联网前报参数错误，不默认选择任何包。`--package` 最多指定一次，每条 CLI 命令只转换一个包；重复同值或不同值都在联网／写出前报参数错误，退出码 `2`。语音 `zh-cn`／`en-us`／`ja-jp`／`ko-kr` 只是示例，不是硬编码名单。只下载选中的包，输出一份可供现有比较模块读取的 JSON。未知选项、缺少／重复必选参数、空值及版本格式错误也返回退出码 `2`；配置中没有所选服务、官方返回中没有指定 biz／id／资源包，以及请求、校验或写出失败返回 `1`，不发布部分结果；已有输出在联网前拒绝，仍不覆盖。GUI 多项勾选与核心多清单合并能力保持不变。
 
-**核心调用：**`GetGamesAsync` 读取指定官方服务的游戏／区服身份；CLI 使用字符串版 `GetCatalogAsync(game, region, ...)` 按官方目录匹配。`GetCatalogAsync` 的 `version` 默认 `null`，表示最新版；指定时按原值请求。`FetchAsync` 下载并检查长度，`Read` 在内存中解析与校验；`ReadAsync` 完成两步。CLI 的 `ConvertAsync` 复用这些接口及既有安全 JSON 写出。
+**核心调用：**`GetGamesAsync(service)` 读取完整原始 biz/id；`GetGameVersionsAsync(service)` 保留响应中的独立分支，GUI 直接传所选分支给 `GetCatalogAsync`，不会重新查询分支。CLI 使用 `GetCatalogAsync(service, biz, ..., gameId: ...)` 精确匹配。`GetCatalogAsync` 的 `version` 默认 `null`，表示当前版本；指定时按原值请求。`FetchAsync` 下载并检查长度，`Read` 在内存中解析与校验；`ReadAsync` 完成两步。`ConvertAsync` 要求显式指定一个包，复用既有安全 JSON 写出。
 
 ```csharp
 using HttpClient http = NetworkManifestClient.CreateHttpClient();
 var network = new NetworkManifestClient(http);
-RemoteManifestCatalog catalog = await network.GetCatalogAsync(GenshinChannel.China, cancellationToken);
-RemoteManifest main = catalog.Manifests.Single(item => item.MatchingField == "game");
-FileListSnapshot snapshot = await network.ReadAsync(main, cancellationToken);
+NetworkService service = NetworkManifestClient.Services.Single(item => item.Id == selectedServiceId);
+RemoteManifestCatalog catalog = await network.GetCatalogAsync(service, selectedBiz, cancellationToken, gameId: selectedGameId);
+RemoteManifest selected = catalog.Manifests.Single(item => item.MatchingField == selectedPackage);
+FileListSnapshot snapshot = await network.ReadAsync(selected, cancellationToken);
 ```
 
 正式联网使用 `CreateHttpClient()` 创建并复用客户端，禁用自动重定向；构造器允许传入客户端供测试使用，自定义客户端同样必须禁用重定向。查询入口从项目配置读取，只依赖官方接口；下载采用官方构建响应返回的具体 URL，不依赖第三方维护的清单服务，也不维护 CDN 白名单。联网下载对象须由官方构建响应产生，手工构造或替换其 URL 后不可下载；离线 Read 不需要此来源标记。通用地址限制为 HTTPS、默认端口、无用户信息或片段，拒绝重定向，继续执行长度、摘要及格式校验。此方式信任官方 API 给出的地址，不对 API 本身错误或被攻击后的响应提供独立域名白名单防护。无需账号，不下载游戏正文或补丁。

@@ -7,21 +7,16 @@ internal sealed record ExclusionRules(IReadOnlyList<string> Directories, IReadOn
     internal static ExclusionRules Read(string path, string root)
     {
         using var stream = File.OpenRead(path);
-        using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { AllowDuplicateProperties = false });
-        JsonElement rules = document.RootElement;
-        if (rules.ValueKind != JsonValueKind.Object) throw new JsonException();
-        if (rules.TryGetProperty("scan", out JsonElement scan)) rules = scan;
-        if (rules.ValueKind != JsonValueKind.Object) throw new JsonException();
-        if (!rules.TryGetProperty("excludedDirectories", out _) && !rules.TryGetProperty("excludedFiles", out _))
-            throw new JsonException();
-        string[] ReadArray(string name)
+        ExclusionRuleInput input = JsonSerializer.Deserialize<ExclusionRuleInput>(stream, new JsonSerializerOptions
         {
-            if (!rules.TryGetProperty(name, out JsonElement array)) return [];
-            if (array.ValueKind != JsonValueKind.Array) throw new JsonException();
-            return array.EnumerateArray().Select(item => item.ValueKind == JsonValueKind.String
-                ? item.GetString()! : throw new JsonException()).ToArray();
-        }
-        return new ExclusionRules(DirectoryScanner.NormalizeExclusionPaths(root, ReadArray("excludedDirectories")),
-            DirectoryScanner.NormalizeExclusionPaths(root, ReadArray("excludedFiles")));
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase, AllowDuplicateProperties = false,
+            RespectNullableAnnotations = true
+        }) ?? throw new JsonException();
+        IReadOnlyList<string>? directories = input.Scan is { } scan ? scan.ExcludedDirectories : input.ExcludedDirectories;
+        IReadOnlyList<string>? files = input.Scan is { } scope ? scope.ExcludedFiles : input.ExcludedFiles;
+        if (directories is null && files is null) throw new JsonException();
+        if ((directories ?? []).Concat(files ?? []).Any(path => path is null)) throw new JsonException();
+        return new ExclusionRules(DirectoryScanner.NormalizeExclusionPaths(root, directories ?? []),
+            DirectoryScanner.NormalizeExclusionPaths(root, files ?? []));
     }
 }

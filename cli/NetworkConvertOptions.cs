@@ -1,6 +1,6 @@
 namespace HoyoFileClean.Cli;
 
-internal sealed record NetworkConvertOptions(string OutputPath, string Game, string Region, string? Version, string? Package)
+internal sealed record NetworkConvertOptions(string OutputPath, string Service, string Biz, string? Version, string Package, string? GameId)
 {
     internal static bool TryParse(string[] args, out NetworkConvertOptions? options, out string? error)
     {
@@ -13,23 +13,24 @@ internal sealed record NetworkConvertOptions(string OutputPath, string Game, str
         {
             string key = args[i];
             if (key == "--network") { if (network) return false; network = true; continue; }
-            if (key is "--game" or "--region" or "--version" or "--package")
+            if (key is "--service" or "--biz" or "--game-id" or "--version" or "--package")
             {
                 if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || args[i].StartsWith("--")) return false;
                 if (!values.TryAdd(key, args[i]))
                 {
-                    if (key == "--package") error = "--package 最多指定一次，每次网络转换只能选择一个资源包。";
+                    if (key == "--package") error = L.Get("OnePackageRequired");
                     return false;
                 }
             }
             else if (key.StartsWith("--") || output is not null || string.IsNullOrWhiteSpace(key)) return false;
             else output = key;
         }
-        if (!network || output is null || !values.TryGetValue("--game", out string? game)
-            || !values.TryGetValue("--region", out string? region)
+        if (!network || output is null || !values.TryGetValue("--service", out string? service)
+            || !values.TryGetValue("--biz", out string? biz)
+            || !values.TryGetValue("--package", out string? package)
             || !values.TryGetValue("--version", out string? version)) return false;
         if (version != "latest" && (!System.Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)) return false;
-        options = new(output, game, region, version == "latest" ? null : version, values.GetValueOrDefault("--package"));
+        options = new(output, service, biz, version == "latest" ? null : version, package, values.GetValueOrDefault("--game-id"));
         return true;
     }
 }

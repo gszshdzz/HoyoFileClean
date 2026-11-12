@@ -106,6 +106,12 @@ public sealed class CliPresentationTests
     [InlineData("--network --region china --version latest")]
     [InlineData("--network --game genshin --region china --version 7.1")]
     [InlineData("--network --game genshin --region china --version latest --version 7.1.0")]
+    [InlineData("--network --service china --biz hk4e_cn --version latest")]
+    [InlineData("--network --biz hk4e_cn --version latest --package game")]
+    [InlineData("--network --service china --version latest --package game")]
+    [InlineData("--network --service china --biz hk4e_cn --package game")]
+    [InlineData("--network --service china --biz hk4e_cn --version 7.1 --package game")]
+    [InlineData("--network --service china --biz hk4e_cn --version latest --package game --biz other")]
     public void NetworkConvertRequiresExplicitValidSelection(string arguments)
     {
         var result = Run(new[] { "convert", "unused.json" }.Concat(arguments.Split(' ')).ToArray());
@@ -115,14 +121,14 @@ public sealed class CliPresentationTests
     }
 
     [Theory]
-    [InlineData("hk4e", "cn", "zh-cn")]
+    [InlineData("hk4e_cn", "china", "zh-cn")]
     [InlineData("future-game", "future-region", "future-package")]
-    public void NetworkConvertRefusesExistingOutputBeforeConnecting(string game, string region, string package)
+    public void NetworkConvertRefusesExistingOutputBeforeConnecting(string biz, string service, string package)
     {
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "keep.json");
         File.WriteAllText(output, "keep");
-        var result = Run(["convert", output, "--network", "--game", game, "--region", region, "--version", "latest", "--package", package]);
+        var result = Run(["convert", output, "--network", "--biz", biz, "--service", service, "--version", "latest", "--package", package]);
         Assert.Equal(1, result.Code);
         Assert.Contains("OutputExists", result.Error);
         Assert.Equal("keep", File.ReadAllText(output));
@@ -133,7 +139,7 @@ public sealed class CliPresentationTests
     {
         string help = Run(["--help"]).Output;
         string usage = Assert.Single(help.Split('\n'), line => line.Contains("convert <output.json> --network"));
-        Assert.Contains("--game <game> --region <region> --version <version>", usage);
+        Assert.Contains("--service <service> --biz <biz> --version <version>", usage);
         Assert.Contains("--package <package>", usage);
         Assert.DoesNotContain("hk4e", usage);
         Assert.DoesNotContain("zh-cn", usage);
@@ -148,7 +154,7 @@ public sealed class CliPresentationTests
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "keep.json");
         File.WriteAllText(output, "keep");
-        var result = Run(["convert", output, "--game", "hk4e", "--region", "cn", "--version", "latest",
+        var result = Run(["convert", output, "--service", "china", "--biz", "hk4e_cn", "--version", "latest",
             "--package", "game", "--package", secondPackage, "--network"]);
         Assert.Equal(2, result.Code);
         Assert.Contains("--package 最多指定一次", result.Error);

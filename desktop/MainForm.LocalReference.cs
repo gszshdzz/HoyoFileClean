@@ -3,18 +3,18 @@ namespace HoyoFileClean.Desktop;
 public sealed partial class MainForm
 {
     internal static string DefaultManifestDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "miHoYo", "HYP", "1_1", "modules", "sophon", "manifest");
+        new[] { Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) }
+            .Concat(Maintenance.ManifestDirectorySegments).ToArray());
 
     private readonly TextBox localManifestDirectory = new() { Name = "LocalManifestDirectory", Anchor = AnchorStyles.Left | AnchorStyles.Right, Text = DefaultManifestDirectory };
-    private readonly Button getLocalManifests = MakeButton("获取", "GetLocalManifests");
+    private readonly Button getLocalManifests = MakeButton(L.Get("Button_GetLocalManifests"), "GetLocalManifests");
     private readonly ManifestTable localManifests = new("LocalManifests", groupByModifiedHour: true);
-    private readonly Button parseLocalReference = MakeButton("解析", "ParseLocalReference");
+    private readonly Button parseLocalReference = MakeButton(L.Get("Button_Execute"), "ParseLocalReference");
     private Panel localReferencePage = null!;
 
     internal static FolderBrowserDialog CreateManifestDirectoryDialog() => new()
     {
-        Description = "选择启动器保存清单的目录", UseDescriptionForTitle = true,
+        Description = L.Get("SelectManifestDirectoryDialogTitle"), UseDescriptionForTitle = true,
         SelectedPath = DefaultManifestDirectory, ShowNewFolderButton = false
     };
 
@@ -27,7 +27,7 @@ public sealed partial class MainForm
         {
             if (DroppedManifestDirectory(args) is { } directory) localManifestDirectory.Text = directory;
         };
-        Button browse = MakeButton("浏览…", "BrowseLocalManifestDirectory");
+        Button browse = MakeButton(L.Get("Button_BrowseGame"), "BrowseLocalManifestDirectory");
         browse.Click += (_, _) =>
         {
             using var dialog = CreateManifestDirectoryDialog();
@@ -37,7 +37,7 @@ public sealed partial class MainForm
         {
             localManifests.Rows.Clear();
             ReferenceChanged();
-            status.Text = "目录已变更，请点击获取。";
+            status.Text = L.Get("ManifestDirectoryChanged");
         };
         getLocalManifests.Click += async (_, _) => await GetLocalManifestsAsync();
         var pathRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
@@ -50,7 +50,7 @@ public sealed partial class MainForm
         var input = Vertical();
         input.Controls.Add(pathRow);
         input.Controls.Add(Buttons(getLocalManifests, parseLocalReference));
-        input.Controls.Add(Note("只获取当前目录的候选清单文件，不解析内容、不扫描子目录；链接文件不列入。默认按修改时间从新到旧显示。"));
+        input.Controls.Add(Note(L.Get("LocalManifestHint")));
         return Page(input, localManifests);
     }
 
@@ -74,11 +74,11 @@ public sealed partial class MainForm
         referenceOrigin = reportOrigin = "";
         await RunWorkAsync(() =>
         {
-            if (!Path.IsPathFullyQualified(directory)) throw new ArgumentException("请输入清单目录的完整路径。");
+            if (!Path.IsPathFullyQualified(directory)) throw new ArgumentException(L.Get("ManifestDirectoryRequired"));
             return ManifestDiscovery.Find(directory);
         }, files =>
         {
             localManifests.AddFiles(files);
-        }, "正在获取本地清单文件…", () => $"已获取 {localManifests.Rows.Count:N0} 份候选清单，尚未解析。请勾选后解析。");
+        }, L.Get("GettingLocalManifests"), () => L.Format("LocalManifestsFound", localManifests.Rows.Count));
     }
 }

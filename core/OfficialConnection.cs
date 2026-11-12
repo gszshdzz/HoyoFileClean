@@ -10,7 +10,7 @@ internal static class OfficialConnection
         DnsEndPoint endpoint = context.DnsEndPoint;
         IPAddress[] addresses = await Dns.GetHostAddressesAsync(endpoint.Host, endpoint.AddressFamily, token).ConfigureAwait(false);
         return await ConnectAddressesAsync(addresses, (address, attempt) => ConnectSocketAsync(address, endpoint.Port, attempt),
-            TimeSpan.FromSeconds(1.5), token).ConfigureAwait(false);
+            Maintenance.AddressTimeout, token).ConfigureAwait(false);
     }
 
     // Each address family starts one attempt, then adds one every 500 ms; attempts expire independently.
@@ -30,7 +30,7 @@ internal static class OfficialConnection
         {
             StartRound();
             Task? tick = queues.Any(queue => queue.Addresses.Count > 0)
-                ? Task.Delay(TimeSpan.FromMilliseconds(500), race.Token) : null;
+                ? Task.Delay(Maintenance.AddressRampInterval, race.Token) : null;
             while (pending.Count > 0 || tick is not null)
             {
                 await Task.WhenAny(tick is null
@@ -54,7 +54,7 @@ internal static class OfficialConnection
                     await tick.ConfigureAwait(false);
                     StartRound();
                     tick = queues.Any(queue => queue.Addresses.Count > 0)
-                        ? Task.Delay(TimeSpan.FromMilliseconds(500), race.Token) : null;
+                        ? Task.Delay(Maintenance.AddressRampInterval, race.Token) : null;
                 }
             }
         }

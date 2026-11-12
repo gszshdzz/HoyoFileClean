@@ -6,15 +6,15 @@ public sealed partial class MainForm : Form
     private readonly Panel content = new() { Dock = DockStyle.Fill };
     private readonly Label[] steps = new Label[4];
     private readonly Panel[] pages;
-    private readonly Button back = MakeButton("上一步", "Back");
-    private readonly Button skip = MakeButton("跳过（导入 JSON）", "Import");
-    private readonly Button execute = MakeButton("解析", "Execute");
-    private readonly Button next = MakeButton("下一步", "Next");
-    private readonly Button close = MakeButton("关闭", "CloseWizard");
-    private readonly Button cancelParsing = MakeButton("取消解析", "CancelParsing");
+    private readonly Button back = MakeButton(L.Get("Button_Back"), "Back");
+    private readonly Button skip = MakeButton(L.Get("Button_Import"), "Import");
+    private readonly Button execute = MakeButton(L.Get("Button_Execute"), "Execute");
+    private readonly Button next = MakeButton(L.Get("Button_Next"), "Next");
+    private readonly Button close = MakeButton(L.Get("Button_CloseWizard"), "CloseWizard");
+    private readonly Button cancelParsing = MakeButton(L.Get("Button_CancelParsing"), "CancelParsing");
     private readonly ReferenceParser referenceParser;
     private CancellationTokenSource? parsingCancellation;
-    private readonly Button parseManualReference = MakeButton("解析", "ParseManualReference");
+    private readonly Button parseManualReference = MakeButton(L.Get("Button_Execute"), "ParseManualReference");
     private readonly ProgressBar parsingProgress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
     private readonly ProgressBar comparisonProgress = new() { Name = "ComparisonProgress", Dock = DockStyle.Fill, Visible = false };
     private ProgressBar progress => session.Step == 2 ? comparisonProgress : parsingProgress;
@@ -23,13 +23,13 @@ public sealed partial class MainForm : Form
         BackColor = SystemColors.Control, Padding = new Padding(0, 3, 0, 3) };
     private readonly ManifestTable manifests = new("Manifests");
     private readonly Label referenceResult = new() { Name = "ReferenceResult", AutoSize = true, Dock = DockStyle.Top };
-    private readonly RadioButton networkSource = new() { Name = "NetworkSource", Text = "网络获取", AutoSize = true, Checked = true };
-    private readonly RadioButton localSource = new() { Name = "LocalSource", Text = "本地获取", AutoSize = true };
-    private readonly RadioButton manualSource = new() { Name = "ManualSource", Text = "手动输入", AutoSize = true };
+    private readonly RadioButton networkSource = new() { Name = "NetworkSource", Text = L.Get("NetworkSourceLabel"), AutoSize = true, Checked = true };
+    private readonly RadioButton localSource = new() { Name = "LocalSource", Text = L.Get("LocalSourceLabel"), AutoSize = true };
+    private readonly RadioButton manualSource = new() { Name = "ManualSource", Text = L.Get("ManualSourceLabel"), AutoSize = true };
     private readonly Panel referenceModeContent = new() { Dock = DockStyle.Fill };
     private Panel manualReferencePage = null!;
     private readonly TextBox gameRoot = new() { Name = "GameRoot", Width = 570 };
-    private readonly CheckBox heavy = new() { Text = "MD5 重扫（读取文件内容，耗时更长）", AutoSize = true, Name = "HeavyScan" };
+    private readonly CheckBox heavy = new() { Text = L.Get("HeavyScanHint"), AutoSize = true, Name = "HeavyScan" };
     private readonly TextBox comparisonResult = OutputBox("ComparisonResult");
     private readonly DifferencePanel differences;
     private string referenceOrigin = "";
@@ -46,7 +46,7 @@ public sealed partial class MainForm : Form
         this.networkClient = networkClient ?? new NetworkManifestClient(networkHttp);
         this.loadNetworkServices = loadNetworkServices ?? (() => NetworkManifestClient.Services);
         Disposed += (_, _) => networkHttp.Dispose();
-        Text = "HoyoFileClean — 文件差异向导（删除仅演示）";
+        Text = L.Get("WizardTitle");
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(800, 650);
@@ -61,7 +61,7 @@ public sealed partial class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var flow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Padding = new Padding(0, 0, 0, 12) };
-        string[] titles = ["1 参考清单", "2 游戏扫描", "3 确认与比较", "4 差异与选择"];
+        string[] titles = StepTitles();
         for (int i = 0; i < steps.Length; i++)
         {
             flow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
@@ -85,7 +85,7 @@ public sealed partial class MainForm : Form
         {
             parsingCancellation?.Cancel();
             cancelParsing.Enabled = false;
-            status.Text = "正在取消解析，请等待正在执行的解析退出…";
+            status.Text = L.Get("CancellingParsing");
         };
         gameRoot.TextChanged += (_, _) => GameChanged();
         heavy.CheckedChanged += (_, _) => GameChanged();
@@ -97,12 +97,12 @@ public sealed partial class MainForm : Form
             {
                 closeAfterNetwork = true;
                 networkCancellation.Cancel();
-                status.Text = "正在取消网络操作并关闭…";
+                status.Text = L.Get("CancellingNetworkAndClosing");
                 return;
             }
             status.Text = parsingCancellation is not null
-                ? "正在解析，请先点击取消解析，等待退出后关闭。"
-                : "正在处理，请等待当前操作完成后关闭；扫描暂不支持中途取消。";
+                ? L.Get("CloseDuringParsingHint")
+                : L.Get("CloseDuringWorkHint");
         };
         RefreshView();
         ActiveControl = session.Step == 0 ? (manualSource.Checked ? manualSource : networkSource) : execute;
@@ -110,11 +110,11 @@ public sealed partial class MainForm : Form
 
     private Panel BuildReferencePage()
     {
-        Button add = MakeButton("添加清单…", "AddManifest");
-        Button remove = MakeButton("移除选中", "RemoveManifest");
+        Button add = MakeButton(L.Get("Button_AddManifest"), "AddManifest");
+        Button remove = MakeButton(L.Get("Button_RemoveManifest"), "RemoveManifest");
         add.Click += (_, _) =>
         {
-            using var dialog = new OpenFileDialog { Title = "选择清单（manifest 或 JSON）", Multiselect = true, Filter = "所有文件 (*.*)|*.*" };
+            using var dialog = new OpenFileDialog { Title = L.Get("SelectManifestDialogTitle"), Multiselect = true, Filter = L.Get("AllFileFilter") };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             AddManualFiles(dialog.FileNames);
         };
@@ -128,7 +128,7 @@ public sealed partial class MainForm : Form
             ReferenceChanged();
         };
         var input = Vertical();
-        input.Controls.Add(Note("添加或拖入 manifest／清单 JSON 到下方表格，勾选后统一解析。"));
+        input.Controls.Add(Note(L.Get("ManualManifestHint")));
         input.Controls.Add(Buttons(add, remove, parseManualReference));
         parseManualReference.Click += async (_, _) => await ExecuteAsync();
         input.Controls.Add(referenceResult);
@@ -167,8 +167,8 @@ public sealed partial class MainForm : Form
     private Panel BuildComparisonPage()
     {
         var input = Vertical();
-        input.Controls.Add(Note("请核对下方两侧来源、文件数、大小、哈希和范围。A＝游戏文件，B＝参考清单。"));
-        input.Controls.Add(Note("跳过＝导入已有报告，并核对两侧身份和报告内容；不会自动打开报告记录的路径。"));
+        input.Controls.Add(Note(L.Get("ComparisonInputHint")));
+        input.Controls.Add(Note(L.Get("ImportReportHint")));
         return WithPageProgress(Page(input, comparisonResult), comparisonProgress);
     }
 
@@ -194,7 +194,7 @@ public sealed partial class MainForm : Form
     {
         session.InvalidateReference();
         referenceOrigin = reportOrigin = "";
-        if (session.Step == 0) status.Text = networkSource.Checked ? DescribeNetworkInput() : "参考输入已变更，尚无有效结果，请重新解析。";
+        if (session.Step == 0) status.Text = networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
         differences.Render();
         RefreshView();
     }
@@ -204,7 +204,7 @@ public sealed partial class MainForm : Form
         session.InvalidateGame();
         scanOrigin = reportOrigin = "";
         ResetScanProgress();
-        if (session.Step == 1) status.Text = "游戏输入已变更，尚无有效结果，请重新扫描或导入。";
+        if (session.Step == 1) status.Text = L.Get("GameInputChanged");
         differences.Render();
         RefreshView();
     }
@@ -216,18 +216,18 @@ public sealed partial class MainForm : Form
             displayedStep = session.Step;
             status.Text = session.Step switch
             {
-                0 => session.Reference is not null ? "参考清单已就绪，可核对后点击下一步。"
-                    : networkSource.Checked ? DescribeNetworkInput() : "请选择来源，获取并解析参考清单。",
-                1 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : "游戏扫描：尚无有效结果，请扫描或导入。",
-                2 => session.Comparison is not null ? "比较结果已就绪，可点击下一步查看差异。" : "请核对两侧摘要，再比较或导入报告。",
-                _ => "请核对差异与扫描范围；删除仅演示，不会删除或移动文件。"
+                0 => session.Reference is not null ? L.Get("ReferenceReady")
+                    : networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputRequired"),
+                1 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : L.Get("GameInputRequired"),
+                2 => session.Comparison is not null ? L.Get("ComparisonReady") : L.Get("ComparisonInputRequired"),
+                _ => L.Get("DifferenceReviewHint")
             };
         }
         for (int i = 0; i < pages.Length; i++)
         {
             pages[i].Visible = i == session.Step;
             if (i < 3) SetInputsBusy(pages[i], session.IsBusy);
-            steps[i].Text = (i == session.Step ? "当前 → " : "") + new[] { "1 参考清单", "2 游戏扫描", "3 确认与比较", "4 差异与选择" }[i];
+            steps[i].Text = (i == session.Step ? L.Get("CurrentStepPrefix") : "") + StepTitles()[i];
         }
         back.Enabled = !session.IsBusy && session.Step > 0;
         skip.Visible = session.Step == 2;
@@ -247,16 +247,16 @@ public sealed partial class MainForm : Form
         cancelParsing.Visible = parsingCancellation is not null;
         cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };
         cancelNetwork.Enabled = session.IsBusy && networkCancellation is { IsCancellationRequested: false };
-        execute.Text = "比较";
+        execute.Text = L.Get("CompareAction");
         scanOptions.Visible = scanGameSource.Checked;
         gameJsonRow.Visible = importGameSource.Checked;
         heavy.Visible = scanGameSource.Checked;
-        readGame.Text = importGameSource.Checked ? "导入" : "扫描";
+        readGame.Text = importGameSource.Checked ? L.Get("ImportAction") : L.Get("ScanAction");
         referenceResult.Text = session.Reference is { } reference
-            ? $"有效参考：{reference.FileCount:N0} 个条目，共 {reference.TotalSize:N0} 字节。" : "尚无有效参考结果。";
-        comparisonResult.Text = "【左侧／A：游戏文件】\r\n" + scanOrigin + ResultText.Describe(session.Game, "游戏扫描")
-            + "\r\n\r\n【右侧／B：参考清单】\r\n" + referenceOrigin + ResultText.Describe(session.Reference, "参考清单")
-            + "\r\n\r\n【比较结果】\r\n" + reportOrigin + ResultText.Describe(session.Comparison);
+            ? L.Format("ReferenceSummary", reference.FileCount, reference.TotalSize) : L.Get("ReferenceResultMissing");
+        comparisonResult.Text = L.Get("GameSideHeading") + scanOrigin + ResultText.Describe(session.Game, L.Get("GameScanTitle"))
+            + L.Get("ReferenceSideHeading") + referenceOrigin + ResultText.Describe(session.Reference, L.Get("ReferenceListTitle"))
+            + L.Get("ComparisonResultHeading") + reportOrigin + ResultText.Describe(session.Comparison);
     }
 
     private void ShowReferencePage(Panel target)
@@ -284,6 +284,8 @@ public sealed partial class MainForm : Form
     }
 
     private static Button MakeButton(string text, string name) => new() { Text = text, Name = name, AutoSize = true, MinimumSize = new Size(90, 30) };
+    private static string[] StepTitles() => [L.Get("StepReference"), L.Get("StepGame"),
+        L.Get("StepComparison"), L.Get("StepDifferences")];
     private static Label Note(string text)
         => new() { Text = text, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 5) };
     private static TextBox OutputBox(string name) => new() { Name = name, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };

@@ -150,6 +150,9 @@ public sealed class NetworkReferenceTests
         ClickAndWait(form, session, "QueryNetwork");
         Assert.Equal(1, handler.Requests);
         Assert.Equal("hk4e_cn", Assert.Single(games.Items.Cast<object>()).ToString());
+        Assert.Equal(-1, games.SelectedIndex);
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
+        games.SelectedIndex = 0;
         Assert.True(regions.Items.Count == 2,
             $"requests={handler.Requests}; game={games.SelectedIndex}; queryEnabled={Find<Button>(form, "QueryNetwork").Enabled}; status={Find<Label>(form, "Status").Text}");
         Assert.Empty(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
@@ -286,6 +289,8 @@ public sealed class NetworkReferenceTests
         ClickAndWait(form, session, "QueryNetwork");
         Assert.Equal(new[] { "sg-hyp-api.hoyoverse.com" }, handler.Hosts);
         Assert.Empty(handler.Versions);
+        Assert.Equal(-1, Find<ListBox>(form, "NetworkGames").SelectedIndex);
+        Find<ListBox>(form, "NetworkGames").SelectedIndex = 0;
         Assert.Contains("7.2.0", Find<RadioButton>(form, "LatestNetworkVersion").Text);
         Assert.Contains("7.2.0", Find<Label>(form, "Status").Text);
         ClickAndWait(form, session, "GetNetworkManifests");
@@ -318,7 +323,11 @@ public sealed class NetworkReferenceTests
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
-        if (stage != "query") ClickAndWait(form, session, "QueryNetwork");
+        if (stage != "query")
+        {
+            ClickAndWait(form, session, "QueryNetwork");
+            Find<ListBox>(form, "NetworkGames").SelectedIndex = 0;
+        }
         if (stage == "body")
         {
             ClickAndWait(form, session, "GetNetworkManifests");
@@ -355,7 +364,7 @@ public sealed class NetworkReferenceTests
             handler.BlockPath = null;
             handler.BlockBody = false;
             ClickAndWait(form, session, operationButton);
-            Assert.True(Find<Button>(form, "GetNetworkManifests").Enabled);
+            Assert.Equal(stage != "query", Find<Button>(form, "GetNetworkManifests").Enabled);
         }
         else Assert.True(form.IsDisposed);
     });
@@ -366,6 +375,33 @@ public sealed class NetworkReferenceTests
         while (!condition() && Environment.TickCount64 - start < 5000) { Application.DoEvents(); Thread.Yield(); }
         Assert.True(condition());
     }
+
+    [Fact]
+    public void ArbitraryConfiguredServiceIsUsedDirectlyAndGameRemainsUnselected() => OnSta(() =>
+    {
+        using var handler = new Handler { ExtraGames = true };
+        using var http = new HttpClient(handler);
+        var service = new NetworkService("future", "ServiceGlobal", new Uri("https://future.example/getGameBranches"),
+            new Uri("https://build.future.example/getBuild"), "launcher&new");
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http), loadNetworkServices: () => [service])
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        Assert.Equal(0, handler.Requests);
+        ClickAndWait(form, session, "QueryNetwork");
+        Assert.Equal(new[] { "future.example" }, handler.Hosts);
+        ListBox games = Find<ListBox>(form, "NetworkGames");
+        Assert.Equal(-1, games.SelectedIndex);
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
+        Assert.Contains("不会自动选择游戏", Find<Label>(form, "Status").Text);
+        games.SelectedIndex = 2;
+        ClickAndWait(form, session, "GetNetworkManifests");
+        Assert.Equal(new[] { "future.example", "build.future.example" }, handler.Hosts);
+        Assert.Empty(Find<ManifestTable>(form, "NetworkManifests").CheckedInputs);
+        ClickAndWait(form, session, "QueryNetwork");
+        Assert.Equal(-1, games.SelectedIndex);
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
+    });
 
     [Fact]
     public void ConfigurationFailureLeavesOfflineSourcesAvailable() => OnSta(() =>
@@ -407,6 +443,7 @@ public sealed class NetworkReferenceTests
         Assert.Equal(0, handler.Requests);
         DoubleClick(regions, new Point(3, 3));
         Assert.Equal(1, handler.Requests);
+        Assert.Equal(-1, games.SelectedIndex);
         DoubleClick(games, new Point(3, 3));
         Assert.Equal(2, handler.Requests);
         Assert.Single(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
@@ -488,6 +525,7 @@ public sealed class NetworkReferenceTests
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
         ClickAndWait(form, session, "QueryNetwork");
+        Find<ListBox>(form, "NetworkGames").SelectedIndex = 0;
         ClickAndWait(form, session, "GetNetworkManifests");
         Assert.Contains("请勾选", Find<Label>(form, "Status").Text);
         Find<DataGridView>(form, "NetworkManifests").Rows[0].Cells["Checked"].Value = true;

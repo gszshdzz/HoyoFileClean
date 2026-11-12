@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="core\HoyoFileClean.Core.csproj" />
-    <Compile Remove="tests\**\*.cs;core\**\*.cs;desktop\**\*.cs;desktop.tests\**\*.cs" />
+    <ProjectReference Include="presentation\HoyoFileClean.Presentation.csproj" />
+    <Compile Remove="tests\**\*.cs;core\**\*.cs;desktop\**\*.cs;desktop.tests\**\*.cs;config\**\*.cs;presentation\**\*.cs" />
   </ItemGroup>
 </Project>

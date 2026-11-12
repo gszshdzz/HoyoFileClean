@@ -4,8 +4,8 @@ namespace HoyoFileClean.Desktop;
 
 public sealed partial class MainForm
 {
-    private readonly RadioButton scanGameSource = new() { Name = "ScanGameSource", Text = "扫描游戏", AutoSize = true, Checked = true };
-    private readonly RadioButton importGameSource = new() { Name = "ImportGameSource", Text = "导入 JSON", AutoSize = true };
+    private readonly RadioButton scanGameSource = new() { Name = "ScanGameSource", Text = L.Get("ScanGameSourceLabel"), AutoSize = true, Checked = true };
+    private readonly RadioButton importGameSource = new() { Name = "ImportGameSource", Text = L.Get("ImportJsonSourceLabel"), AutoSize = true };
     private readonly TextBox gameJson = new() { Name = "GameJson" };
     private readonly TextBox exclusionJson = new() { Name = "ExclusionJson" };
     private readonly TextBox excludedDirectoryInput = new() { Name = "ExcludedDirectoryInput" };
@@ -18,20 +18,20 @@ public sealed partial class MainForm
         AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 2, Visible = false };
     private Panel scanOptions = null!;
     private TableLayoutPanel gameJsonRow = null!;
-    private readonly Button readGame = MakeButton("扫描", "ReadGame");
+    private readonly Button readGame = MakeButton(L.Get("ScanAction"), "ReadGame");
 
     private Panel BuildScanPage()
     {
         var input = CompactGameInputs();
-        heavy.Text = "MD5 重扫";
+        heavy.Text = L.Get("HeavyScanLabel");
         input.Controls.Add(Buttons(scanGameSource, importGameSource));
-        Button browse = MakeButton("浏览…", "BrowseGame");
+        Button browse = MakeButton(L.Get("Button_BrowseGame"), "BrowseGame");
         browse.Click += (_, _) => BrowseDirectory(gameRoot);
-        input.Controls.Add(LabeledRow("游戏根目录", gameRoot, browse));
+        input.Controls.Add(LabeledRow(L.Get("GameRootLabel"), gameRoot, browse));
         EnablePathDrop(gameRoot, directory: true);
-        Button browseJson = MakeButton("浏览…", "BrowseGameJson");
+        Button browseJson = MakeButton(L.Get("Button_BrowseGame"), "BrowseGameJson");
         browseJson.Click += (_, _) => BrowseFile(gameJson, json: true);
-        gameJsonRow = LabeledRow("历史扫描 JSON", gameJson, browseJson);
+        gameJsonRow = LabeledRow(L.Get("HistoricalScanJsonLabel"), gameJson, browseJson);
         input.Controls.Add(gameJsonRow);
         EnablePathDrop(gameJson, directory: false);
         gameJson.TextChanged += (_, _) => GameChanged();
@@ -39,13 +39,13 @@ public sealed partial class MainForm
         input.Controls.Add(Buttons(readGame, heavy));
 
         var options = CompactGameInputs();
-        Button browseRules = MakeButton("浏览…", "BrowseExclusionJson");
+        Button browseRules = MakeButton(L.Get("Button_BrowseGame"), "BrowseExclusionJson");
         browseRules.Click += (_, _) => BrowseFile(exclusionJson, json: true);
-        Button importRules = MakeButton("导入规则", "ImportExclusionRules");
+        Button importRules = MakeButton(L.Get("Button_ImportExclusionRules"), "ImportExclusionRules");
         importRules.Click += async (_, _) => await ImportExclusionRulesAsync();
-        options.Controls.Add(LabeledRow("排除规则 JSON", exclusionJson, browseRules, importRules));
+        options.Controls.Add(LabeledRow(L.Get("ExclusionRulesJsonLabel"), exclusionJson, browseRules, importRules));
         EnablePathDrop(exclusionJson, directory: false);
-        Label exclusionHint = Note("排除项可填游戏目录内的相对／完整路径，添加后生效；不支持通配符。");
+        Label exclusionHint = Note(L.Get("ExclusionPathHint"));
         exclusionHint.Padding = Padding.Empty;
         options.Controls.Add(exclusionHint);
 
@@ -57,7 +57,7 @@ public sealed partial class MainForm
         lists.Controls.Add(BuildExclusionEditor(false), 1, 0);
         scanOptions = new Panel { Dock = DockStyle.Fill };
         scanOptions.Controls.Add(GameReadingRows([options, lists], 1));
-        Label scanFileStatus = Note("文件数量"), scanByteStatus = Note("文件大小");
+        Label scanFileStatus = Note(L.Get("ScanFileCountLabel")), scanByteStatus = Note(L.Get("ScanByteCountLabel"));
         scanFileStatus.Padding = scanByteStatus.Padding = Padding.Empty;
         scanFileStatus.Margin = scanByteStatus.Margin = Padding.Empty;
         TableLayoutPanel results = scanProgressPanel;
@@ -89,9 +89,9 @@ public sealed partial class MainForm
         TextBox entry = directory ? excludedDirectoryInput : excludedFileInput;
         ListBox list = directory ? excludedDirectories : excludedFiles;
         string suffix = directory ? "Directory" : "File";
-        Button browse = MakeButton("浏览…", "BrowseExcluded" + suffix);
+        Button browse = MakeButton(L.Get("Button_BrowseGame"), "BrowseExcluded" + suffix);
         browse.Click += (_, _) => { if (directory) BrowseDirectory(entry); else BrowseFile(entry); };
-        Button add = MakeButton("添加", "AddExcluded" + suffix);
+        Button add = MakeButton(L.Get("AddAction"), "AddExcluded" + suffix);
         add.Click += (_, _) => AddExclusion(entry, list);
         entry.KeyDown += (_, args) =>
         {
@@ -99,7 +99,7 @@ public sealed partial class MainForm
             args.SuppressKeyPress = true;
             AddExclusion(entry, list);
         };
-        Button remove = MakeButton("移除选中", "RemoveExcluded" + suffix);
+        Button remove = MakeButton(L.Get("Button_RemoveManifest"), "RemoveExcluded" + suffix);
         remove.Click += (_, _) =>
         {
             if (session.IsBusy || list.SelectedItems.Count == 0) return;
@@ -108,7 +108,7 @@ public sealed partial class MainForm
         };
         EnablePathDrop(entry, directory);
         var input = CompactGameInputs();
-        input.Controls.Add(Buttons(Note(directory ? "排除目录" : "排除文件"), add, remove));
+        input.Controls.Add(Buttons(Note(directory ? L.Get("ExcludedDirectoriesLabel") : L.Get("ExcludedFilesLabel")), add, remove));
         input.Controls.Add(PathRow(entry, browse));
         EnableExclusionDrop(list, directory);
         return GameReadingRows([input, list], 1);
@@ -170,7 +170,7 @@ public sealed partial class MainForm
                 GameChanged();
             }
             catch (Exception error) when (error is CoreException or ArgumentException or NotSupportedException)
-            { status.Text = "整批未添加：排除项必须全部位于指定游戏根目录内。"; }
+            { status.Text = L.Get("ExclusionDropRejected"); }
         };
     }
 
@@ -192,15 +192,15 @@ public sealed partial class MainForm
 
     private void BrowseDirectory(TextBox target)
     {
-        using var dialog = new FolderBrowserDialog { Description = "选择目录", UseDescriptionForTitle = true,
+        using var dialog = new FolderBrowserDialog { Description = L.Get("SelectDirectoryDialogTitle"), UseDescriptionForTitle = true,
             ShowNewFolderButton = false, SelectedPath = gameRoot.Text.Trim() };
         if (dialog.ShowDialog(this) == DialogResult.OK) target.Text = dialog.SelectedPath;
     }
 
     private void BrowseFile(TextBox target, bool json = false)
     {
-        using var dialog = new OpenFileDialog { Title = json ? "选择 JSON 文件" : "选择排除文件",
-            InitialDirectory = gameRoot.Text.Trim(), Filter = json ? "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*" : "所有文件 (*.*)|*.*" };
+        using var dialog = new OpenFileDialog { Title = json ? L.Get("SelectJsonDialogTitle") : L.Get("SelectExcludedFileDialogTitle"),
+            InitialDirectory = gameRoot.Text.Trim(), Filter = json ? L.Get("JsonFileFilter") : L.Get("AllFileFilter") };
         if (dialog.ShowDialog(this) == DialogResult.OK) target.Text = dialog.FileName;
     }
 
@@ -226,7 +226,7 @@ public sealed partial class MainForm
             GameChanged();
         }
         catch (Exception error) when (error is CoreException or ArgumentException or NotSupportedException)
-        { status.Text = "无法添加排除项：请先指定游戏目录，并填写目录内的有效路径。"; }
+        { status.Text = L.Get("AddExclusionFailed"); }
     }
 
     private static void MergeExclusions(ListBox list, IEnumerable<string> paths)
@@ -245,16 +245,16 @@ public sealed partial class MainForm
             MergeExclusions(excludedFiles, rules.Files);
             GameChanged();
         });
-        status.Text = "正在读取排除规则…";
+        status.Text = L.Get("ImportingExclusionRules");
         RefreshView();
         try
         {
             await operation;
-            status.Text = "排除规则已合并导入；可在下方列表选择移除。";
+            status.Text = L.Get("ExclusionRulesImported");
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException
             or CoreException or ArgumentException or NotSupportedException or System.Security.SecurityException)
-        { status.Text = "规则导入失败，原列表未改变。请检查 JSON 的 excludedDirectories／excludedFiles 数组及游戏目录内的路径。"; }
+        { status.Text = L.Get("ExclusionRulesImportFailed"); }
         finally { RefreshView(); }
     }
 

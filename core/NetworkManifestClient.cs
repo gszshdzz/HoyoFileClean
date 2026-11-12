@@ -1,48 +1,17 @@
-using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HoyoFileClean;
-
-public enum GenshinChannel { China, Global }
-
-public sealed record RemoteGame(string Game, string Region);
-
-public sealed class RemoteGameVersion
-{
-    public GenshinChannel Channel { get; }
-    public RemoteGame Game { get; }
-    public string Version { get; }
-    public string Biz => Branch.GetProperty("game").GetProperty("biz").GetString()!;
-    public string Id => Branch.GetProperty("game").TryGetProperty("id", out JsonElement id) ? id.GetString() ?? "" : "";
-    internal JsonElement Branch { get; }
-
-    internal RemoteGameVersion(GenshinChannel channel, RemoteGame game, string version, JsonElement branch)
-    {
-        Channel = channel;
-        Game = game;
-        Version = version;
-        Branch = branch.Clone();
-    }
-}
-
-public sealed record RemoteManifest(string MatchingField, string Category, Uri Url,
-    long DownloadSize, long DecodedSize, string Md5, bool Compressed)
-{
-    private Uri? officialUrl;
-    internal bool HasOfficialSource => officialUrl == Url;
-    internal RemoteManifest FromOfficialResponse() => this with { officialUrl = Url };
-}
-
-public sealed record RemoteManifestCatalog(GenshinChannel Channel, string Version, string BuildId,
-    IReadOnlyList<RemoteManifest> Manifests);
 
 // Only metadata and manifests. No game chunks, disk cache, retries or frontend policy.
 public sealed class NetworkManifestClient(HttpClient client)
 {
-    private const int MetadataLimit = 2 * 1024 * 1024;
-    private const int CompressedLimit = 64 * 1024 * 1024;
-    private const int DecodedLimit = 128 * 1024 * 1024;
+    private static readonly JsonSerializerOptions protocolOptions = new()
+    {
+        RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true,
+        AllowDuplicateProperties = false, NumberHandling = JsonNumberHandling.AllowReadingFromString
+    };
 
     // Use this factory for real requests: automatic redirects could leave official servers.
     public static HttpClient CreateHttpClient() => new(CreateHttpHandler());
@@ -58,77 +27,62 @@ public sealed class NetworkManifestClient(HttpClient client)
     private static readonly Lazy<IReadOnlyList<NetworkService>> services = new(() => NetworkService.Load());
     public static IReadOnlyList<NetworkService> Services => services.Value;
 
-    private static NetworkService Endpoints(GenshinChannel channel)
-        => Services.SingleOrDefault(service => service.Channel == channel) ?? throw new ArgumentOutOfRangeException(nameof(channel));
-
-    private async Task<JsonDocument> GetBranchesAsync(GenshinChannel channel, CancellationToken token)
+    private async Task<IReadOnlyList<OfficialGameBranch>> GetBranchesAsync(NetworkService service, CancellationToken token)
     {
-        var endpoints = Endpoints(channel);
-        return await GetJsonAsync(endpoints.BranchUrl, token)
-            .ConfigureAwait(false);
+        if (service is null || !service.IsValid) throw new CoreException(CoreErrorCode.NetworkConfigurationInvalid);
+        OfficialBranches branches = await GetJsonAsync<OfficialBranches>(service.BranchRequestUrl, token).ConfigureAwait(false);
+        if (branches.Games.Any(item => item is null)) throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid);
+        return branches.Games;
     }
 
-    private static JsonElement[] Games(JsonDocument branches)
+    private static RemoteGame Identity(OfficialGameBranch item)
     {
-        try { return Data(branches).GetProperty("game_branches").EnumerateArray().ToArray(); }
-        catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or FormatException or OverflowException)
+        try
         {
-            throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid, innerException: error);
+            return new RemoteGame(Text(item.Game.Biz), item.Game.Id ?? "");
         }
-    }
-
-    private static RemoteGame Identity(JsonElement item)
-    {
-        string biz;
-        try { biz = Text(item.GetProperty("game"), "biz"); }
         catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or FormatException)
         { throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid, innerException: error); }
-        int separator = biz.LastIndexOf('_');
-        return separator > 0 && separator < biz.Length - 1
-            ? new RemoteGame(biz[..separator], biz[(separator + 1)..])
-            : new RemoteGame(biz, "");
     }
 
-    public async Task<IReadOnlyList<RemoteGame>> GetGamesAsync(GenshinChannel service, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<RemoteGame>> GetGamesAsync(NetworkService service, CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        using JsonDocument branches = await GetBranchesAsync(service, timeout.Token).ConfigureAwait(false);
-        return Array.AsReadOnly(Games(branches).Select(Identity).Distinct().ToArray());
+        timeout.CancelAfter(Maintenance.RequestTimeout);
+        IReadOnlyList<OfficialGameBranch> branches = await GetBranchesAsync(service, timeout.Token).ConfigureAwait(false);
+        return Array.AsReadOnly(branches.Select(Identity).Distinct().ToArray());
     }
 
-    public async Task<RemoteManifestCatalog> GetCatalogAsync(GenshinChannel channel,
-        CancellationToken cancellationToken = default, string? version = null)
+    public async Task<RemoteManifestCatalog> GetCatalogAsync(NetworkService service, string biz,
+        CancellationToken cancellationToken = default, string? version = null, string? gameId = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(biz);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        using JsonDocument branches = await GetBranchesAsync(channel, timeout.Token).ConfigureAwait(false);
-        JsonElement[] games = Games(branches).Where(item =>
+        timeout.CancelAfter(Maintenance.RequestTimeout);
+        IReadOnlyList<OfficialGameBranch> branches = await GetBranchesAsync(service, timeout.Token).ConfigureAwait(false);
+        OfficialGameBranch[] games = branches.Where(item =>
         {
             RemoteGame identity = Identity(item);
-            return identity.Game + "_" + identity.Region == Endpoints(channel).DefaultBiz;
+            return identity.Biz == biz && (gameId is null || identity.Id == gameId);
         }).ToArray();
         if (games.Length == 0) throw new CoreException(CoreErrorCode.ManifestChannelUnavailable);
-        if (games.Length != 1) throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid);
-        return await GetBuildAsync(channel, games[0], version, timeout.Token).ConfigureAwait(false);
+        if (games.Length != 1) throw new CoreException(CoreErrorCode.ManifestGameAmbiguous);
+        return await GetBuildAsync(service, games[0], version, timeout.Token).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<RemoteGameVersion>> GetGameVersionsAsync(GenshinChannel service, string? game = null,
+    public async Task<IReadOnlyList<RemoteGameVersion>> GetGameVersionsAsync(NetworkService service,
         CancellationToken cancellationToken = default)
     {
-        if (game is not null) ArgumentException.ThrowIfNullOrWhiteSpace(game);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        using JsonDocument branches = await GetBranchesAsync(service, timeout.Token).ConfigureAwait(false);
+        timeout.CancelAfter(Maintenance.RequestTimeout);
+        IReadOnlyList<OfficialGameBranch> branches = await GetBranchesAsync(service, timeout.Token).ConfigureAwait(false);
         try
         {
             var versions = new List<RemoteGameVersion>();
-            foreach (JsonElement item in Games(branches))
+            foreach (OfficialGameBranch item in branches)
             {
                 RemoteGame identity = Identity(item);
-                if (game is not null && identity.Game != game) continue;
-                if (game is not null && versions.Any(value => value.Game == identity)) throw new FormatException();
-                string version = Text(item.GetProperty("main"), "tag");
+                string version = Text(item.Main?.Tag);
                 if (!Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)
                     throw new FormatException();
                 versions.Add(new RemoteGameVersion(service, identity, version, item));
@@ -144,99 +98,49 @@ public sealed class NetworkManifestClient(HttpClient client)
     {
         ArgumentNullException.ThrowIfNull(game);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        return await GetBuildAsync(game.Channel, game.Branch, version, timeout.Token).ConfigureAwait(false);
+        timeout.CancelAfter(Maintenance.RequestTimeout);
+        return await GetBuildAsync(game.Service, game.Branch, version, timeout.Token).ConfigureAwait(false);
     }
 
-    public async Task<RemoteManifestCatalog> GetCatalogAsync(string game, string region,
-        CancellationToken cancellationToken = default, string? version = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(game);
-        ArgumentException.ThrowIfNullOrWhiteSpace(region);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        Task<(RemoteManifestCatalog? Catalog, Exception? Error, bool Matched)>[] queries = Services
-            .Select(service => FindCatalogAsync(service.Channel, game, region, version, timeout.Token)).ToArray();
-        var pending = queries.ToList();
-        Exception? failure = null;
-        try
-        {
-            while (pending.Count > 0)
-            {
-                var completed = await Task.WhenAny(pending).ConfigureAwait(false);
-                pending.Remove(completed);
-                var result = await completed.ConfigureAwait(false);
-                if (result.Catalog is not null) return result.Catalog;
-                if (result.Matched && result.Error is not null) throw result.Error;
-                failure ??= result.Error;
-            }
-            throw failure ?? new CoreException(CoreErrorCode.ManifestChannelUnavailable);
-        }
-        finally
-        {
-            timeout.Cancel();
-            // Observe and release every request before its shared cancellation source is disposed.
-            try { await Task.WhenAll(queries).ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-        }
-    }
-
-    private async Task<(RemoteManifestCatalog? Catalog, Exception? Error, bool Matched)> FindCatalogAsync(
-        GenshinChannel service, string game, string region, string? version, CancellationToken token)
-    {
-        bool matched = false;
-        try
-        {
-            using JsonDocument branches = await GetBranchesAsync(service, token).ConfigureAwait(false);
-            JsonElement[] matches = Games(branches).Where(item => Identity(item) == new RemoteGame(game, region)).ToArray();
-            matched = matches.Length > 0;
-            if (matches.Length > 1) throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid);
-            return (matched ? await GetBuildAsync(service, matches[0], version, token).ConfigureAwait(false) : null, null, matched);
-        }
-        catch (Exception error) when (error is CoreException or HttpRequestException or IOException
-            || error is OperationCanceledException && !token.IsCancellationRequested)
-        {
-            return (null, error, matched);
-        }
-    }
-
-    private async Task<RemoteManifestCatalog> GetBuildAsync(GenshinChannel channel, JsonElement game,
+    private async Task<RemoteManifestCatalog> GetBuildAsync(NetworkService service, OfficialGameBranch game,
         string? version, CancellationToken token)
     {
         try
         {
-            JsonElement main = game.GetProperty("main");
-            string requestedVersion = version ?? Text(main, "tag");
+            OfficialBuildRequest main = game.Main ?? throw new FormatException();
+            string requestedVersion = version ?? Text(main.Tag);
             if (!Version.TryParse(requestedVersion, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)
                 throw new ArgumentException("A three-part version is required.", nameof(version));
-            string query = string.Join("&", new[] { "branch", "password", "package_id", "tag" }
-                .Select(key => key + "=" + Uri.EscapeDataString(key == "tag" ? requestedVersion : Text(main, key))));
-            using JsonDocument build = await GetJsonAsync(new Uri(
-                $"{Endpoints(channel).BuildUrl.AbsoluteUri}?{query}"), token).ConfigureAwait(false);
-            JsonElement data = Data(build);
-            if (Text(data, "tag") != requestedVersion) throw new CoreException(CoreErrorCode.ManifestVersionUnavailable);
+            string query = OfficialProtocol.BuildQuery(main with { Tag = requestedVersion });
+            OfficialBuild data = await GetJsonAsync<OfficialBuild>(new Uri(
+                $"{service.BuildUrl.AbsoluteUri}?{query}"), token).ConfigureAwait(false);
+            if (Text(data.Tag) != requestedVersion) throw new CoreException(CoreErrorCode.ManifestVersionUnavailable);
             var manifests = new List<RemoteManifest>();
             var fields = new HashSet<string>(StringComparer.Ordinal);
-            foreach (JsonElement item in data.GetProperty("manifests").EnumerateArray())
+            foreach (OfficialManifest? item in data.Manifests)
             {
-                JsonElement file = item.GetProperty("manifest"), download = item.GetProperty("manifest_download");
-                if (Number(download, "encryption") != 0) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
-                long compression = Number(download, "compression");
-                if (compression is not (0 or 1)) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
-                string field = Text(item, "matching_field"), id = Text(file, "id"), md5 = Text(file, "checksum");
+                if (item is null) throw new FormatException();
+                OfficialManifestFile file = item.Manifest;
+                OfficialManifestDownload download = item.Download;
+                if (download.Encryption != OfficialProtocol.NoEncryption) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
+                long compression = download.Compression;
+                if (compression is not ((long)OfficialCompression.None or (long)OfficialCompression.Zstandard))
+                    throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
+                bool compressed = compression == (long)OfficialCompression.Zstandard;
+                string field = Text(item.MatchingField), id = Text(file.Id), md5 = Text(file.Checksum);
                 if (!fields.Add(field) || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-' or '.'))
                     || id is "." or ".." || md5.Length != 32 || md5.Any(c => !Uri.IsHexDigit(c))) throw new FormatException();
-                string suffix = download.GetProperty("url_suffix").GetString() ?? "";
-                var url = new Uri(Text(download, "url_prefix").TrimEnd('/') + "/" + id + suffix);
+                string suffix = download.UrlSuffix ?? "";
+                var url = new Uri(Text(download.UrlPrefix).TrimEnd('/') + "/" + id + suffix);
                 ValidateCdn(url);
-                long decodedSize = Number(file, "uncompressed_size");
-                long downloadSize = compression == 1 ? Number(file, "compressed_size") : decodedSize;
-                ValidateSizes(downloadSize, decodedSize, compression == 1);
-                manifests.Add(new RemoteManifest(field, Text(item, "category_name"), url,
-                    downloadSize, decodedSize, md5, compression == 1).FromOfficialResponse());
+                long decodedSize = file.UncompressedSize;
+                long downloadSize = compressed ? file.CompressedSize ?? throw new FormatException() : decodedSize;
+                ValidateSizes(downloadSize, decodedSize, compressed);
+                manifests.Add(new RemoteManifest(field, Text(item.CategoryName), url,
+                    downloadSize, decodedSize, md5, compressed).FromOfficialResponse());
             }
             if (manifests.Count == 0) throw new FormatException();
-            return new RemoteManifestCatalog(channel, requestedVersion, Text(data, "build_id"), manifests.AsReadOnly());
+            return new RemoteManifestCatalog(service, requestedVersion, Text(data.BuildId), manifests.AsReadOnly());
         }
         catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or FormatException or OverflowException)
         {
@@ -247,7 +151,7 @@ public sealed class NetworkManifestClient(HttpClient client)
     public async Task<FileListSnapshot> ReadAsync(RemoteManifest manifest, CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        timeout.CancelAfter(Maintenance.RequestTimeout);
         byte[] bytes = await FetchAsync(manifest, timeout.Token).ConfigureAwait(false);
         return Read(manifest, bytes, timeout.Token);
     }
@@ -276,49 +180,39 @@ public sealed class NetworkManifestClient(HttpClient client)
         ValidateManifest(manifest);
         if (!manifest.HasOfficialSource) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        timeout.CancelAfter(Maintenance.RequestTimeout);
         using MemoryStream input = await DownloadAsync(manifest.Url, manifest.DownloadSize, timeout.Token).ConfigureAwait(false);
         if (input.Length != manifest.DownloadSize) throw new CoreException(CoreErrorCode.ManifestDownloadMismatch);
         timeout.Token.ThrowIfCancellationRequested();
         return input.ToArray();
     }
 
-    public async Task<ConversionSummary> ConvertAsync(GenshinChannel channel, string? version, string outputPath,
-        IEnumerable<string>? packages = null, CancellationToken cancellationToken = default)
+    public async Task<ConversionSummary> ConvertAsync(NetworkService service, string biz, string? version, string outputPath,
+        string package, CancellationToken cancellationToken = default, string? gameId = null)
     {
         if (File.Exists(outputPath) || Directory.Exists(outputPath)) throw new CoreException(CoreErrorCode.OutputExists, outputPath);
-        RemoteManifestCatalog catalog = await GetCatalogAsync(channel, cancellationToken, version).ConfigureAwait(false);
-        return await ConvertCatalogAsync(catalog, outputPath, packages, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<ConversionSummary> ConvertAsync(string game, string region, string? version, string outputPath,
-        IEnumerable<string>? packages = null, CancellationToken cancellationToken = default)
-    {
-        if (File.Exists(outputPath) || Directory.Exists(outputPath)) throw new CoreException(CoreErrorCode.OutputExists, outputPath);
-        RemoteManifestCatalog catalog = await GetCatalogAsync(game, region, cancellationToken, version).ConfigureAwait(false);
-        return await ConvertCatalogAsync(catalog, outputPath, packages, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<ConversionSummary> ConvertCatalogAsync(RemoteManifestCatalog catalog, string outputPath,
-        IEnumerable<string>? packages, CancellationToken cancellationToken)
-    {
-        string[] fields = (packages ?? ["game"]).Distinct(StringComparer.Ordinal).ToArray();
-        if (fields.Length == 0 || fields.Any(field => !catalog.Manifests.Any(item => item.MatchingField == field)))
+        ArgumentException.ThrowIfNullOrWhiteSpace(package);
+        RemoteManifestCatalog catalog = await GetCatalogAsync(service, biz, cancellationToken, version, gameId).ConfigureAwait(false);
+        RemoteManifest? manifest = catalog.Manifests.SingleOrDefault(item => item.MatchingField == package);
+        if (manifest is null)
             throw new CoreException(CoreErrorCode.ManifestPackageUnavailable);
-        var accumulator = new FileComparer.SnapshotAccumulator();
-        for (int i = 0; i < fields.Length; i++)
-            accumulator.Add(await ReadAsync(catalog.Manifests.Single(item => item.MatchingField == fields[i]), cancellationToken)
-                .ConfigureAwait(false), i, cancellationToken);
-        FileListSnapshot snapshot = accumulator.Build(cancellationToken);
+        FileListSnapshot snapshot = await ReadAsync(manifest, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        JsonFileOutput.WriteNew(outputPath, new ManifestFileList("MD5", snapshot.FileCount, snapshot.TotalSize, snapshot.Files.Values.ToArray()));
+        JsonFileOutput.WriteNew(outputPath, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
+            snapshot.Files.Values.ToArray(), FileValues.Md5));
         return new ConversionSummary(snapshot.FileCount, snapshot.TotalSize);
     }
 
-    private async Task<JsonDocument> GetJsonAsync(Uri url, CancellationToken token)
+    private async Task<T> GetJsonAsync<T>(Uri url, CancellationToken token) where T : class
     {
-        using MemoryStream bytes = await DownloadAsync(url, MetadataLimit, token).ConfigureAwait(false);
-        try { return JsonDocument.Parse(bytes); }
+        using MemoryStream bytes = await DownloadAsync(url, Maintenance.MetadataLimit, token).ConfigureAwait(false);
+        try
+        {
+            OfficialResponse response = JsonSerializer.Deserialize<OfficialResponse>(bytes, protocolOptions) ?? throw new JsonException();
+            if (response.Retcode != 0) throw new CoreException(CoreErrorCode.ManifestChannelUnavailable);
+            if (response.Data.ValueKind != JsonValueKind.Object) throw new JsonException();
+            return response.Data.Deserialize<T>(protocolOptions) ?? throw new JsonException();
+        }
         catch (JsonException error)
         {
             throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid, innerException: error);
@@ -336,7 +230,7 @@ public sealed class NetworkManifestClient(HttpClient client)
         var output = new MemoryStream();
         try
         {
-            byte[] buffer = new byte[81920];
+            byte[] buffer = new byte[Maintenance.DownloadBufferSize];
             int count;
             while ((count = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, limit - output.Length + 1)), token).ConfigureAwait(false)) != 0)
             {
@@ -349,28 +243,13 @@ public sealed class NetworkManifestClient(HttpClient client)
         catch { output.Dispose(); throw; }
     }
 
-    private static JsonElement Data(JsonDocument document)
-    {
-        JsonElement root = document.RootElement;
-        if (Number(root, "retcode") != 0) throw new CoreException(CoreErrorCode.ManifestChannelUnavailable);
-        return root.GetProperty("data");
-    }
-
-    private static string Text(JsonElement item, string key)
-        => item.GetProperty(key).GetString() is { Length: > 0 } text ? text : throw new FormatException();
-
-    private static long Number(JsonElement item, string key)
-    {
-        JsonElement value = item.GetProperty(key);
-        return value.ValueKind == JsonValueKind.String
-            ? long.Parse(value.GetString()!, NumberStyles.Integer, CultureInfo.InvariantCulture) : value.GetInt64();
-    }
+    private static string Text(string? value) => value is { Length: > 0 } ? value : throw new FormatException();
 
     private static void ValidateSizes(long download, long decoded, bool compressed)
     {
         if (download <= 0 || decoded <= 0 || (!compressed && download != decoded))
             throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid);
-        if (download > (compressed ? CompressedLimit : DecodedLimit) || decoded > DecodedLimit)
+        if (download > (compressed ? Maintenance.CompressedLimit : Maintenance.DecodedLimit) || decoded > Maintenance.DecodedLimit)
             throw new CoreException(CoreErrorCode.ManifestNetworkSizeLimit);
     }
 

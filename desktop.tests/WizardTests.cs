@@ -57,6 +57,40 @@ public sealed class WizardTests
     });
 
     [Fact]
+    public void ManifestStateRecoveryDoesNotDependOnDisplayedText() => OnSta(() =>
+    {
+        foreach (ReferenceState state in Enum.GetValues<ReferenceState>())
+            Assert.False(string.IsNullOrWhiteSpace(ManifestTable.StateText(state)));
+        using var table = new ManifestTable("state-test");
+        table.AddFiles([new LocalManifestFile("file", @"C:\file", 1, DateTime.UtcNow)]);
+        ReferenceInput input = Assert.IsType<ReferenceInput>(table.Rows[0].Tag);
+        table.ShowResult(input, ReferenceState.Fetching, null);
+        table.Rows[0].Cells["State"].Value = "arbitrary translated text";
+        table.ResetFetching();
+        Assert.Equal(ReferenceState.Unfetched, table.Rows[0].Cells["State"].Tag);
+        Assert.Equal(ManifestTable.StateText(ReferenceState.Unfetched), table.Rows[0].Cells["State"].Value);
+        table.ShowResult(input, ReferenceState.Parsed, 1);
+        table.Rows[0].Cells["State"].Value = ManifestTable.StateText(ReferenceState.Fetching);
+        table.ResetFetching();
+        Assert.Equal(ReferenceState.Parsed, table.Rows[0].Cells["State"].Tag);
+    });
+
+    [Fact]
+    public void ExclusionRuleModelsRejectExplicitNullAndKeepOptionalArrays()
+    {
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "rules-null.json");
+        foreach (string json in new[] { "{}", "{\"scan\":null,\"excludedFiles\":[]}",
+            "{\"excludedFiles\":null}", "{\"excludedFiles\":[null]}", "{\"scan\":{\"excludedDirectories\":null}}" })
+        {
+            File.WriteAllText(path, json);
+            Assert.Throws<JsonException>(() => ExclusionRules.Read(path, directory));
+        }
+        File.WriteAllText(path, "{\"excludedFiles\":[]}");
+        Assert.Empty(ExclusionRules.Read(path, directory).Directories);
+    }
+
+    [Fact]
     public void ExclusionRulesValidateBothArraysBeforePublishing()
     {
         Directory.CreateDirectory(directory);

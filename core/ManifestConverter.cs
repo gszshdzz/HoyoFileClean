@@ -1,5 +1,4 @@
 using Google.Protobuf;
-using System.Text.Json.Serialization;
 using HoyoFileClean.Protos;
 using ZstdSharp;
 
@@ -7,19 +6,8 @@ namespace HoyoFileClean;
 
 public sealed record ConversionSummary(int FileCount, long TotalSize);
 
-public sealed record ManifestFile(string Path, long Size,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Hash = null);
-
-internal sealed record ManifestFileList(
-    string HashAlgorithm,
-    int FileCount,
-    long TotalSize,
-    IReadOnlyList<ManifestFile> Files);
-
 public static class ManifestConverter
 {
-    private const int MaxCompressedSize = 64 * 1024 * 1024;
-    private const int MaxDecodedSize = 128 * 1024 * 1024;
 
     public static ConversionSummary Convert(
         string inputPath,
@@ -31,13 +19,8 @@ public static class ManifestConverter
         }
         FileListSnapshot snapshot = Read(inputPath, out bool isJson, CancellationToken.None);
         FileListSource source = snapshot.Sources[0];
-        if (isJson) JsonFileOutput.WriteNew(outputPath, new
-        {
-            source.HashAlgorithm, snapshot.FileCount, snapshot.TotalSize,
-            files = snapshot.Files.Values, source.Scan
-        });
-        else JsonFileOutput.WriteNew(outputPath, new ManifestFileList("MD5", snapshot.FileCount,
-            snapshot.TotalSize, snapshot.Files.Values.ToArray()));
+        JsonFileOutput.WriteNew(outputPath, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
+            snapshot.Files.Values.ToArray(), source.HashAlgorithm, source.Scan));
         return new ConversionSummary(snapshot.FileCount, snapshot.TotalSize);
     }
 
@@ -65,7 +48,7 @@ public static class ManifestConverter
                 || (header[0] is >= 0x50 and <= 0x5f && header[1] == 0x2a && header[2] == 0x4d && header[3] == 0x18));
         if (expectedCompression is not null && compressed != expectedCompression)
             throw new CoreException(CoreErrorCode.ManifestDownloadMismatch, inputPath);
-        if (compressed && input.Length > MaxCompressedSize)
+        if (compressed && input.Length > Maintenance.CompressedLimit)
         {
             throw new CoreException(CoreErrorCode.ManifestCompressedSizeLimit, inputPath);
         }
@@ -96,7 +79,7 @@ public static class ManifestConverter
         CancellationToken cancellationToken, Func<Stream> replayDecoded,
         long? decodedSize = null, string? decodedMd5 = null, bool allowJson = true)
     {
-        using var limited = new ManifestReadStream(decoded, MaxDecodedSize, cancellationToken, decodedSize, decodedMd5);
+        using var limited = new ManifestReadStream(decoded, Maintenance.DecodedLimit, cancellationToken, decodedSize, decodedMd5);
         try { return ReadContent(limited, inputPath, out isJson, cancellationToken, replayDecoded, allowJson); }
         finally
         {
@@ -134,7 +117,7 @@ public static class ManifestConverter
             first = limited.ReadByte();
             if (first >= 0)
             {
-                if (prefix.Length < 4096) prefix.WriteByte((byte)first);
+                if (prefix.Length < Maintenance.FormatProbeLimit) prefix.WriteByte((byte)first);
                 else prefixOverflow = true;
             }
         }
@@ -162,7 +145,7 @@ public static class ManifestConverter
             // reread from the same open file rather than cached or silently discarded.
             limited.CopyTo(Stream.Null);
             using var decodedAgain = replayDecoded();
-            using var boundedAgain = new ManifestReadStream(decodedAgain, MaxDecodedSize, cancellationToken);
+            using var boundedAgain = new ManifestReadStream(decodedAgain, Maintenance.DecodedLimit, cancellationToken);
             try { return ReadProtobuf(boundedAgain, inputPath, cancellationToken); }
             finally { boundedAgain.CopyTo(Stream.Null); }
         }
@@ -186,7 +169,7 @@ public static class ManifestConverter
         foreach (SophonFileAsset asset in manifest.Assets)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (asset.AssetType == 0) files.Add(ReadFile(asset));
+            if (asset.AssetType == OfficialProtocol.FileAsset) files.Add(ReadFile(asset));
         }
         if (files.Count == 0)
         {
@@ -202,7 +185,7 @@ public static class ManifestConverter
         {
             throw new CoreException(CoreErrorCode.TotalSizeOverflow, inputPath, innerException: error);
         }
-        return FileComparer.FromFiles(inputPath, files, totalSize, "MD5", cancellationToken: cancellationToken);
+        return FileComparer.FromFiles(inputPath, files, totalSize, FileValues.Md5, cancellationToken: cancellationToken);
     }
 
     private static ManifestFile ReadFile(SophonFileAsset asset)

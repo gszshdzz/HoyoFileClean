@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using System.Text.Json.Serialization;
 
 namespace HoyoFileClean;
 
@@ -42,8 +41,8 @@ public static class DirectoryScanner
         FileListSnapshot snapshot = Scan(root, excludedDirectories, excludedFiles, computeHashes, progress);
         FileListSource source = snapshot.Sources[0];
         ValidateDirectoryPath(outputParent);
-        JsonFileOutput.WriteNew(output, new ScanFileList(source.HashAlgorithm,
-            snapshot.FileCount, snapshot.TotalSize, snapshot.Files.Values.ToArray(), source.Scan!));
+        JsonFileOutput.WriteNew(output, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
+            snapshot.Files.Values.ToArray(), source.HashAlgorithm, source.Scan));
         return new ScanSummary(snapshot.FileCount, snapshot.TotalSize, source.Scan!.SkippedLinks);
     }
 
@@ -79,8 +78,8 @@ public static class DirectoryScanner
         var details = new ScanScope(root,
             excludedDirs.OrderBy(path => path, StringComparer.Ordinal).ToArray(),
             excludedFilePaths.OrderBy(path => path, StringComparer.Ordinal).ToArray(), links,
-            computeHashes ? "heavy" : "light");
-        return FileComparer.FromFiles(root, files, totalSize, computeHashes ? "MD5" : null, details);
+            computeHashes ? FileValues.HeavyScan : FileValues.LightScan);
+        return FileComparer.FromFiles(root, files, totalSize, computeHashes ? FileValues.Md5 : null, details);
     }
 
     private static List<ManifestFile> ReadFileList(
@@ -139,7 +138,7 @@ public static class DirectoryScanner
     private static void ComputeHashes(
         string root, List<ManifestFile> files, long totalSize, Action<ScanProgress>? progress)
     {
-        byte[] buffer = new byte[128 * 1024];
+        byte[] buffer = new byte[Maintenance.HashBufferSize];
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
         var timer = Stopwatch.StartNew();
         long processedBytes = 0;
@@ -147,7 +146,7 @@ public static class DirectoryScanner
         void Report(int completedFiles, bool force = false)
         {
             long now = timer.ElapsedMilliseconds;
-            if (progress is null || (!force && now - lastReport < 500))
+            if (progress is null || (!force && now - lastReport < Maintenance.ScanProgressIntervalMs))
             {
                 return;
             }
@@ -266,7 +265,4 @@ public static class DirectoryScanner
         }
     }
 
-    private sealed record ScanFileList(
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HashAlgorithm,
-        int FileCount, long TotalSize, IReadOnlyList<ManifestFile> Files, ScanScope Scan);
 }

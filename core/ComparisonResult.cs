@@ -2,12 +2,6 @@ using System.Collections.ObjectModel;
 
 namespace HoyoFileClean;
 
-public sealed record ScanScope(string Root, IReadOnlyList<string> ExcludedDirectories,
-    IReadOnlyList<string> ExcludedFiles, IReadOnlyList<string> SkippedLinks, string Mode);
-
-public sealed record FileListSource(string Path, int FileCount, long TotalSize,
-    string? HashAlgorithm, ScanScope? Scan);
-
 // Created only by the common validated reader. Callers cannot replace its entries.
 public sealed class FileListSnapshot
 {
@@ -36,12 +30,3 @@ public sealed class FileListSnapshot
                     path.Equals(excluded, StringComparison.OrdinalIgnoreCase)
                     || path.StartsWith(excluded + "/", StringComparison.OrdinalIgnoreCase))));
 }
-
-public sealed record Difference(ManifestFile A, ManifestFile B,
-    bool SizeDifferent, bool HashDifferent, bool HashCompared);
-
-public sealed record UncomparedFile(string PresentIn, ManifestFile File);
-
-public sealed record ComparisonResult(IReadOnlyList<string> AInputs, IReadOnlyList<string> BInputs,
-    ComparisonSummary Summary, IReadOnlyList<ManifestFile> OnlyA, IReadOnlyList<ManifestFile> OnlyB,
-    IReadOnlyList<Difference> Different, IReadOnlyList<UncomparedFile> OutsideScope);

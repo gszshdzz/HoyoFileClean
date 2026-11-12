@@ -53,7 +53,7 @@ public sealed class WizardSession
 
     public void Next()
     {
-        if (!CanAdvance) throw new InvalidOperationException("当前步骤没有有效结果，不能前进。");
+        if (!CanAdvance) throw new InvalidOperationException(L.Get("AdvanceRequiresResult"));
         Step++;
     }
 
@@ -91,13 +91,13 @@ public sealed class WizardSession
     public static void ValidateGameInput(FileListSnapshot game, string root)
     {
         if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root))
-            throw new ArgumentException("请先明确指定游戏目录的完整路径，再导入扫描结果。");
+            throw new ArgumentException(L.Get("ImportRequiresRoot"));
         if (game.Sources.Count != 1 || game.Sources[0].Scan is not { } scan)
-            throw new InvalidDataException("游戏侧必须导入一份带 scan 信息的扫描 JSON，不能导入 manifest 转换结果。");
+            throw new InvalidDataException(L.Get("ImportRequiresScanDocument"));
         if (!Path.IsPathFullyQualified(scan.Root) || !string.Equals(
             DirectoryScanner.NormalizeRootPath(root), DirectoryScanner.NormalizeRootPath(scan.Root),
             StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("扫描 JSON 记录的根目录与指定游戏目录不一致。不会使用报告中的路径替换游戏目录。");
+            throw new InvalidDataException(L.Get("ImportedRootMismatch"));
     }
 
     public void AcceptGame(FileListSnapshot game, string root)
@@ -111,14 +111,14 @@ public sealed class WizardSession
     public void AcceptComparison(ComparisonResult comparison)
     {
         RequireIdle();
-        if (Game is null || Reference is null) throw new InvalidOperationException("请先取得两侧有效清单。");
+        if (Game is null || Reference is null) throw new InvalidOperationException(L.Get("ComparisonRequiresInputs"));
         InvalidateComparison();
         Comparison = comparison;
         Rows = comparison.OnlyA.Select(file => new DifferenceRow(file.Path, file, null, DifferenceCategory.GameOnly))
             .Concat(comparison.OnlyB.Select(file => new DifferenceRow(file.Path, null, file, DifferenceCategory.ReferenceOnly)))
             .Concat(comparison.Different.Select(item => new DifferenceRow(item.A.Path, item.A, item.B, DifferenceCategory.Different)))
             .Concat(comparison.OutsideScope.Select(item => new DifferenceRow(item.File.Path,
-                item.PresentIn == "a" ? item.File : null, item.PresentIn == "b" ? item.File : null, DifferenceCategory.OutsideScope)))
+                item.PresentIn == FileValues.SideA ? item.File : null, item.PresentIn == FileValues.SideB ? item.File : null, DifferenceCategory.OutsideScope)))
             .OrderBy(row => row.Path, StringComparer.Ordinal).ToArray();
         Filter = DifferenceCategory.All;
         foreach (DifferenceRow row in Rows) rowsByPath.Add(row.Path, row);
@@ -144,8 +144,8 @@ public sealed class WizardSession
     {
         RequireIdle();
         if (!rowsByPath.TryGetValue(path, out DifferenceRow? row) || (Filter != DifferenceCategory.All && row.Category != Filter))
-            throw new ArgumentException("该文件不在当前差异视图内。");
-        if (!row.CanSelect) throw new ArgumentException("只能选择已扫描范围内的游戏侧文件。");
+            throw new ArgumentException(L.Get("SelectionNotVisible"));
+        if (!row.CanSelect) throw new ArgumentException(L.Get("SelectionRequiresScannedGameFile"));
         bool changed = value ? selected.TryAdd(row.Path, row.Game!) : selected.Remove(row.Path);
         if (changed) SelectionConfirmed = false;
     }
@@ -158,6 +158,6 @@ public sealed class WizardSession
 
     private void RequireIdle()
     {
-        if (IsBusy) throw new InvalidOperationException("正在处理，请等待当前操作完成。");
+        if (IsBusy) throw new InvalidOperationException(L.Get("OperationBusy"));
     }
 }

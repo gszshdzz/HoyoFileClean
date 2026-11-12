@@ -21,8 +21,12 @@ try
                     return 2;
                 }
                 using HttpClient http = NetworkManifestClient.CreateHttpClient();
-                CliOutput.Conversion(await new NetworkManifestClient(http).ConvertAsync(options!.Game, options.Region,
-                    options.Version, options.OutputPath, options.Package is { } package ? [package] : null));
+                if (File.Exists(options!.OutputPath) || Directory.Exists(options.OutputPath))
+                    throw new CoreException(CoreErrorCode.OutputExists, options.OutputPath);
+                NetworkService service = NetworkManifestClient.Services.SingleOrDefault(item => item.Id == options.Service)
+                    ?? throw new CoreException(CoreErrorCode.ManifestChannelUnavailable);
+                CliOutput.Conversion(await new NetworkManifestClient(http).ConvertAsync(service, options!.Biz,
+                    options.Version, options.OutputPath, options.Package, gameId: options.GameId));
                 CliOutput.Saved(options.OutputPath);
                 return 0;
             }

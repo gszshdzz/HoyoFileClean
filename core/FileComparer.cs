@@ -3,9 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace HoyoFileClean;
 
-public sealed record ComparisonSummary(
-    int OnlyA, int OnlyB, int Different, int MatchedWithHash, int MatchedSizeOnly, int OutsideScope);
-
 public static class FileComparer
 {
     public static ComparisonSummary Compare(IEnumerable<string> aPaths, IEnumerable<string> bPaths, string outputPath)
@@ -38,7 +35,7 @@ public static class FileComparer
                 FileListSnapshot absentSide = left is null ? a : b;
                 if (absentSide.IsOutsideScope(path))
                 {
-                    outsideScope.Add(new UncomparedFile(left is null ? "b" : "a", file));
+                    outsideScope.Add(new UncomparedFile(left is null ? FileValues.SideB : FileValues.SideA, file));
                 }
                 else
                 {
@@ -121,7 +118,7 @@ public static class FileComparer
             try
             {
                 using var stream = open(input);
-                return JsonSerializer.Deserialize<FileList>(stream, ReaderOptions()) ?? throw new JsonException();
+                return JsonSerializer.Deserialize<FileListDocument>(stream, ReaderOptions()) ?? throw new JsonException();
             }
             catch (JsonException error)
             {
@@ -131,7 +128,7 @@ public static class FileComparer
 
     internal static FileListSnapshot FromFiles(string source, IReadOnlyList<ManifestFile> files,
         long totalSize, string? hashAlgorithm, ScanScope? scan = null, CancellationToken cancellationToken = default)
-        => ReadLists([source], _ => new FileList(files.Count, totalSize, files.ToList(), hashAlgorithm, scan), cancellationToken,
+        => ReadLists([source], _ => new FileListDocument(files.Count, totalSize, files, hashAlgorithm, scan), cancellationToken,
             preserveSource: true);
 
     public static FileListSnapshot Combine(IEnumerable<FileListSnapshot> snapshots, CancellationToken cancellationToken = default)
@@ -184,7 +181,7 @@ public static class FileComparer
         }
     }
 
-    private static FileListSnapshot ReadLists(IEnumerable<string> paths, Func<string, FileList> read,
+    private static FileListSnapshot ReadLists(IEnumerable<string> paths, Func<string, FileListDocument> read,
         CancellationToken cancellationToken, bool preserveSource = false)
     {
         string[] inputs = preserveSource ? paths.ToArray() : paths.Select(Path.GetFullPath).ToArray();
@@ -197,10 +194,10 @@ public static class FileComparer
         foreach (string input in inputs)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            FileList list = read(input);
-            bool hasHashes = list.HashAlgorithm == "MD5";
+            FileListDocument list = read(input);
+            bool hasHashes = list.HashAlgorithm == FileValues.Md5;
             if ((list.HashAlgorithm is not null && !hasHashes)
-                || (list.Scan is not null && list.Scan.Mode != (hasHashes ? "heavy" : "light")))
+                || (list.Scan is not null && list.Scan.Mode != (hasHashes ? FileValues.HeavyScan : FileValues.LightScan)))
             {
                 throw new CoreException(CoreErrorCode.ListHashModeInvalid, input);
             }
@@ -268,7 +265,5 @@ public static class FileComparer
         => value is { Length: 32 } && value.All(character => character is >= '0' and <= '9'
             or >= 'a' and <= 'f' or >= 'A' and <= 'F');
 
-    private sealed record FileList(int FileCount, long TotalSize, List<ManifestFile> Files,
-        string? HashAlgorithm = null, ScanScope? Scan = null);
 
 }

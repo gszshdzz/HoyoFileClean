@@ -10,7 +10,7 @@ internal sealed class ManifestTable : DataGridView
     private bool[] hourBands = [];
     private readonly CheckBox selectAll = new()
     {
-        Name = "SelectAllManifests", AccessibleName = "全选或全不选清单",
+        Name = "SelectAllManifests", AccessibleName = L.Get("SelectAllManifests"),
         ThreeState = true, AutoCheck = false, AutoSize = true, Enabled = false
     };
 
@@ -31,14 +31,14 @@ internal sealed class ManifestTable : DataGridView
         {
             Name = "Checked", HeaderText = "", Width = 35, AutoSizeMode = DataGridViewAutoSizeColumnMode.None
         });
-        AddColumn("Name", "文件名", typeof(string), 8);
-        AddColumn("Modified", "修改时间", typeof(DateTime), 7);
-        AddColumn("Size", "大小", typeof(long), 3);
-        AddColumn("State", "状态", typeof(string), 3);
-        AddColumn("Game", "游戏", typeof(string), 3);
-        AddColumn("Version", "版本", typeof(string), 2);
-        AddColumn("Package", "包体", typeof(string), 4);
-        AddColumn("Entries", "条目数", typeof(int), 3);
+        AddColumn("Name", L.Get("ManifestColumnName"), typeof(string), 8);
+        AddColumn("Modified", L.Get("ManifestColumnModified"), typeof(DateTime), 7);
+        AddColumn("Size", L.Get("ManifestColumnSize"), typeof(long), 3);
+        AddColumn("State", L.Get("ManifestColumnState"), typeof(string), 3);
+        AddColumn("Game", L.Get("ManifestColumnGame"), typeof(string), 3);
+        AddColumn("Version", L.Get("ManifestColumnVersion"), typeof(string), 2);
+        AddColumn("Package", L.Get("ManifestColumnPackage"), typeof(string), 4);
+        AddColumn("Entries", L.Get("ManifestColumnEntryCount"), typeof(int), 3);
         Controls.Add(selectAll);
         selectAll.Click += (_, _) => ToggleAll();
         Layout += (_, _) => PositionSelectAll();
@@ -73,7 +73,7 @@ internal sealed class ManifestTable : DataGridView
                 return;
             }
             if (args.ColumnIndex != 2 || args.Value is not DateTime utc) return;
-            args.Value = utc.ToLocalTime().ToString("yyyy-MM-dd HH'时'");
+            args.Value = utc.ToLocalTime().ToString(L.Get("ManifestModifiedFormat"));
             args.FormattingApplied = true;
         };
         SelectionChanged += (_, _) => { if (!updating) ClearSelection(); };
@@ -155,7 +155,8 @@ internal sealed class ManifestTable : DataGridView
     internal static string FormatSize(long bytes)
     {
         decimal value = bytes / 1024m;
-        string[] units = ["KB", "MB", "GB", "TB", "PB", "EB"];
+        string[] units = [L.Get("UnitKB"), L.Get("UnitMB"), L.Get("UnitGB"),
+            L.Get("UnitTB"), L.Get("UnitPB"), L.Get("UnitEB")];
         int unitIndex = 0;
         while (value >= 999.5m && unitIndex < units.Length - 1) { value /= 1024m; unitIndex++; }
         int decimals = value >= 99.95m ? 0 : value >= 9.995m ? 1 : 2;
@@ -182,7 +183,8 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow[] added = complete.Where(file => known.Add(file.FullPath)).Select(file =>
         {
             var row = new DataGridViewRow { Tag = new ReferenceInput(file) };
-            row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, "未解析", "—", "—", null!, null!);
+            row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, StateText(ReferenceState.Unparsed), L.Get("UnavailableValue"), L.Get("UnavailableValue"), null!, null!);
+            row.Cells[Columns["State"]!.Index].Tag = ReferenceState.Unparsed;
             return row;
         }).ToArray();
         if (added.Length == 0) return;
@@ -212,8 +214,9 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow[] rows = inputs.Select(input =>
         {
             var row = new DataGridViewRow { Tag = input };
-            row.CreateCells(this, false, input.Remote!.Category, "—",
-                input.Remote.DownloadSize, "未获取", game, version, input.Remote.MatchingField, null!);
+            row.CreateCells(this, false, input.Remote!.Category, L.Get("UnavailableValue"),
+                input.Remote.DownloadSize, StateText(ReferenceState.Unfetched), game, version, input.Remote.MatchingField, null!);
+            row.Cells[Columns["State"]!.Index].Tag = ReferenceState.Unfetched;
             return row;
         }).ToArray();
         updating = true;
@@ -231,19 +234,19 @@ internal sealed class ManifestTable : DataGridView
     {
         foreach (DataGridViewRow row in Rows)
         {
-            row.Cells["State"].Value = ((ReferenceInput)row.Tag!).Remote is null ? "未解析" : "未获取";
+            SetState(row, ((ReferenceInput)row.Tag!).Remote is null ? ReferenceState.Unparsed : ReferenceState.Unfetched);
             row.Cells["Entries"].Value = null;
         }
     }
 
-    internal void ShowResult(ReferenceInput input, string state, int? entries)
+    internal void ShowResult(ReferenceInput input, ReferenceState state, int? entries)
     {
         DataGridViewRow row = Rows.Cast<DataGridViewRow>().Single(row => ReferenceEquals(row.Tag, input));
-        row.Cells["State"].Value = state;
+        SetState(row, state);
         row.Cells["Entries"].Value = entries;
     }
 
-    internal void ShowResults(IEnumerable<(ReferenceInput Input, string State, int? Entries)> results)
+    internal void ShowResults(IEnumerable<(ReferenceInput Input, ReferenceState State, int? Entries)> results)
     {
         var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);
         SuspendLayout();
@@ -252,12 +255,38 @@ internal sealed class ManifestTable : DataGridView
             foreach (var result in results)
             {
                 DataGridViewRow row = rows[result.Input];
-                row.Cells["State"].Value = result.State;
+                SetState(row, result.State);
                 row.Cells["Entries"].Value = result.Entries;
             }
         }
         finally { ResumeLayout(); }
     }
+
+    internal void ResetFetching()
+    {
+        foreach (DataGridViewRow row in Rows)
+            if (row.Cells["State"].Tag is ReferenceState.Fetching) SetState(row, ReferenceState.Unfetched);
+    }
+
+    private static void SetState(DataGridViewRow row, ReferenceState state)
+    {
+        row.Cells["State"].Tag = state;
+        row.Cells["State"].Value = StateText(state);
+    }
+
+    internal static string StateText(ReferenceState state) => L.Get(state switch
+    {
+        ReferenceState.Unparsed => "StateUnparsed",
+        ReferenceState.Unfetched => "StateUnfetched",
+        ReferenceState.Pending => "StatePending",
+        ReferenceState.Fetching => "StateFetching",
+        ReferenceState.Parsed => "StateParsed",
+        ReferenceState.Failed => "StateFailed",
+        ReferenceState.Cancelled => "StateCancelled",
+        _ => throw new ArgumentOutOfRangeException(nameof(state))
+    });
 }
+
+internal enum ReferenceState { Unparsed, Unfetched, Pending, Fetching, Parsed, Failed, Cancelled }
 
 internal sealed record ReferenceInput(LocalManifestFile File, RemoteManifest? Remote = null, byte[]? Content = null);

@@ -5,6 +5,8 @@ using Xunit;
 
 namespace HoyoFileClean.Desktop.Tests;
 
+// TableLayout uses shared mutable sizing proxies, so native UI tests must not lay out concurrently.
+[Collection("Windows Forms")]
 public sealed class ParsingDiagnosticsTests
 {
     [Fact(Explicit = true)]

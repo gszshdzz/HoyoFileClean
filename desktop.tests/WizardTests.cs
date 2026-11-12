@@ -5,6 +5,7 @@ using Xunit;
 
 namespace HoyoFileClean.Desktop.Tests;
 
+[Collection("Windows Forms")]
 public sealed class WizardTests
 {
     [Fact]
@@ -1323,7 +1324,8 @@ public sealed class WizardTests
                     Size preferred = label.GetPreferredSize(new Size(label.Width, 0));
                     Assert.True(label.Height >= preferred.Height,
                         $"text={label.Text}; actual={label.Size}; preferred={preferred}");
-                    Assert.True(label.Bottom <= input.Height, $"labelBottom={label.Bottom}, inputHeight={input.Height}");
+                    Assert.True(label.Bottom <= input.Height,
+                        $"local={local}, iteration={i}, client={form.ClientSize}, name={label.Name}, text={label.Text}, visible={label.Visible}, bounds={label.Bounds}, font={label.Font}, input={input.Bounds}, labelBottom={label.Bottom}, inputHeight={input.Height}");
                 }
             }
         }

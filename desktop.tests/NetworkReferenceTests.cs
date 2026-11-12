@@ -9,6 +9,7 @@ using Xunit;
 
 namespace HoyoFileClean.Desktop.Tests;
 
+[Collection("Windows Forms")]
 public sealed class NetworkReferenceTests
 {
     private sealed class Handler : HttpMessageHandler

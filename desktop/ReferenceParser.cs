@@ -1,7 +1,15 @@
 namespace HoyoFileClean.Desktop;
 
 internal sealed record ReferenceParseItem(int? Entries, Exception? Error);
-internal sealed record ReferenceParseBatch(ReferenceParseItem[] Items, FileListSnapshot? Snapshot, Exception? CombinedError);
+
+internal sealed class ReferenceParseBatch(ReferenceParseItem[] items, FileListSnapshot? snapshot, Exception? combinedError)
+{
+    public IReadOnlyList<ReferenceParseItem> Items { get; } = Array.AsReadOnly(items);
+
+    // A batch can retain row diagnostics without exposing a usable partial snapshot.
+    public FileListSnapshot GetSnapshot() => snapshot ?? throw new InvalidDataException(null,
+        Items.FirstOrDefault(item => item.Error is not null)?.Error ?? combinedError);
+}
 
 // Workers merge each file immediately. Failed batches retain summaries, not parsed file lists.
 internal sealed class ReferenceParser

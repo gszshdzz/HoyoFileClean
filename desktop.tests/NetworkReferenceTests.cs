@@ -21,6 +21,8 @@ public sealed class NetworkReferenceTests
         internal bool ExtraGames;
         internal bool ExtraPackage;
         internal bool SharedManifestUrl;
+        internal bool FailExtraPackage;
+        internal bool ConflictingExtraPackage;
         internal bool CorruptManifest;
         internal string? BlockPath;
         internal bool BlockBody;
@@ -45,8 +47,7 @@ public sealed class NetworkReferenceTests
             bool china = request.RequestUri!.Host == "hyp-api.mihoyo.com";
             if (FailChina && china) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { RequestMessage = request };
             string biz = china ? "hk4e_cn" : "hk4e_global";
-            byte[] bytes = new SophonManifestProto { Assets = { new SophonManifestAssetProperty
-            { AssetName = "Data/file", AssetSize = 3, AssetHashMd5 = "900150983cd24fb0d6963f7d28e17f72" } } }.ToByteArray();
+            byte[] bytes = ManifestBytes(3);
             object data;
             if (request.RequestUri.AbsolutePath.EndsWith("getGameBranches"))
                 data = new { game_branches = (NoGame ? Array.Empty<(string Biz, string Id)>()
@@ -57,19 +58,34 @@ public sealed class NetworkReferenceTests
             {
                 string version = Uri.UnescapeDataString(request.RequestUri.Query.Split("tag=")[1]);
                 Versions.Add(version);
-                data = new { tag = version, build_id = "build", manifests = (ExtraPackage ? new[] { "game", "future-voice" } : new[] { "game" }).Select(field => new
+                data = new { tag = version, build_id = "build", manifests = (ExtraPackage ? new[] { "game", "future-voice" } : new[] { "game" }).Select(field =>
                 {
-                    matching_field = field, category_name = "类别-" + field,
-                    manifest = new { id = "manifest-" + (SharedManifestUrl ? "shared" : field), checksum = Convert.ToHexString(MD5.HashData(bytes)), compressed_size = bytes.Length, uncompressed_size = bytes.Length },
-                    manifest_download = new { url_prefix = "https://autopatchcn.yuanshen.com/test", url_suffix = "", compression = 0, encryption = 0 }
+                    byte[] content = ConflictingExtraPackage && field == "future-voice" ? ManifestBytes(4) : bytes;
+                    return new
+                    {
+                        matching_field = field, category_name = "类别-" + field,
+                        manifest = new { id = "manifest-" + (SharedManifestUrl ? "shared" : field), checksum = Convert.ToHexString(MD5.HashData(content)), compressed_size = content.Length, uncompressed_size = content.Length },
+                        manifest_download = new { url_prefix = "https://autopatchcn.yuanshen.com/test", url_suffix = "", compression = 0, encryption = 0 }
+                    };
                 }) };
             }
-            else return new HttpResponseMessage(Fail ? HttpStatusCode.NotFound : HttpStatusCode.OK)
-                { RequestMessage = request, Content = BlockBody ? new StreamContent(new StalledStream(this))
-                    : new ByteArrayContent(CorruptManifest ? new byte[bytes.Length] : bytes) };
+            else
+            {
+                bool extra = request.RequestUri.AbsolutePath.EndsWith("manifest-future-voice");
+                if (extra && ConflictingExtraPackage) bytes = ManifestBytes(4);
+                return new HttpResponseMessage(Fail || extra && FailExtraPackage ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+                    { RequestMessage = request, Content = BlockBody ? new StreamContent(new StalledStream(this))
+                        : new ByteArrayContent(CorruptManifest ? new byte[bytes.Length] : bytes) };
+            }
             return new HttpResponseMessage(Fail ? HttpStatusCode.NotFound : HttpStatusCode.OK)
             { RequestMessage = request, Content = new StringContent(JsonSerializer.Serialize(new { retcode = 0, data })) };
         }
+
+        private static byte[] ManifestBytes(long size) => new SophonManifestProto
+        {
+            Assets = { new SophonManifestAssetProperty
+            { AssetName = "Data/file", AssetSize = size, AssetHashMd5 = "900150983cd24fb0d6963f7d28e17f72" } }
+        }.ToByteArray();
     }
 
     private sealed class StalledStream(Handler handler) : Stream
@@ -576,6 +592,47 @@ public sealed class NetworkReferenceTests
         Assert.DoesNotContain("勾选后解析", Find<Label>(form, "Status").Text);
         Assert.False(Find<Button>(form, "Next").Enabled);
         Assert.False(Find<ProgressBar>(form, "OperationProgress").Visible);
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FailedMultiPackageBatchCannotAdvanceAndCanRecover(bool conflict) => OnSta(() =>
+    {
+        using var handler = new Handler
+        { ExtraPackage = true, FailExtraPackage = !conflict, ConflictingExtraPackage = conflict };
+        using var http = new HttpClient(handler);
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        ClickAndWait(form, session, "QueryNetwork");
+        Find<ListBox>(form, "NetworkGames").SelectedIndex = 0;
+        ClickAndWait(form, session, "GetNetworkManifests");
+        var table = Find<ManifestTable>(form, "NetworkManifests");
+        foreach (DataGridViewRow row in table.Rows) row.Cells["Checked"].Value = true;
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.Equal(4, handler.Requests);
+        Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Assert.Contains("部分文件无效或所选清单存在同侧冲突", Find<Label>(form, "Status").Text);
+        Assert.All(table.Rows.Cast<DataGridViewRow>(), row =>
+        {
+            bool parsed = conflict || (string?)row.Cells["Package"].Value == "game";
+            Assert.Equal(parsed ? "已解析" : "失败", row.Cells["State"].Value);
+            Assert.Equal(parsed ? 1 : (int?)null, row.Cells["Entries"].Value);
+        });
+        Assert.False(Find<ProgressBar>(form, "OperationProgress").Visible);
+        handler.FailExtraPackage = handler.ConflictingExtraPackage = false;
+        ClickAndWait(form, session, "GetNetworkManifests");
+        Assert.Empty(table.CheckedInputs);
+        foreach (DataGridViewRow row in table.Rows) row.Cells["Checked"].Value = true;
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.Equal(7, handler.Requests);
+        Assert.NotNull(session.Reference);
+        Assert.Equal(1, session.Reference.FileCount);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        Assert.All(table.Rows.Cast<DataGridViewRow>(), row => Assert.Equal("已解析", row.Cells["State"].Value));
     });
 
     [Fact]

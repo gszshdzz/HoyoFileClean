@@ -9,7 +9,7 @@ public sealed class ReferenceParserTests
     private static ReferenceInput[] Inputs(params string[] paths)
         => paths.Select(path => new ReferenceInput(new LocalManifestFile(path, path, 0, default))).ToArray();
 
-    private static FileListSnapshot Sample()
+    private static FileListSnapshot Sample(long size = 3)
     {
         string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
@@ -17,7 +17,7 @@ public sealed class ReferenceParserTests
         string path = Path.Combine(directory, "sample.json");
         File.WriteAllText(path, JsonSerializer.Serialize(new
         {
-            fileCount = 1, totalSize = 3, files = new[] { new { path = "file", size = 3 } }
+            fileCount = 1, totalSize = size, files = new[] { new { path = "file", size } }
         }));
         return ManifestConverter.Read(path, TestContext.Current.CancellationToken);
     }
@@ -54,7 +54,8 @@ public sealed class ReferenceParserTests
         Assert.Equal(0, active);
         Assert.Equal(new int?[] { 1, 1, null, 1 }, result.Items.Select(item => item.Entries));
         Assert.IsType<IOException>(result.Items[2].Error);
-        Assert.Null(result.Snapshot);
+        var failure = Assert.Throws<InvalidDataException>(() => result.GetSnapshot());
+        Assert.Same(result.Items[2].Error, failure.InnerException);
     }
 
     [Fact]
@@ -107,7 +108,8 @@ public sealed class ReferenceParserTests
             ReferenceParseBatch result = parser.Parse(Inputs("a", "bad", "b"), TestContext.Current.CancellationToken, concurrency, reporter);
             Assert.Equal(new[] { 1, 2, 3 }, counts.Order());
             Assert.Equal(new int?[] { 1, null, 1 }, result.Items.Select(item => item.Entries));
-            Assert.Null(result.Snapshot);
+            var failure = Assert.Throws<InvalidDataException>(() => result.GetSnapshot());
+            Assert.Same(result.Items[1].Error, failure.InnerException);
         }
         Assert.Equal(1, ReferenceParser.DefaultConcurrency);
         foreach (int invalid in new[] { 0, -1, 129 })
@@ -146,12 +148,27 @@ public sealed class ReferenceParserTests
     {
         FileListSnapshot snapshot = Sample();
         var parser = new ReferenceParser((_, _) => snapshot);
-        Assert.Equal(2, parser.Parse(Inputs("a", "b"), TestContext.Current.CancellationToken).Snapshot!.Sources.Count);
-        Assert.Single(parser.Parse(Inputs("c"), TestContext.Current.CancellationToken).Snapshot!.Sources);
+        Assert.Equal(2, parser.Parse(Inputs("a", "b"), TestContext.Current.CancellationToken).GetSnapshot().Sources.Count);
+        Assert.Single(parser.Parse(Inputs("c"), TestContext.Current.CancellationToken).GetSnapshot().Sources);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
         Assert.ThrowsAny<OperationCanceledException>(() => parser.Parse(Inputs("d"), cancelled.Token));
-        Assert.Single(parser.Parse(Inputs("e"), TestContext.Current.CancellationToken).Snapshot!.Sources);
+        Assert.Single(parser.Parse(Inputs("e"), TestContext.Current.CancellationToken).GetSnapshot().Sources);
+    }
+
+    [Fact]
+    public void SuccessfulReadsWithMergeConflictKeepRowResultsButCannotReturnSnapshot()
+    {
+        FileListSnapshot first = Sample(), conflicting = Sample(4);
+        var parser = new ReferenceParser((input, _) => input.File.FullPath == "first" ? first : conflicting);
+        ReferenceParseBatch result = parser.Parse(Inputs("first", "conflicting"), TestContext.Current.CancellationToken);
+        Assert.All(result.Items, item =>
+        {
+            Assert.Equal(1, item.Entries);
+            Assert.Null(item.Error);
+        });
+        var failure = Assert.Throws<InvalidDataException>(() => result.GetSnapshot());
+        Assert.Equal(CoreErrorCode.InputConflict, Assert.IsType<CoreException>(failure.InnerException).Code);
     }
 
     [Theory]

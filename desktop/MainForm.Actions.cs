@@ -52,12 +52,7 @@ public sealed partial class MainForm
             progress.Value = inputs.Length;
             table.ShowResults(inputs.Select((input, i) => (input,
                 result.Items[i].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[i].Entries)));
-            if (result.Items.Any(item => item.Error is not null))
-                throw new InvalidDataException(L.Get("BatchParseFailed"),
-                    result.Items.First(item => item.Error is not null).Error);
-            if (result.CombinedError is not null)
-                throw new InvalidDataException(L.Get("BatchMergeFailed"), result.CombinedError);
-            session.AcceptReference(result.Snapshot!);
+            session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => ResultText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Format("ParsingStartProgress", inputs.Length), totalFiles: inputs.Length,
         onFinished: () =>

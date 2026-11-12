@@ -187,11 +187,7 @@ public sealed partial class MainForm
         {
             networkManifests.ShowResults(inputs.Select((input, index) => (input,
                 result.Items[index].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[index].Entries)));
-            if (result.Items.Any(item => item.Error is not null))
-                throw new InvalidDataException(L.Get("NetworkBatchParseFailed"), result.Items.First(item => item.Error is not null).Error);
-            if (result.CombinedError is not null)
-                throw new InvalidDataException(L.Get("NetworkBatchMergeFailed"), result.CombinedError);
-            session.AcceptReference(result.Snapshot!);
+            session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => ResultText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Get("FetchingManifests"), () => L.Format("NetworkBatchParsed", inputs.Length), onFinished: () =>
         {

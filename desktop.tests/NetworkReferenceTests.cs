@@ -20,6 +20,7 @@ public sealed class NetworkReferenceTests
         internal bool NoGame;
         internal bool ExtraGames;
         internal bool ExtraPackage;
+        internal bool SharedManifestUrl;
         internal bool CorruptManifest;
         internal string? BlockPath;
         internal bool BlockBody;
@@ -59,7 +60,7 @@ public sealed class NetworkReferenceTests
                 data = new { tag = version, build_id = "build", manifests = (ExtraPackage ? new[] { "game", "future-voice" } : new[] { "game" }).Select(field => new
                 {
                     matching_field = field, category_name = "类别-" + field,
-                    manifest = new { id = "manifest-" + field, checksum = Convert.ToHexString(MD5.HashData(bytes)), compressed_size = bytes.Length, uncompressed_size = bytes.Length },
+                    manifest = new { id = "manifest-" + (SharedManifestUrl ? "shared" : field), checksum = Convert.ToHexString(MD5.HashData(bytes)), compressed_size = bytes.Length, uncompressed_size = bytes.Length },
                     manifest_download = new { url_prefix = "https://autopatchcn.yuanshen.com/test", url_suffix = "", compression = 0, encryption = 0 }
                 }) };
             }
@@ -513,6 +514,43 @@ public sealed class NetworkReferenceTests
             Assert.Equal(new float[] { 8, 7, 3, 3, 3, 2, 4, 3 },
                 columns.Cast<DataGridViewColumn>().Skip(1).Select(column => column.FillWeight));
         }
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SelectedPackagesKeepTheirIdentityEvenWhenDownloadUrlsMatch(bool sharedUrl) => OnSta(() =>
+    {
+        using var handler = new Handler { ExtraPackage = true, SharedManifestUrl = sharedUrl };
+        using var http = new HttpClient(handler);
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        ClickAndWait(form, session, "QueryNetwork");
+        Find<ListBox>(form, "NetworkGames").SelectedIndex = 0;
+        ClickAndWait(form, session, "GetNetworkManifests");
+        var table = Find<ManifestTable>(form, "NetworkManifests");
+        Assert.Equal(2, table.Rows.Count);
+        Assert.Empty(table.CheckedInputs);
+        foreach (DataGridViewRow row in table.Rows) row.Cells["Checked"].Value = true;
+        ReferenceInput[] inputs = table.CheckedInputs;
+        Assert.Equal(2, inputs.Select(input => input.Remote!.MatchingField).Distinct().Count());
+        Assert.Equal(sharedUrl ? 1 : 2, inputs.Select(input => input.Remote!.Url).Distinct().Count());
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.Equal(4, handler.Requests);
+        Assert.NotNull(session.Reference);
+        Assert.Equal(1, session.Reference.FileCount);
+        Assert.Equal(2, session.Reference.Sources.Count);
+        Assert.All(table.Rows.Cast<DataGridViewRow>(), row =>
+        {
+            Assert.Equal("已解析", row.Cells["State"].Value);
+            Assert.Equal(1, row.Cells["Entries"].Value);
+        });
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        table.Rows[0].Cells["Checked"].Value = false;
+        Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "Next").Enabled);
     });
 
     [Fact]

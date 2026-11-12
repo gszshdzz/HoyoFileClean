@@ -8,34 +8,34 @@ internal sealed class ReferenceParser
 {
     internal const int DefaultConcurrency = Maintenance.DefaultParsingConcurrency;
     internal const int MaximumConcurrency = Maintenance.MaximumParsingConcurrency;
-    private readonly Func<string, CancellationToken, FileListSnapshot> read;
+    private readonly Func<ReferenceInput, CancellationToken, FileListSnapshot> read;
 
-    public ReferenceParser() : this(ManifestConverter.Read) { }
+    public ReferenceParser() : this((input, token) => ManifestConverter.Read(input.File.FullPath, token)) { }
 
-    internal ReferenceParser(Func<string, CancellationToken, FileListSnapshot> read)
+    internal ReferenceParser(Func<ReferenceInput, CancellationToken, FileListSnapshot> read)
     {
         this.read = read;
     }
 
-    public ReferenceParseBatch Parse(string[] paths, CancellationToken cancellationToken,
+    public ReferenceParseBatch Parse(ReferenceInput[] inputs, CancellationToken cancellationToken,
         int concurrency = DefaultConcurrency, IProgress<int>? progress = null)
     {
         if (concurrency is < 1 or > MaximumConcurrency) throw new ArgumentOutOfRangeException(nameof(concurrency));
-        var items = new ReferenceParseItem[paths.Length];
+        var items = new ReferenceParseItem[inputs.Length];
         var gate = new object();
         FileComparer.SnapshotAccumulator? accumulator = new();
         Exception? combinedError = null;
         int completed = 0;
         try
         {
-            Parallel.For(0, paths.Length, new ParallelOptions
+            Parallel.For(0, inputs.Length, new ParallelOptions
             {
                 MaxDegreeOfParallelism = concurrency, CancellationToken = cancellationToken
             }, index =>
             {
                 try
                 {
-                    FileListSnapshot snapshot = read(paths[index], cancellationToken);
+                    FileListSnapshot snapshot = read(inputs[index], cancellationToken);
                     cancellationToken.ThrowIfCancellationRequested();
                     items[index] = new ReferenceParseItem(snapshot.FileCount, null);
                     lock (gate)

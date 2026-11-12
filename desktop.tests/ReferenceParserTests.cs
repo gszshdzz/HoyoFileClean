@@ -6,6 +6,9 @@ namespace HoyoFileClean.Desktop.Tests;
 
 public sealed class ReferenceParserTests
 {
+    private static ReferenceInput[] Inputs(params string[] paths)
+        => paths.Select(path => new ReferenceInput(new LocalManifestFile(path, path, 0, default))).ToArray();
+
     private static FileListSnapshot Sample()
     {
         string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -26,7 +29,7 @@ public sealed class ReferenceParserTests
         using var entered = new CountdownEvent(2);
         using var release = new ManualResetEventSlim();
         int active = 0, maximum = 0, started = 0;
-        var parser = new ReferenceParser((path, token) =>
+        var parser = new ReferenceParser((input, token) =>
         {
             int current = Interlocked.Increment(ref active);
             int old;
@@ -36,13 +39,13 @@ public sealed class ReferenceParserTests
             {
                 if (Interlocked.Increment(ref started) <= 2) entered.Signal();
                 if (!release.Wait(TimeSpan.FromSeconds(10), token)) throw new TimeoutException();
-                if (path == "bad") throw new IOException("invalid input");
+                if (input.File.FullPath == "bad") throw new IOException("invalid input");
                 return snapshot;
             }
             finally { Interlocked.Decrement(ref active); }
         });
         CancellationToken token = TestContext.Current.CancellationToken;
-        Task<ReferenceParseBatch> work = Task.Run(() => parser.Parse(["first", "second", "bad", "last"], token, 2), token);
+        Task<ReferenceParseBatch> work = Task.Run(() => parser.Parse(Inputs("first", "second", "bad", "last"), token, 2), token);
         bool concurrent = entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         release.Set();
         ReferenceParseBatch result = await work;
@@ -73,7 +76,7 @@ public sealed class ReferenceParserTests
             }
             finally { Interlocked.Decrement(ref active); }
         });
-        Task<ReferenceParseBatch> work = Task.Run(() => parser.Parse(Enumerable.Range(0, 100).Select(i => i.ToString()).ToArray(), cancellation.Token, 2), TestContext.Current.CancellationToken);
+        Task<ReferenceParseBatch> work = Task.Run(() => parser.Parse(Inputs(Enumerable.Range(0, 100).Select(i => i.ToString()).ToArray()), cancellation.Token, 2), TestContext.Current.CancellationToken);
         bool concurrent = entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await work);
@@ -96,19 +99,19 @@ public sealed class ReferenceParserTests
     public void ProgressCountsSuccessfulAndFailedFilesAndAcceptsConfiguredConcurrency()
     {
         FileListSnapshot snapshot = Sample();
-        var parser = new ReferenceParser((path, _) => path == "bad" ? throw new IOException("invalid") : snapshot);
+        var parser = new ReferenceParser((input, _) => input.File.FullPath == "bad" ? throw new IOException("invalid") : snapshot);
         foreach (int concurrency in new[] { 1, 4, 16, 128 })
         {
             var counts = new System.Collections.Concurrent.ConcurrentQueue<int>();
             var reporter = new InlineProgress(counts.Enqueue);
-            ReferenceParseBatch result = parser.Parse(["a", "bad", "b"], TestContext.Current.CancellationToken, concurrency, reporter);
+            ReferenceParseBatch result = parser.Parse(Inputs("a", "bad", "b"), TestContext.Current.CancellationToken, concurrency, reporter);
             Assert.Equal(new[] { 1, 2, 3 }, counts.Order());
             Assert.Equal(new int?[] { 1, null, 1 }, result.Items.Select(item => item.Entries));
             Assert.Null(result.Snapshot);
         }
         Assert.Equal(1, ReferenceParser.DefaultConcurrency);
         foreach (int invalid in new[] { 0, -1, 129 })
-            Assert.Throws<ArgumentOutOfRangeException>(() => parser.Parse(["a"], TestContext.Current.CancellationToken, invalid));
+            Assert.Throws<ArgumentOutOfRangeException>(() => parser.Parse(Inputs("a"), TestContext.Current.CancellationToken, invalid));
     }
 
     [Fact]
@@ -127,7 +130,7 @@ public sealed class ReferenceParserTests
             }
             return snapshot;
         });
-        Assert.ThrowsAny<OperationCanceledException>(() => parser.Parse(["a", "b", "c"], cancellation.Token,
+        Assert.ThrowsAny<OperationCanceledException>(() => parser.Parse(Inputs("a", "b", "c"), cancellation.Token,
             1, new InlineProgress(counts.Add)));
         Assert.Equal(new[] { 1 }, counts);
         Assert.Equal(2, calls);
@@ -143,12 +146,12 @@ public sealed class ReferenceParserTests
     {
         FileListSnapshot snapshot = Sample();
         var parser = new ReferenceParser((_, _) => snapshot);
-        Assert.Equal(2, parser.Parse(["a", "b"], TestContext.Current.CancellationToken).Snapshot!.Sources.Count);
-        Assert.Single(parser.Parse(["c"], TestContext.Current.CancellationToken).Snapshot!.Sources);
+        Assert.Equal(2, parser.Parse(Inputs("a", "b"), TestContext.Current.CancellationToken).Snapshot!.Sources.Count);
+        Assert.Single(parser.Parse(Inputs("c"), TestContext.Current.CancellationToken).Snapshot!.Sources);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        Assert.ThrowsAny<OperationCanceledException>(() => parser.Parse(["d"], cancelled.Token));
-        Assert.Single(parser.Parse(["e"], TestContext.Current.CancellationToken).Snapshot!.Sources);
+        Assert.ThrowsAny<OperationCanceledException>(() => parser.Parse(Inputs("d"), cancelled.Token));
+        Assert.Single(parser.Parse(Inputs("e"), TestContext.Current.CancellationToken).Snapshot!.Sources);
     }
 
     [Theory]

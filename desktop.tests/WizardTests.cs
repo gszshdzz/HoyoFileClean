@@ -1228,7 +1228,7 @@ public sealed class WizardTests
                 enteredSecond.Set();
                 if (!release.Wait(TimeSpan.FromSeconds(10), token)) throw new TimeoutException();
             }
-            return ManifestConverter.Read(input, token);
+            return ManifestConverter.Read(input.File.FullPath, token);
         });
         var session = new WizardSession();
         using var form = new MainForm(session, parser)
@@ -1286,7 +1286,7 @@ public sealed class WizardTests
                 if (!token.WaitHandle.WaitOne(TimeSpan.FromSeconds(10))) throw new TimeoutException();
                 token.ThrowIfCancellationRequested();
             }
-            return ManifestConverter.Read(input, token);
+            return ManifestConverter.Read(input.File.FullPath, token);
         });
         using var form = new MainForm(session, parser)
         {

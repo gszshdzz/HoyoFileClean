@@ -180,12 +180,9 @@ public sealed partial class MainForm
         networkManifests.ShowResults(inputs.Select(input => (input, ReferenceState.Fetching, (int?)null)));
         await RunNetworkWorkAsync(token =>
         {
-            var parser = new ReferenceParser((path, cancellation) =>
-            {
-                ReferenceInput input = inputs.Single(item => item.File.FullPath == path);
-                return networkClient.ReadAsync(input.Remote!, cancellation).GetAwaiter().GetResult();
-            });
-            return parser.Parse(inputs.Select(input => input.File.FullPath).ToArray(), token);
+            var parser = new ReferenceParser((input, cancellation) =>
+                networkClient.ReadAsync(input.Remote!, cancellation).GetAwaiter().GetResult());
+            return parser.Parse(inputs, token);
         }, result =>
         {
             networkManifests.ShowResults(inputs.Select((input, index) => (input,

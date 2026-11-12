@@ -288,5 +288,3 @@ internal sealed class ManifestTable : DataGridView
 }
 
 internal enum ReferenceState { Unparsed, Unfetched, Pending, Fetching, Parsed, Failed, Cancelled }
-
-internal sealed record ReferenceInput(LocalManifestFile File, RemoteManifest? Remote = null, byte[]? Content = null);

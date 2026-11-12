@@ -45,7 +45,7 @@ public sealed partial class MainForm
         };
         refreshProgress.Start();
         ReferenceParser parser = referenceParser;
-        await RunWorkAsync(() => parser.Parse(inputs.Select(input => input.File.FullPath).ToArray(),
+        await RunWorkAsync(() => parser.Parse(inputs,
             cancellation.Token, progress: reporter), result =>
         {
             cancellation.Token.ThrowIfCancellationRequested();

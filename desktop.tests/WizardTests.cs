@@ -854,7 +854,7 @@ public sealed class WizardTests
             new InvalidDataException(diagnostic), new ArgumentException(diagnostic)
         })
         {
-            string text = MainForm.DescribeDesktopError(error);
+            string text = HoyoFileClean.Presentation.DiagnosticText.ForDesktop(error);
             Assert.NotEmpty(text);
             Assert.DoesNotContain(diagnostic, text);
         }

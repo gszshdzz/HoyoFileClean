@@ -56,6 +56,7 @@ dotnet run --project desktop\HoyoFileClean.Desktop.csproj
 - `core/`：转换、扫描、清单读取校验、比较与安全 JSON 写出，不依赖控制台或 Windows Forms；返回数据和结构化错误，不定义用户提示。
 - `cli/Program.cs`：CLI 参数、操作调用和退出码；`cli/CliOutput.cs`：面向用户的帮助、摘要、警告、错误；`cli/ProgressDisplay.cs`：终端进度格式。
 - `desktop/`：原生向导、界面状态和目录展示，直接引用核心库，不启动 CLI、不解析控制台文字。
+- `presentation/`：语言资源与共用错误解释、来源网址脱敏；引用核心错误类型，不向核心反向注入文案。CLI／GUI 保留不同展示方式。
 
 CLI 与 GUI 共用同一套业务逻辑和清单校验。多输入只在核心比较模块内汇总，不新增组合清单模块、组合文件或另一套清单格式。
 

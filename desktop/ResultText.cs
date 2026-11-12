@@ -4,11 +4,6 @@ namespace HoyoFileClean.Desktop;
 
 internal static class ResultText
 {
-    internal static string DisplaySource(string source)
-        => Uri.TryCreate(source, UriKind.Absolute, out var url) && url.Scheme is "https" or "http"
-            ? new UriBuilder(url) { UserName = "", Password = "", Query = "", Fragment = "" }.Uri.AbsoluteUri
-            : source;
-
     internal static string DescribeGameStatus(FileListSnapshot snapshot, bool imported)
     {
         ScanScope scan = snapshot.Sources[0].Scan!;
@@ -30,7 +25,7 @@ internal static class ResultText
         foreach (FileListSource source in snapshot.Sources)
         {
             text.AppendLine();
-            text.AppendLine(L.Get("SourcePrefix") + DisplaySource(source.Path));
+            text.AppendLine(L.Get("SourcePrefix") + DiagnosticText.DisplaySource(source.Path));
             text.AppendLine(L.Format("SourceSummary", source.FileCount, source.TotalSize, source.HashAlgorithm ?? L.Get("SizeOnlyHashDescription")));
             if (source.Scan is { } scan)
             {

@@ -206,15 +206,11 @@ public static class FileComparer
             foreach (ManifestFile? file in list.Files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (file is null || file.Size < 0 || (hasHashes ? !IsMd5(file.Hash) : file.Hash is not null))
-                {
-                    throw new CoreException(CoreErrorCode.FileMetadataInvalid, input: input);
-                }
-                string path = FilePathRules.NormalizeRelative(file.Path, input);
-                normalized.Add(file with { Path = path, Hash = file.Hash?.ToLowerInvariant() });
+                ManifestFile entry = FileEntryRules.Normalize(file, hasHashes, input);
+                normalized.Add(entry);
                 try
                 {
-                    totalSize = checked(totalSize + file.Size);
+                    totalSize = checked(totalSize + entry.Size);
                 }
                 catch (OverflowException error)
                 {
@@ -260,10 +256,6 @@ public static class FileComparer
             files.TryAdd(file.Path, file);
         }
     }
-
-    private static bool IsMd5(string? value)
-        => value is { Length: 32 } && value.All(character => character is >= '0' and <= '9'
-            or >= 'a' and <= 'f' or >= 'A' and <= 'F');
 
 
 }

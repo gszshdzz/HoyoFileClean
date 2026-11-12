@@ -189,15 +189,6 @@ public static class ManifestConverter
     }
 
     private static ManifestFile ReadFile(SophonFileAsset asset)
-    {
-        if (asset.AssetSize < 0 || asset.AssetHashMd5.Length != 32
-            || asset.AssetHashMd5.Any(character => character is not
-                (>= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F')))
-        {
-            throw new CoreException(CoreErrorCode.FileMetadataInvalid, asset.AssetName);
-        }
-
-        string path = FilePathRules.NormalizeRelative(asset.AssetName);
-        return new ManifestFile(path, asset.AssetSize, asset.AssetHashMd5.ToLowerInvariant());
-    }
+        => FileEntryRules.Normalize(new ManifestFile(asset.AssetName, asset.AssetSize, asset.AssetHashMd5),
+            hasHashes: true, metadataPath: asset.AssetName);
 }

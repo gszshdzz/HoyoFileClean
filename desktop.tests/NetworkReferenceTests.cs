@@ -639,8 +639,8 @@ public sealed class NetworkReferenceTests
     public void SourceDisplayRemovesUrlSecretsWithoutChangingIdentity()
     {
         const string source = "https://autopatchcn.yuanshen.com/test/manifest?signature=private-value#fragment";
-        Assert.Equal("https://autopatchcn.yuanshen.com/test/manifest", ResultText.DisplaySource(source));
-        Assert.Equal(@"C:\manifests\local", ResultText.DisplaySource(@"C:\manifests\local"));
+        Assert.Equal("https://autopatchcn.yuanshen.com/test/manifest", HoyoFileClean.Presentation.DiagnosticText.DisplaySource(source));
+        Assert.Equal(@"C:\manifests\local", HoyoFileClean.Presentation.DiagnosticText.DisplaySource(@"C:\manifests\local"));
     }
 
     private static void ClickAndWait(MainForm form, WizardSession session, string name)

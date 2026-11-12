@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\core\HoyoFileClean.Core.csproj" />
     <Compile Include="..\config\PresentationOptions.cs" Link="Configuration\PresentationOptions.cs" />
     <EmbeddedResource Include="Languages\*.json" />
   </ItemGroup>

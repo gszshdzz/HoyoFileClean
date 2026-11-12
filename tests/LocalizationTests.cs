@@ -15,17 +15,27 @@ public sealed class LocalizationTests
     {
         string name = $"HoyoFileClean.Presentation.Languages.{PresentationOptions.DefaultLanguage}.json";
         using Stream input = typeof(Text).Assembly.GetManifestResourceStream(name)!;
-        using JsonDocument language = JsonDocument.Parse(input);
-        JsonProperty[] entries = language.RootElement.EnumerateObject().ToArray();
-        Assert.Equal(entries.Length, entries.Select(entry => entry.Name).Distinct().Count());
-        foreach (JsonProperty entry in entries)
+        using JsonDocument fallback = JsonDocument.Parse(input);
+        string[] resources = typeof(Text).Assembly.GetManifestResourceNames()
+            .Where(resource => resource.StartsWith("HoyoFileClean.Presentation.Languages.", StringComparison.Ordinal)
+                && resource.EndsWith(".json", StringComparison.Ordinal)).ToArray();
+        Assert.Contains(name, resources);
+        foreach (string resource in resources)
         {
-            string id = entry.Name;
-            string template = Text.Get(id);
-            Assert.False(string.IsNullOrWhiteSpace(template), id.ToString());
-            CompositeFormat format = CompositeFormat.Parse(template);
-            object[] values = Enumerable.Repeat<object>(123, format.MinimumArgumentCount).ToArray();
-            Assert.NotNull(Text.Format(id, values));
+            using Stream localizedInput = typeof(Text).Assembly.GetManifestResourceStream(resource)!;
+            using JsonDocument language = JsonDocument.Parse(localizedInput);
+            JsonProperty[] entries = language.RootElement.EnumerateObject().ToArray();
+            Assert.Equal(entries.Length, entries.Select(entry => entry.Name).Distinct().Count());
+            foreach (JsonProperty entry in entries)
+            {
+                Assert.True(fallback.RootElement.TryGetProperty(entry.Name, out JsonElement original), $"{resource}: {entry.Name}");
+                string template = entry.Value.GetString()!;
+                Assert.False(string.IsNullOrWhiteSpace(template), $"{resource}: {entry.Name}");
+                CompositeFormat format = CompositeFormat.Parse(template);
+                Assert.Equal(CompositeFormat.Parse(original.GetString()!).MinimumArgumentCount, format.MinimumArgumentCount);
+                object[] values = Enumerable.Repeat<object>(123, format.MinimumArgumentCount).ToArray();
+                Assert.NotNull(string.Format(CultureInfo.InvariantCulture, format, values));
+            }
         }
     }
 
@@ -34,11 +44,11 @@ public sealed class LocalizationTests
     {
         string root = RepositoryRoot();
         int checkedCalls = 0;
-        foreach (string directory in new[] { "cli", "desktop" })
+        foreach (string directory in new[] { "cli", "desktop", "presentation" })
         foreach (string file in Directory.EnumerateFiles(Path.Combine(root, directory), "*.cs"))
         {
             string source = File.ReadAllText(file);
-            foreach (Match call in Regex.Matches(source, "\\bL\\.(?:Get|Format|FormatInvariant)\\(\\s*\"(?<id>[^\"]+)\""))
+            foreach (Match call in Regex.Matches(source, "\\b(?:L|Text)\\.(?:Get|Format|FormatInvariant)\\(\\s*\"(?<id>[^\"]+)\""))
             {
                 string id = call.Groups["id"].Value;
                 Assert.True(Text.Contains(id), $"{file}: {id}");
@@ -55,19 +65,70 @@ public sealed class LocalizationTests
     public void MissingKeyFailsExplicitlyInsteadOfShowingId()
         => Assert.Throws<MissingManifestResourceException>(() => Text.Get("not-a-real-resource-key"));
 
-    [Fact]
-    public void EveryCoreErrorHasExplicitCliTextMapping()
+    [Theory]
+    [InlineData("file", "InputFileMissing", "DesktopFileMissing")]
+    [InlineData("directory", "InputDirectoryMissing", "DesktopDirectoryMissing")]
+    [InlineData("permission", "FilePermissionDenied", "DesktopPermissionDenied")]
+    [InlineData("data", "InputDataInvalid", "DesktopBatchInvalid")]
+    [InlineData("network", "OfficialRequestFailed", "OfficialRequestFailed")]
+    [InlineData("cancel", "NetworkCancelledOrTimedOut", "DesktopNetworkCancelled")]
+    [InlineData("io", "FilePublicationFailed", "DesktopIoFailed")]
+    [InlineData("argument", "InvalidPathOrArgument", "DesktopArgumentInvalid")]
+    [InlineData("unsupported", "UnsupportedPathOrOperation", "DesktopArgumentInvalid")]
+    [InlineData("unknown", "ProcessingFailed", "DesktopOperationFailed")]
+    public void ErrorPresentationKeepsFrontendSpecificWording(string kind, string cliId, string desktopId)
     {
-        Type cli = System.Reflection.Assembly.Load("HoyoFileClean").GetType("HoyoFileClean.Cli.CliOutput")!;
-        var map = cli.GetMethod("ErrorTextId", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
-        var describe = cli.GetMethod("Describe", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        Exception error = kind switch
+        {
+            "file" => new FileNotFoundException(),
+            "directory" => new DirectoryNotFoundException(),
+            "permission" => new UnauthorizedAccessException(),
+            "data" => new InvalidDataException(),
+            "network" => new HttpRequestException(),
+            "cancel" => new OperationCanceledException(),
+            "io" => new IOException(),
+            "argument" => new ArgumentException(),
+            "unsupported" => new NotSupportedException(),
+            _ => new Exception()
+        };
+        Assert.Equal(Text.Get(cliId), DiagnosticText.ForCli(error));
+        Assert.Equal(Text.Get(desktopId), DiagnosticText.ForDesktop(error));
+    }
+
+    [Fact]
+    public void SourcePresentationRedactsOnlyWebCredentialsAndKeepsIdentityUntouched()
+    {
+        const string source = "https://example.invalid/manifest?signature=private-value#fragment";
+        Assert.Equal("https://example.invalid/manifest", DiagnosticText.DisplaySource(source));
+        Assert.Equal("https://example.invalid/manifest", DiagnosticText.DisplaySource("https://user:pass@example.invalid/manifest"));
+        Assert.Equal(@"C:\manifests\local", DiagnosticText.DisplaySource(@"C:\manifests\local"));
+        Assert.Equal("https://example.invalid/manifest?signature=private-value#fragment", source);
+    }
+
+    [Fact]
+    public void ErrorLimitsAndConfigurationPathComeFromMaintenance()
+    {
+        Assert.Equal(Text.Format("CoreErrorCode_ManifestCompressedSizeLimit", Maintenance.CompressedLimit / 1048576),
+            DiagnosticText.ForCli(new CoreException(CoreErrorCode.ManifestCompressedSizeLimit)));
+        Assert.Equal(Text.Format("CoreErrorCode_ManifestDecodedSizeLimit", Maintenance.DecodedLimit / 1048576),
+            DiagnosticText.ForCli(new CoreException(CoreErrorCode.ManifestDecodedSizeLimit)));
+        var configuration = new CoreException(CoreErrorCode.NetworkConfigurationInvalid);
+        Assert.Equal(Text.Format("CoreErrorCode_NetworkConfigurationInvalid", Maintenance.NetworkServicesRelativePath), DiagnosticText.ForCli(configuration));
+        Assert.Equal(Text.Format("DesktopConfigurationInvalid", Maintenance.NetworkServicesRelativePath), DiagnosticText.ForDesktop(configuration));
+    }
+
+    [Fact]
+    public void EveryCoreErrorHasTextThroughActualPresentationEntrypoints()
+    {
         foreach (CoreErrorCode code in Enum.GetValues<CoreErrorCode>())
         {
-            string id = Assert.IsType<string>(map.Invoke(null, [code]));
-            Assert.NotEqual("UnknownCoreError", id);
-            Assert.False(string.IsNullOrWhiteSpace(Text.Get(id)));
-            string text = Assert.IsType<string>(describe.Invoke(null, [code]));
-            Assert.DoesNotContain("{0}", text);
+            var error = new CoreException(code);
+            string cli = DiagnosticText.ForCli(error), desktop = DiagnosticText.ForDesktop(error);
+            Assert.NotEqual(Text.Get("UnknownCoreError"), cli);
+            Assert.False(string.IsNullOrWhiteSpace(cli));
+            Assert.False(string.IsNullOrWhiteSpace(desktop));
+            Assert.DoesNotContain("{0}", cli);
+            Assert.DoesNotContain("{0}", desktop);
         }
     }
 

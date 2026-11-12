@@ -53,7 +53,7 @@ public sealed partial class MainForm
             table.ShowResults(inputs.Select((input, i) => (input,
                 result.Items[i].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[i].Entries)));
             session.AcceptReference(result.GetSnapshot());
-            referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => ResultText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
+            referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Format("ParsingStartProgress", inputs.Length), totalFiles: inputs.Length,
         onFinished: () =>
         {
@@ -183,7 +183,7 @@ public sealed partial class MainForm
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            outcome = L.Get("StepFailedPrefix") + DescribeDesktopError(error);
+            outcome = L.Get("StepFailedPrefix") + DiagnosticText.ForDesktop(error);
         }
         finally
         {
@@ -234,29 +234,7 @@ public sealed partial class MainForm
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
             or NotSupportedException or System.Security.SecurityException)
-        { status.Text = L.Get("AddFilesFailedPrefix") + DescribeDesktopError(error); }
+        { status.Text = L.Get("AddFilesFailedPrefix") + DiagnosticText.ForDesktop(error); }
     }
-
-    internal static string DescribeDesktopError(Exception error) => error switch
-    {
-        CoreException { Code: CoreErrorCode.InputConflict } => L.Get("DesktopInputConflict"),
-        CoreException { Code: CoreErrorCode.OutputInsideScanRoot } => L.Get("DesktopOutputInsideRoot"),
-        CoreException { Code: CoreErrorCode.ManifestChannelUnavailable or CoreErrorCode.ManifestVersionUnavailable } => L.Get("DesktopVersionUnavailable"),
-        CoreException { Code: CoreErrorCode.ManifestGameAmbiguous } => L.Get("DesktopGameAmbiguous"),
-        CoreException { Code: CoreErrorCode.ManifestDownloadMismatch } => L.Get("DesktopDownloadMismatch"),
-        CoreException { Code: CoreErrorCode.ManifestNetworkSizeLimit } => L.Get("CoreErrorCode_ManifestNetworkSizeLimit"),
-        CoreException { Code: CoreErrorCode.NetworkConfigurationInvalid } => L.Format("DesktopConfigurationInvalid", Maintenance.NetworkServicesRelativePath),
-        CoreException { Code: CoreErrorCode.ManifestNetworkMetadataInvalid or CoreErrorCode.ManifestNetworkUnsupported } => L.Get("DesktopNetworkMetadataInvalid"),
-        CoreException => L.Get("DesktopListInvalid"),
-        FileNotFoundException => L.Get("DesktopFileMissing"),
-        DirectoryNotFoundException => L.Get("DesktopDirectoryMissing"),
-        UnauthorizedAccessException or System.Security.SecurityException => L.Get("DesktopPermissionDenied"),
-        InvalidDataException => L.Get("DesktopBatchInvalid"),
-        HttpRequestException => L.Get("OfficialRequestFailed"),
-        OperationCanceledException => L.Get("DesktopNetworkCancelled"),
-        IOException => L.Get("DesktopIoFailed"),
-        ArgumentException or NotSupportedException => L.Get("DesktopArgumentInvalid"),
-        _ => L.Get("DesktopOperationFailed")
-    };
 
 }

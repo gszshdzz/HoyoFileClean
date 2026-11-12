@@ -43,7 +43,7 @@ public sealed partial class MainForm
         }
         catch (CoreException error) when (error.Code == CoreErrorCode.NetworkConfigurationInvalid)
         {
-            networkConfigurationError = DescribeDesktopError(error);
+            networkConfigurationError = DiagnosticText.ForDesktop(error);
         }
         var choices = new TableLayoutPanel { Name = "NetworkChoices", Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 2 };
         for (int i = 0; i < 3; i++) choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
@@ -188,7 +188,7 @@ public sealed partial class MainForm
             networkManifests.ShowResults(inputs.Select((input, index) => (input,
                 result.Items[index].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[index].Entries)));
             session.AcceptReference(result.GetSnapshot());
-            referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => ResultText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
+            referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Get("FetchingManifests"), () => L.Format("NetworkBatchParsed", inputs.Length), onFinished: () =>
         {
             networkManifests.ResetFetching();

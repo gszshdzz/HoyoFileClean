@@ -38,11 +38,13 @@ public sealed partial class MainForm : Form
 
     public MainForm() : this(new WizardSession()) { }
 
-    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null)
+    internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null,
+        Func<IReadOnlyList<NetworkService>>? loadNetworkServices = null)
     {
         this.session = session;
         this.referenceParser = referenceParser ?? new ReferenceParser();
         this.networkClient = networkClient ?? new NetworkManifestClient(networkHttp);
+        this.loadNetworkServices = loadNetworkServices ?? (() => NetworkManifestClient.Services);
         Disposed += (_, _) => networkHttp.Dispose();
         Text = "HoyoFileClean — 文件差异向导（删除仅演示）";
         Name = "MainForm";
@@ -91,6 +93,13 @@ public sealed partial class MainForm : Form
         {
             if (!session.IsBusy) return;
             args.Cancel = true;
+            if (networkCancellation is not null)
+            {
+                closeAfterNetwork = true;
+                networkCancellation.Cancel();
+                status.Text = "正在取消网络操作并关闭…";
+                return;
+            }
             status.Text = parsingCancellation is not null
                 ? "正在解析，请先点击取消解析，等待退出后关闭。"
                 : "正在处理，请等待当前操作完成后关闭；扫描暂不支持中途取消。";
@@ -226,17 +235,18 @@ public sealed partial class MainForm : Form
         next.Visible = session.Step < 3;
         skip.Enabled = execute.Enabled = !session.IsBusy;
         ShowReferencePage(networkSource.Checked ? networkReferencePage : localSource.Checked ? localReferencePage : manualReferencePage);
-        queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedIndex >= 0;
-        getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
+        queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
+        getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedItem is not null;
         parseNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkManifests.CheckedInputs.Length > 0;
         networkVersion.Enabled = !session.IsBusy && customNetworkVersion.Checked;
         parseManualReference.Enabled = !session.IsBusy && manualSource.Checked && manifests.CheckedInputs.Length > 0;
         parseLocalReference.Enabled = !session.IsBusy && localSource.Checked && localManifests.CheckedInputs.Length > 0;
         if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
         next.Enabled = session.CanAdvance;
-        close.Enabled = !session.IsBusy;
+        close.Enabled = !session.IsBusy || networkCancellation is not null;
         cancelParsing.Visible = parsingCancellation is not null;
         cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };
+        cancelNetwork.Enabled = session.IsBusy && networkCancellation is { IsCancellationRequested: false };
         execute.Text = "比较";
         scanOptions.Visible = scanGameSource.Checked;
         gameJsonRow.Visible = importGameSource.Checked;

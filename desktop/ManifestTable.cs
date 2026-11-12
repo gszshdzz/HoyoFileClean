@@ -31,13 +31,14 @@ internal sealed class ManifestTable : DataGridView
         {
             Name = "Checked", HeaderText = "", Width = 35, AutoSizeMode = DataGridViewAutoSizeColumnMode.None
         });
-        AddColumn("Name", "文件名", typeof(string), 26);
-        AddColumn("Modified", "修改时间", typeof(DateTime), 21);
-        AddColumn("Size", "大小", typeof(long), 12);
-        AddColumn("State", "状态", typeof(string), 15);
-        AddColumn("Game", "游戏", typeof(string), 10);
-        AddColumn("Version", "版本", typeof(string), 10);
-        AddColumn("Entries", "条目数", typeof(int), 12);
+        AddColumn("Name", "文件名", typeof(string), 8);
+        AddColumn("Modified", "修改时间", typeof(DateTime), 7);
+        AddColumn("Size", "大小", typeof(long), 3);
+        AddColumn("State", "状态", typeof(string), 3);
+        AddColumn("Game", "游戏", typeof(string), 3);
+        AddColumn("Version", "版本", typeof(string), 2);
+        AddColumn("Package", "包体", typeof(string), 4);
+        AddColumn("Entries", "条目数", typeof(int), 3);
         Controls.Add(selectAll);
         selectAll.Click += (_, _) => ToggleAll();
         Layout += (_, _) => PositionSelectAll();
@@ -181,7 +182,7 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow[] added = complete.Where(file => known.Add(file.FullPath)).Select(file =>
         {
             var row = new DataGridViewRow { Tag = new ReferenceInput(file) };
-            row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, "未解析", "—", "—");
+            row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, "未解析", "—", "—", null!, null!);
             return row;
         }).ToArray();
         if (added.Length == 0) return;
@@ -211,8 +212,8 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow[] rows = inputs.Select(input =>
         {
             var row = new DataGridViewRow { Tag = input };
-            row.CreateCells(this, input.Remote!.MatchingField == "game", input.File.Name, "—",
-                input.File.Size, "未解析", game, version);
+            row.CreateCells(this, false, input.Remote!.Category, "—",
+                input.Remote.DownloadSize, "未获取", game, version, input.Remote.MatchingField, null!);
             return row;
         }).ToArray();
         updating = true;
@@ -230,7 +231,7 @@ internal sealed class ManifestTable : DataGridView
     {
         foreach (DataGridViewRow row in Rows)
         {
-            row.Cells["State"].Value = "未解析";
+            row.Cells["State"].Value = ((ReferenceInput)row.Tag!).Remote is null ? "未解析" : "未获取";
             row.Cells["Entries"].Value = null;
         }
     }

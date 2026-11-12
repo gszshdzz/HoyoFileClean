@@ -20,8 +20,8 @@ public sealed class NetworkManifestTests
     }.ToByteArray();
 
     private static RemoteManifest Info(byte[] decoded, int downloadSize, bool compressed = true)
-        => new("game", "本体", new Uri(Cdn), downloadSize, decoded.Length,
-            Convert.ToHexString(MD5.HashData(decoded)), compressed);
+        => new RemoteManifest("game", "本体", new Uri(Cdn), downloadSize, decoded.Length,
+            Convert.ToHexString(MD5.HashData(decoded)), compressed).FromOfficialResponse();
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
@@ -242,12 +242,95 @@ public sealed class NetworkManifestTests
         {"matching_field":"zh-cn","category_name":"中文","manifest":{"id":"voice","checksum":"900150983cd24fb0d6963f7d28e17f72","compressed_size":10,"uncompressed_size":20},"manifest_download":{"url_prefix":"https://autopatchcn.yuanshen.com/test","url_suffix":"","compression":1,"encryption":0}}]}}
         """;
 
+    [Fact]
+    public async Task DiscoverVersionsThenBuildUsesOnlyOneRequestPerStage()
+    {
+        var paths = new List<string>();
+        using HttpClient http = Client(request =>
+        {
+            paths.Add(request.RequestUri!.AbsolutePath);
+            return request.RequestUri.AbsolutePath.EndsWith("getGameBranches")
+                ? Json("""{"retcode":0,"data":{"game_branches":[{"game":{"biz":"hk4e_cn"},"main":{"branch":"main","password":"p","package_id":"pkg","tag":"1.0.0"}},{"game":{"biz":"other_cn"},"main":{"tag":"9.0.0"}}]}}""")
+                : Json(CatalogJson());
+        });
+        var network = new NetworkManifestClient(http);
+        RemoteGameVersion game = Assert.Single(await network.GetGameVersionsAsync(GenshinChannel.China, "hk4e", TestContext.Current.CancellationToken));
+        Assert.Equal(new RemoteGame("hk4e", "cn"), game.Game);
+        Assert.Equal("1.0.0", game.Version);
+        Assert.Single(paths);
+        RemoteManifestCatalog catalog = await network.GetCatalogAsync(game, TestContext.Current.CancellationToken);
+        Assert.Equal("1.0.0", catalog.Version);
+        Assert.Equal(new[] { "/hyp/hyp-connect/api/getGameBranches", "/downloader/sophon_chunk/api/getBuild" }, paths);
+    }
+
+    [Fact]
+    public async Task UnfilteredDiscoveryKeepsNewGamesAndDuplicateBizBranchesDistinct()
+    {
+        int requests = 0;
+        using HttpClient http = Client(request =>
+        {
+            requests++;
+            Assert.DoesNotContain("sg-", request.RequestUri!.Host);
+            if (request.RequestUri.AbsolutePath.EndsWith("getGameBranches"))
+                return Json("""
+                    {"retcode":0,"data":{"game_branches":[
+                    {"game":{"id":"first","biz":"future_cn"},"main":{"branch":"main","password":"p","package_id":"one","tag":"1.0.0"}},
+                    {"game":{"id":"second","biz":"future_cn"},"main":{"branch":"main","password":"p","package_id":"two","tag":"1.0.0"}},
+                    {"game":{"id":"third","biz":"another_cn"},"main":{"branch":"main","password":"p","package_id":"three","tag":"2.0.0"}}
+                    ]}}
+                    """);
+            Assert.Contains("package_id=two", request.RequestUri.Query);
+            return Json(CatalogJson());
+        });
+        var network = new NetworkManifestClient(http);
+        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(GenshinChannel.China,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(1, requests);
+        Assert.Equal(new[] { "future_cn", "future_cn", "another_cn" }, games.Select(game => game.Biz));
+        Assert.Equal(new[] { "first", "second", "third" }, games.Select(game => game.Id));
+        await network.GetCatalogAsync(games[1], TestContext.Current.CancellationToken);
+        Assert.Equal(2, requests);
+    }
+
+    [Theory]
+    [InlineData("autopatchcn.bhsr.com")]
+    [InlineData("autopatchcn.juequling.com")]
+    [InlineData("autopatchcn.bh3.com")]
+    [InlineData("future-cdn.example")]
+    public async Task DownloadsUseOfficialResponseUrlWithoutGameOrDomainLists(string host)
+    {
+        int downloads = 0;
+        using HttpClient http = Client(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("getGameBranches"))
+                return Json("""{"retcode":0,"data":{"game_branches":[{"game":{"biz":"future_cn"},"main":{"branch":"main","password":"p","package_id":"pkg","tag":"1.0.0"}}]}}""");
+            if (request.RequestUri.AbsolutePath.EndsWith("getBuild"))
+                return Json(CatalogJson().Replace("autopatchcn.yuanshen.com", host).Replace("\"game\"", "\"unknown-package\""));
+            downloads++;
+            Assert.Equal(host, request.RequestUri.Host);
+            return Bytes(new byte[10]);
+        });
+        var network = new NetworkManifestClient(http);
+        RemoteGameVersion game = Assert.Single(await network.GetGameVersionsAsync(GenshinChannel.China,
+            cancellationToken: TestContext.Current.CancellationToken));
+        RemoteManifestCatalog catalog = await network.GetCatalogAsync(game, TestContext.Current.CancellationToken);
+        RemoteManifest manifest = catalog.Manifests[0];
+        Assert.Equal("unknown-package", manifest.MatchingField);
+        Assert.Equal(10, (await network.FetchAsync(manifest, TestContext.Current.CancellationToken)).Length);
+        Assert.Equal(1, downloads);
+        await Assert.ThrowsAsync<CoreException>(() => network.FetchAsync(manifest with { Url = new Uri("https://tampered.example/manifest") }, TestContext.Current.CancellationToken));
+        var untrusted = new RemoteManifest(manifest.MatchingField, manifest.Category, manifest.Url,
+            manifest.DownloadSize, manifest.DecodedSize, manifest.Md5, manifest.Compressed);
+        await Assert.ThrowsAsync<CoreException>(() => network.FetchAsync(untrusted, TestContext.Current.CancellationToken));
+        Assert.Equal(1, downloads);
+    }
+
     [Theory]
     [InlineData("invalid")]
     [InlineData("missing")]
     [InlineData("duplicate")]
     [InlineData("encrypted")]
-    [InlineData("unofficial")]
+    [InlineData("insecure")]
     [InlineData("oversize")]
     [InlineData("version")]
     public async Task RejectsInvalidMetadata(string mutation)
@@ -258,7 +341,7 @@ public sealed class NetworkManifestTests
             "missing" => "{\"retcode\":0,\"data\":{}}",
             "duplicate" => CatalogJson().Replace("\"zh-cn\"", "\"game\""),
             "encrypted" => CatalogJson().Replace("\"encryption\":0", "\"encryption\":1"),
-            "unofficial" => CatalogJson().Replace("autopatchcn.yuanshen.com", "example.com"),
+            "insecure" => CatalogJson().Replace("https://", "http://"),
             "oversize" => CatalogJson().Replace("\"20\"", "\"999999999\""),
             _ => CatalogJson().Replace("1.0.0", "2.0.0")
         };
@@ -451,6 +534,28 @@ public sealed class NetworkManifestTests
         Assert.Equal(selectVoice ? new[] { "game", "future-package" } : new[] { "game" }, downloads);
         Assert.Equal(selectVoice ? 2 : 1, summary.FileCount);
         Assert.Equal(summary.FileCount, FileComparer.ReadInputs([output]).FileCount);
+    }
+
+    [Fact(Explicit = true)]
+    public async Task OfficialGameCatalogsAndStarRailManifest()
+    {
+        using HttpClient http = NetworkManifestClient.CreateHttpClient();
+        var network = new NetworkManifestClient(http);
+        IReadOnlyList<RemoteGameVersion> games = await network.GetGameVersionsAsync(GenshinChannel.China,
+            cancellationToken: TestContext.Current.CancellationToken);
+        RemoteManifestCatalog? starRail = null;
+        foreach (RemoteGameVersion game in games)
+        {
+            RemoteManifestCatalog catalog = await network.GetCatalogAsync(game, TestContext.Current.CancellationToken);
+            Assert.NotEmpty(catalog.Manifests);
+            Console.WriteLine($"{game.Biz} {catalog.Version}: {catalog.Manifests.Count} manifests; hosts={string.Join(',', catalog.Manifests.Select(item => item.Url.Host).Distinct())}");
+            if (game.Biz == "hkrpg_cn") starRail = catalog;
+        }
+        Assert.NotNull(starRail);
+        RemoteManifest selected = starRail.Manifests.MinBy(item => item.DownloadSize)!;
+        FileListSnapshot snapshot = await network.ReadAsync(selected, TestContext.Current.CancellationToken);
+        Assert.True(snapshot.FileCount > 0);
+        Console.WriteLine($"Star Rail sample {selected.MatchingField}: {selected.DownloadSize} bytes, {snapshot.FileCount} files; length, MD5 and parse passed");
     }
 
     [Fact(Explicit = true)]

@@ -51,7 +51,12 @@ internal sealed class ReferenceParser
                         }
                     }
                 }
-                catch (Exception error) when (error is IOException or CoreException or UnauthorizedAccessException
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Parallel.For recognizes cancellation only when it carries its own token.
+                    throw new OperationCanceledException(cancellationToken);
+                }
+                catch (Exception error) when (error is IOException or HttpRequestException or CoreException or UnauthorizedAccessException
                     or ArgumentException or System.Security.SecurityException or NotSupportedException)
                 {
                     items[index] = new ReferenceParseItem(null, error);

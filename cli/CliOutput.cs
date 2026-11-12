@@ -88,6 +88,7 @@ internal static class CliOutput
         CoreErrorCode.DevicePathUnsupported => "扫描不支持此设备卷路径，请使用普通盘符或 UNC 路径。",
         CoreErrorCode.DirectoryIsLink => "目录路径包含链接或重解析点，已停止。",
         CoreErrorCode.DirectoryMissing => "路径不是目录。",
+        CoreErrorCode.NetworkConfigurationInvalid => "网络服务配置缺失或无效，请检查 config/network-services.json。",
         CoreErrorCode.ManifestNetworkMetadataInvalid => "官方清单元数据无效。",
         CoreErrorCode.ManifestChannelUnavailable => "官方接口未提供所选游戏、区服或版本的清单。",
         CoreErrorCode.ManifestVersionUnavailable => "官方返回版本与指定版本不符，未改用其他版本。",

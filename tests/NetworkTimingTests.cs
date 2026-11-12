@@ -6,6 +6,26 @@ namespace HoyoFileClean.Tests;
 
 public sealed class NetworkTimingTests
 {
+    [Fact(Explicit = true)]
+    public async Task ConfiguredServiceQueriesColdAndWarm()
+    {
+        using var events = new ConnectionEvents();
+        foreach (NetworkService service in NetworkManifestClient.Services)
+        {
+            using var http = new HttpClient(new TimingHandler { InnerHandler = NetworkManifestClient.CreateHttpHandler() });
+            var network = new NetworkManifestClient(http);
+            for (int pass = 1; pass <= 2; pass++)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(15));
+                long start = Stopwatch.GetTimestamp();
+                var games = await network.GetGameVersionsAsync(service.Channel, cancellationToken: timeout.Token);
+                Assert.NotEmpty(games);
+                Console.WriteLine($"{service.Name} pass {pass}: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms, {games.Count} branches");
+            }
+        }
+    }
+
     private sealed class ConnectionEvents : EventListener
     {
         private readonly Stopwatch clock = Stopwatch.StartNew();

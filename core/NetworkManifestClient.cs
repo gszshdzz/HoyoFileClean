@@ -8,8 +8,31 @@ public enum GenshinChannel { China, Global }
 
 public sealed record RemoteGame(string Game, string Region);
 
+public sealed class RemoteGameVersion
+{
+    public GenshinChannel Channel { get; }
+    public RemoteGame Game { get; }
+    public string Version { get; }
+    public string Biz => Branch.GetProperty("game").GetProperty("biz").GetString()!;
+    public string Id => Branch.GetProperty("game").TryGetProperty("id", out JsonElement id) ? id.GetString() ?? "" : "";
+    internal JsonElement Branch { get; }
+
+    internal RemoteGameVersion(GenshinChannel channel, RemoteGame game, string version, JsonElement branch)
+    {
+        Channel = channel;
+        Game = game;
+        Version = version;
+        Branch = branch.Clone();
+    }
+}
+
 public sealed record RemoteManifest(string MatchingField, string Category, Uri Url,
-    long DownloadSize, long DecodedSize, string Md5, bool Compressed);
+    long DownloadSize, long DecodedSize, string Md5, bool Compressed)
+{
+    private Uri? officialUrl;
+    internal bool HasOfficialSource => officialUrl == Url;
+    internal RemoteManifest FromOfficialResponse() => this with { officialUrl = Url };
+}
 
 public sealed record RemoteManifestCatalog(GenshinChannel Channel, string Version, string BuildId,
     IReadOnlyList<RemoteManifest> Manifests);
@@ -32,18 +55,16 @@ public sealed class NetworkManifestClient(HttpClient client)
         ConnectCallback = OfficialConnection.ConnectAsync
     };
 
-    private static (string Host, string Launcher, string Biz, string BuildHost) Endpoints(GenshinChannel channel)
-        => channel switch
-        {
-            GenshinChannel.China => ("hyp-api.mihoyo.com", "jGHBHlcOq1", "hk4e_cn", "api-takumi.mihoyo.com"),
-            GenshinChannel.Global => ("sg-hyp-api.hoyoverse.com", "VYTpXlbWo8", "hk4e_global", "sg-public-api.hoyoverse.com"),
-            _ => throw new ArgumentOutOfRangeException(nameof(channel))
-        };
+    private static readonly Lazy<IReadOnlyList<NetworkService>> services = new(() => NetworkService.Load());
+    public static IReadOnlyList<NetworkService> Services => services.Value;
+
+    private static NetworkService Endpoints(GenshinChannel channel)
+        => Services.SingleOrDefault(service => service.Channel == channel) ?? throw new ArgumentOutOfRangeException(nameof(channel));
 
     private async Task<JsonDocument> GetBranchesAsync(GenshinChannel channel, CancellationToken token)
     {
         var endpoints = Endpoints(channel);
-        return await GetJsonAsync(new Uri($"https://{endpoints.Host}/hyp/hyp-connect/api/getGameBranches?launcher_id={endpoints.Launcher}"), token)
+        return await GetJsonAsync(endpoints.BranchUrl, token)
             .ConfigureAwait(false);
     }
 
@@ -85,11 +106,46 @@ public sealed class NetworkManifestClient(HttpClient client)
         JsonElement[] games = Games(branches).Where(item =>
         {
             RemoteGame identity = Identity(item);
-            return identity.Game + "_" + identity.Region == Endpoints(channel).Biz;
+            return identity.Game + "_" + identity.Region == Endpoints(channel).DefaultBiz;
         }).ToArray();
         if (games.Length == 0) throw new CoreException(CoreErrorCode.ManifestChannelUnavailable);
         if (games.Length != 1) throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid);
         return await GetBuildAsync(channel, games[0], version, timeout.Token).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<RemoteGameVersion>> GetGameVersionsAsync(GenshinChannel service, string? game = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (game is not null) ArgumentException.ThrowIfNullOrWhiteSpace(game);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        using JsonDocument branches = await GetBranchesAsync(service, timeout.Token).ConfigureAwait(false);
+        try
+        {
+            var versions = new List<RemoteGameVersion>();
+            foreach (JsonElement item in Games(branches))
+            {
+                RemoteGame identity = Identity(item);
+                if (game is not null && identity.Game != game) continue;
+                if (game is not null && versions.Any(value => value.Game == identity)) throw new FormatException();
+                string version = Text(item.GetProperty("main"), "tag");
+                if (!Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)
+                    throw new FormatException();
+                versions.Add(new RemoteGameVersion(service, identity, version, item));
+            }
+            return versions.AsReadOnly();
+        }
+        catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or FormatException or OverflowException)
+        { throw new CoreException(CoreErrorCode.ManifestNetworkMetadataInvalid, innerException: error); }
+    }
+
+    public async Task<RemoteManifestCatalog> GetCatalogAsync(RemoteGameVersion game,
+        CancellationToken cancellationToken = default, string? version = null)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        return await GetBuildAsync(game.Channel, game.Branch, version, timeout.Token).ConfigureAwait(false);
     }
 
     public async Task<RemoteManifestCatalog> GetCatalogAsync(string game, string region,
@@ -99,8 +155,8 @@ public sealed class NetworkManifestClient(HttpClient client)
         ArgumentException.ThrowIfNullOrWhiteSpace(region);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        Task<(RemoteManifestCatalog? Catalog, Exception? Error, bool Matched)>[] queries = Enum.GetValues<GenshinChannel>()
-            .Select(service => FindCatalogAsync(service, game, region, version, timeout.Token)).ToArray();
+        Task<(RemoteManifestCatalog? Catalog, Exception? Error, bool Matched)>[] queries = Services
+            .Select(service => FindCatalogAsync(service.Channel, game, region, version, timeout.Token)).ToArray();
         var pending = queries.ToList();
         Exception? failure = null;
         try
@@ -156,7 +212,7 @@ public sealed class NetworkManifestClient(HttpClient client)
             string query = string.Join("&", new[] { "branch", "password", "package_id", "tag" }
                 .Select(key => key + "=" + Uri.EscapeDataString(key == "tag" ? requestedVersion : Text(main, key))));
             using JsonDocument build = await GetJsonAsync(new Uri(
-                $"https://{Endpoints(channel).BuildHost}/downloader/sophon_chunk/api/getBuild?{query}"), token).ConfigureAwait(false);
+                $"{Endpoints(channel).BuildUrl.AbsoluteUri}?{query}"), token).ConfigureAwait(false);
             JsonElement data = Data(build);
             if (Text(data, "tag") != requestedVersion) throw new CoreException(CoreErrorCode.ManifestVersionUnavailable);
             var manifests = new List<RemoteManifest>();
@@ -177,7 +233,7 @@ public sealed class NetworkManifestClient(HttpClient client)
                 long downloadSize = compression == 1 ? Number(file, "compressed_size") : decodedSize;
                 ValidateSizes(downloadSize, decodedSize, compression == 1);
                 manifests.Add(new RemoteManifest(field, Text(item, "category_name"), url,
-                    downloadSize, decodedSize, md5, compression == 1));
+                    downloadSize, decodedSize, md5, compression == 1).FromOfficialResponse());
             }
             if (manifests.Count == 0) throw new FormatException();
             return new RemoteManifestCatalog(channel, requestedVersion, Text(data, "build_id"), manifests.AsReadOnly());
@@ -218,6 +274,7 @@ public sealed class NetworkManifestClient(HttpClient client)
     public async Task<byte[]> FetchAsync(RemoteManifest manifest, CancellationToken cancellationToken = default)
     {
         ValidateManifest(manifest);
+        if (!manifest.HasOfficialSource) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(2));
         using MemoryStream input = await DownloadAsync(manifest.Url, manifest.DownloadSize, timeout.Token).ConfigureAwait(false);
@@ -319,9 +376,7 @@ public sealed class NetworkManifestClient(HttpClient client)
 
     private static void ValidateCdn(Uri url)
     {
-        if (!url.IsAbsoluteUri || url.Scheme != "https" || !url.IsDefaultPort
-            || url.UserInfo.Length != 0 || url.Fragment.Length != 0
-            || url.Host is not ("autopatchcn.yuanshen.com" or "autopatchhk.yuanshen.com"))
+        if (!NetworkService.IsHttpsEndpoint(url))
             throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported);
     }
 }

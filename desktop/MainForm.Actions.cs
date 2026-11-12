@@ -20,6 +20,7 @@ public sealed partial class MainForm
     private async Task ConvertAsync()
     {
         if (session.IsBusy) return;
+        if (networkSource.Checked) { await FetchAndParseNetworkAsync(); return; }
         ManifestTable table = networkSource.Checked ? networkManifests : localSource.Checked ? localManifests : manifests;
         ReferenceInput[] inputs = table.CheckedInputs;
         if (inputs.Length == 0) { status.Text = "请先勾选需要解析的文件。"; return; }
@@ -43,11 +44,7 @@ public sealed partial class MainForm
                 : $"正在解析：已处理 {progress.Value:N0}/{inputs.Length:N0} 份文件…";
         };
         refreshProgress.Start();
-        ReferenceParser parser = networkSource.Checked ? new ReferenceParser((path, token) =>
-        {
-            ReferenceInput input = inputs.Single(item => item.File.FullPath == path);
-            return NetworkManifestClient.Read(input.Remote!, input.Content!, token);
-        }) : referenceParser;
+        ReferenceParser parser = referenceParser;
         await RunWorkAsync(() => parser.Parse(inputs.Select(input => input.File.FullPath).ToArray(),
             cancellation.Token, progress: reporter), result =>
         {
@@ -185,6 +182,10 @@ public sealed partial class MainForm
                 ? ResultText.DescribeGameStatus(session.Game, importGameSource.Checked)
                 : completedMessage?.Invoke() ?? "处理完成，请核对本步摘要后点击下一步。";
         }
+        catch (OperationCanceledException) when (networkCancellation is { IsCancellationRequested: true })
+        {
+            outcome = "已取消网络操作，本批结果已丢弃。";
+        }
         catch (OperationCanceledException) when (parsingCancellation is { IsCancellationRequested: true })
         {
             outcome = "已取消解析，本批结果已丢弃，请重新解析。";
@@ -252,6 +253,7 @@ public sealed partial class MainForm
         CoreException { Code: CoreErrorCode.ManifestChannelUnavailable or CoreErrorCode.ManifestVersionUnavailable } => "官方未提供所选区服／版本的清单，未改用最新版或其他区服。",
         CoreException { Code: CoreErrorCode.ManifestDownloadMismatch } => "清单长度、压缩方式或 MD5 校验失败，请重新获取。",
         CoreException { Code: CoreErrorCode.ManifestNetworkSizeLimit } => "网络清单或元数据超过大小上限。",
+        CoreException { Code: CoreErrorCode.NetworkConfigurationInvalid } => "网络服务配置缺失或无效，请检查 config/network-services.json；本地和手动输入仍可使用。",
         CoreException { Code: CoreErrorCode.ManifestNetworkMetadataInvalid or CoreErrorCode.ManifestNetworkUnsupported } => "官方清单元数据、地址或格式不受支持。",
         CoreException => "清单或路径无效，请检查所选文件。",
         FileNotFoundException => "所选文件不存在，请重新获取或添加。",

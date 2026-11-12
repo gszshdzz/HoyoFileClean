@@ -17,37 +17,78 @@ public sealed class NetworkReferenceTests
         internal bool Fail;
         internal bool FailChina;
         internal bool NoGame;
+        internal bool ExtraGames;
+        internal bool ExtraPackage;
         internal bool CorruptManifest;
+        internal string? BlockPath;
+        internal bool BlockBody;
+        internal readonly TaskCompletionSource Blocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal bool Cancelled;
+        internal bool BodyDisposed;
         internal readonly List<string> Versions = [];
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        internal readonly List<string> Hosts = [];
+        internal readonly List<string> Paths = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Interlocked.Increment(ref Requests);
+            Hosts.Add(request.RequestUri!.Host);
+            Paths.Add(request.RequestUri.AbsolutePath);
             token.ThrowIfCancellationRequested();
+            if (request.RequestUri.AbsolutePath.EndsWith(BlockPath ?? "never-block"))
+            {
+                Blocked.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                finally { Cancelled = token.IsCancellationRequested; }
+            }
             bool china = request.RequestUri!.Host == "hyp-api.mihoyo.com";
-            if (FailChina && china) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { RequestMessage = request });
-            string biz = NoGame ? "other_game_cn" : china ? "hk4e_cn" : "hk4e_global";
+            if (FailChina && china) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { RequestMessage = request };
+            string biz = china ? "hk4e_cn" : "hk4e_global";
             byte[] bytes = new SophonManifestProto { Assets = { new SophonManifestAssetProperty
             { AssetName = "Data/file", AssetSize = 3, AssetHashMd5 = "900150983cd24fb0d6963f7d28e17f72" } } }.ToByteArray();
             object data;
             if (request.RequestUri.AbsolutePath.EndsWith("getGameBranches"))
-                data = new { game_branches = new[] { new { game = new { biz }, main = new
-                { tag = "7.2.0", branch = "main", password = "p", package_id = "pkg" } } } };
+                data = new { game_branches = (NoGame ? Array.Empty<(string Biz, string Id)>()
+                    : ExtraGames ? new[] { (biz, "1"), ("future_cn", "2"), ("future_cn", "3") } : new[] { (biz, "1") })
+                    .Select(item => new { game = new { biz = item.Item1, id = item.Item2 }, main = new
+                    { tag = "7.2.0", branch = "main", password = "p", package_id = "pkg" + item.Item2 } }) };
             else if (request.RequestUri.AbsolutePath.EndsWith("getBuild"))
             {
                 string version = Uri.UnescapeDataString(request.RequestUri.Query.Split("tag=")[1]);
                 Versions.Add(version);
-                data = new { tag = version, build_id = "build", manifests = new[] { new
+                data = new { tag = version, build_id = "build", manifests = (ExtraPackage ? new[] { "game", "future-voice" } : new[] { "game" }).Select(field => new
                 {
-                    matching_field = "game", category_name = "本体",
-                    manifest = new { id = "manifest", checksum = Convert.ToHexString(MD5.HashData(bytes)), compressed_size = bytes.Length, uncompressed_size = bytes.Length },
+                    matching_field = field, category_name = "类别-" + field,
+                    manifest = new { id = "manifest-" + field, checksum = Convert.ToHexString(MD5.HashData(bytes)), compressed_size = bytes.Length, uncompressed_size = bytes.Length },
                     manifest_download = new { url_prefix = "https://autopatchcn.yuanshen.com/test", url_suffix = "", compression = 0, encryption = 0 }
-                } } };
+                }) };
             }
-            else return Task.FromResult(new HttpResponseMessage(Fail ? HttpStatusCode.NotFound : HttpStatusCode.OK)
-                { RequestMessage = request, Content = new ByteArrayContent(CorruptManifest ? new byte[bytes.Length] : bytes) });
-            return Task.FromResult(new HttpResponseMessage(Fail ? HttpStatusCode.NotFound : HttpStatusCode.OK)
-            { RequestMessage = request, Content = new StringContent(JsonSerializer.Serialize(new { retcode = 0, data })) });
+            else return new HttpResponseMessage(Fail ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+                { RequestMessage = request, Content = BlockBody ? new StreamContent(new StalledStream(this))
+                    : new ByteArrayContent(CorruptManifest ? new byte[bytes.Length] : bytes) };
+            return new HttpResponseMessage(Fail ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+            { RequestMessage = request, Content = new StringContent(JsonSerializer.Serialize(new { retcode = 0, data })) };
         }
+    }
+
+    private sealed class StalledStream(Handler handler) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+        {
+            handler.Blocked.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); return 0; }
+            finally { handler.Cancelled = token.IsCancellationRequested; }
+        }
+        protected override void Dispose(bool disposing) { handler.BodyDisposed = true; base.Dispose(disposing); }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     [Fact]
@@ -71,10 +112,12 @@ public sealed class NetworkReferenceTests
         var regions = Find<ListBox>(form, "NetworkRegions");
         Assert.Equal(SelectionMode.One, games.SelectionMode);
         Assert.Equal(SelectionMode.One, regions.SelectionMode);
-        Assert.True(games.Left < regions.Left);
+        Assert.True(regions.Left < games.Left);
+        Assert.Empty(games.Items);
+        Assert.Equal(2, regions.Items.Count);
         Assert.True(games.ClientSize.Height / games.ItemHeight == 6,
             $"list={games.Bounds}; client={games.ClientSize}; item={games.ItemHeight}; parent={games.Parent!.Bounds}; rows={string.Join(',', ((TableLayoutPanel)games.Parent).GetRowHeights())}; font={games.Font.Size}");
-        for (int i = 0; i < 20; i++) games.Items.Add("滚动验证-" + i);
+        for (int i = 0; i < 21; i++) games.Items.Add("滚动验证-" + i);
         games.TopIndex = 15;
         Assert.True(games.TopIndex >= 15);
         Assert.Equal(21, games.Items.Count);
@@ -104,7 +147,8 @@ public sealed class NetworkReferenceTests
         Assert.Equal(0, handler.Requests);
         Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
         ClickAndWait(form, session, "QueryNetwork");
-        Assert.Equal(2, handler.Requests);
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal("hk4e_cn", Assert.Single(games.Items.Cast<object>()).ToString());
         Assert.True(regions.Items.Count == 2,
             $"requests={handler.Requests}; game={games.SelectedIndex}; queryEnabled={Find<Button>(form, "QueryNetwork").Enabled}; status={Find<Label>(form, "Status").Text}");
         Assert.Empty(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
@@ -115,21 +159,32 @@ public sealed class NetworkReferenceTests
         Assert.True(version.Width >= 120, $"version bounds={version.Bounds}; parent={version.Parent!.Bounds}");
         Assert.True(version.Parent!.ClientRectangle.Contains(version.Bounds), "自定义版本号输入框被父容器裁切");
         version.Text = "7.1.0";
+        Assert.True(Find<Button>(form, "GetNetworkManifests").Enabled);
+        Assert.Empty(handler.Versions);
+        Assert.Equal(new[] { "hyp-api.mihoyo.com" }, handler.Hosts);
         int beforeGet = handler.Requests;
         ClickAndWait(form, session, "GetNetworkManifests");
-        Assert.Equal(beforeGet + 3, handler.Requests);
+        Assert.Equal(beforeGet + 1, handler.Requests);
+        Assert.Equal(new[] { "api-takumi.mihoyo.com" }, handler.Hosts.Skip(beforeGet));
         Assert.Equal("7.1.0", handler.Versions.Last());
         var table = Find<DataGridView>(form, "NetworkManifests");
         Assert.True(table.Rows.Count > 0, Find<Label>(form, "Status").Text);
         DataGridViewRow row = Assert.Single(table.Rows.Cast<DataGridViewRow>());
-        Assert.Equal("原神-官服", row.Cells["Game"].Value);
+        Assert.Equal("hk4e_cn", row.Cells["Game"].Value);
+        Assert.Equal("game", row.Cells["Package"].Value);
+        Assert.Equal("类别-game", row.Cells["Name"].Value);
+        Assert.Equal("未获取", row.Cells["State"].Value);
+        Assert.IsType<long>(row.Cells["Size"].Value);
         Assert.Equal("7.1.0", row.Cells["Version"].Value);
         Assert.Equal("—", row.Cells["Modified"].Value);
         Assert.Null(row.Cells["Entries"].Value);
         Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "ParseNetworkReference").Enabled);
+        Assert.False((bool)row.Cells["Checked"].Value!);
+        row.Cells["Checked"].Value = true;
         int beforeParse = handler.Requests;
         ClickAndWait(form, session, "ParseNetworkReference");
-        Assert.Equal(beforeParse, handler.Requests);
+        Assert.Equal(beforeParse + 1, handler.Requests);
         Assert.Equal(1, session.Reference!.FileCount);
         Assert.True(Find<Button>(form, "Next").Enabled);
         Assert.Equal("已解析", row.Cells["State"].Value);
@@ -140,21 +195,21 @@ public sealed class NetworkReferenceTests
         Find<Button>(form, "Back").PerformClick();
         Assert.Contains("参考清单已就绪", Find<Label>(form, "Status").Text);
         table.Rows[0].Cells[0].Value = false;
-        Assert.Contains("重新解析", Find<Label>(form, "Status").Text);
+        Assert.Contains("重新获取并解析", Find<Label>(form, "Status").Text);
         Assert.False(Find<Button>(form, "Next").Enabled);
         table.Rows[0].Cells[0].Value = true;
         Find<RadioButton>(form, "LocalSource").Checked = true;
         Assert.Null(session.Reference);
-        Assert.Equal("未解析", row.Cells["State"].Value);
+        Assert.Equal("未获取", row.Cells["State"].Value);
         Find<RadioButton>(form, "NetworkSource").Checked = true;
-        Assert.Contains("重新解析", Find<Label>(form, "Status").Text);
+        Assert.Contains("重新获取并解析", Find<Label>(form, "Status").Text);
         Assert.DoesNotContain("目录已变更", Find<Label>(form, "Status").Text);
         ClickAndWait(form, session, "ParseNetworkReference");
         version.Text = "7.0.0";
         Assert.Empty(table.Rows.Cast<DataGridViewRow>());
         Assert.Null(session.Reference);
         Assert.False(Find<Button>(form, "Next").Enabled);
-        Assert.Equal(beforeParse, handler.Requests);
+        Assert.Equal(beforeParse + 2, handler.Requests);
         Rectangle client = form.RectangleToScreen(form.ClientRectangle);
         foreach (string name in new[] { "NetworkGames", "NetworkRegions", "NetworkVersion", "QueryNetwork", "GetNetworkManifests", "ParseNetworkReference", "NetworkManifests" })
         {
@@ -166,21 +221,24 @@ public sealed class NetworkReferenceTests
         form.DrawToBitmap(image, new Rectangle(Point.Empty, form.Size));
         image.Save(screenshot);
         handler.Fail = true;
+        ClickAndWait(form, session, "QueryNetwork");
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
         ClickAndWait(form, session, "GetNetworkManifests");
         Assert.Empty(table.Rows.Cast<DataGridViewRow>());
         Assert.Null(session.Reference);
         Assert.Contains("失败", Find<Label>(form, "Status").Text);
         ClickAndWait(form, session, "QueryNetwork");
-        Assert.Empty(regions.Items);
+        Assert.Equal(2, regions.Items.Count);
+        Assert.Empty(games.Items);
         Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
-        Assert.Contains("未查询到可用区服", Find<Label>(form, "Status").Text);
+        Assert.Contains("失败", Find<Label>(form, "Status").Text);
         Assert.DoesNotContain("再点击获取", Find<Label>(form, "Status").Text);
     });
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void QueryDistinguishesPartialFailureFromNoMatchingGame(bool noGame) => OnSta(() =>
+    public void SelectedServiceFailureOrEmptyListNeverQueriesOtherService(bool noGame) => OnSta(() =>
     {
         using var handler = new Handler { FailChina = !noGame, NoGame = noGame };
         using var http = new HttpClient(handler);
@@ -193,24 +251,234 @@ public sealed class NetworkReferenceTests
         string status = Find<Label>(form, "Status").Text;
         if (noGame)
         {
-            Assert.Empty(regions.Items);
-            Assert.Contains("未查询到可用区服", status);
+            Assert.Empty(Find<ListBox>(form, "NetworkGames").Items);
+            Assert.Contains("官方未返回游戏列表", status);
             Assert.DoesNotContain("再点击获取", status);
             Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
         }
         else
         {
-            Assert.Single(regions.Items.Cast<object>());
-            Assert.Equal("国际服", regions.SelectedItem!.ToString());
-            Assert.Contains("官服：官方网络请求失败", status);
-            Assert.Contains("请选择可用区服", status);
-            Assert.True(Find<Button>(form, "GetNetworkManifests").Enabled);
+            Assert.Equal(2, regions.Items.Count);
+            Assert.Equal("国服", regions.SelectedItem!.ToString());
+            Assert.Contains("官方网络请求失败", status);
+            Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
         }
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(new[] { "hyp-api.mihoyo.com" }, handler.Hosts);
+        Assert.Empty(handler.Versions);
         Assert.False(Find<Button>(form, "Next").Enabled);
     });
 
     [Fact]
-    public void CorruptDownloadedManifestFailsOfflineWithoutStaleGetPrompt() => OnSta(() =>
+    public void SelectedRegionQueryAndRepeatedGetStayWithinTheirStages() => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        var regions = Find<ListBox>(form, "NetworkRegions");
+        Assert.Equal(2, regions.Items.Count);
+        regions.SelectedIndex = 1;
+        Assert.Equal(0, handler.Requests);
+        ClickAndWait(form, session, "QueryNetwork");
+        Assert.Equal(new[] { "sg-hyp-api.hoyoverse.com" }, handler.Hosts);
+        Assert.Empty(handler.Versions);
+        Assert.Contains("7.2.0", Find<RadioButton>(form, "LatestNetworkVersion").Text);
+        Assert.Contains("7.2.0", Find<Label>(form, "Status").Text);
+        ClickAndWait(form, session, "GetNetworkManifests");
+        ClickAndWait(form, session, "GetNetworkManifests");
+        Assert.Equal(3, handler.Requests);
+        Assert.Equal(new[] { "sg-public-api.hoyoverse.com", "sg-public-api.hoyoverse.com" }, handler.Hosts.Skip(1));
+        Assert.Equal(2, handler.Versions.Count);
+        regions.SelectedIndex = 0;
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
+        Assert.Empty(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
+        Assert.Equal(3, handler.Requests);
+        Find<ListBox>(form, "NetworkGames").SelectedIndex = -1;
+        Assert.Empty(Find<ListBox>(form, "NetworkGames").Items);
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Enabled);
+    });
+
+    [Theory]
+    [InlineData("query", "cancel")]
+    [InlineData("query", "window")]
+    [InlineData("build", "cancel")]
+    [InlineData("build", "button")]
+    [InlineData("body", "cancel")]
+    [InlineData("body", "window")]
+    [InlineData("body", "button")]
+    public void StalledNetworkCanBeCancelledOrClosed(string stage, string action) => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        if (stage != "query") ClickAndWait(form, session, "QueryNetwork");
+        if (stage == "body")
+        {
+            ClickAndWait(form, session, "GetNetworkManifests");
+            Find<DataGridView>(form, "NetworkManifests").Rows[0].Cells["Checked"].Value = true;
+        }
+        handler.BlockPath = stage == "query" ? "getGameBranches" : stage == "build" ? "getBuild" : null;
+        handler.BlockBody = stage == "body";
+        string operationButton = stage == "query" ? "QueryNetwork" : stage == "build" ? "GetNetworkManifests" : "ParseNetworkReference";
+        Find<Button>(form, operationButton).PerformClick();
+        WaitUntil(() => handler.Blocked.Task.IsCompleted);
+        Assert.True(session.IsBusy);
+        Assert.True(Find<Button>(form, "CloseWizard").Enabled);
+        var cancel = Find<Button>(form, "CancelNetwork");
+        Assert.True(cancel.Visible && cancel.Enabled);
+        Assert.Equal("取消网络操作", cancel.Text);
+        Assert.False(Find<Button>(form, "CancelParsing").Visible);
+        Assert.Equal("NetworkActions", cancel.Parent!.Name);
+        Assert.True(cancel.Left > Find<Button>(form, "QueryNetwork").Parent!.Right);
+        if (action == "cancel") cancel.PerformClick();
+        else if (action == "button") Find<Button>(form, "CloseWizard").PerformClick();
+        else form.Close();
+        WaitUntil(() => !session.IsBusy && (action == "cancel" ? !Find<ProgressBar>(form, "OperationProgress").Visible : form.IsDisposed));
+        Assert.True(handler.Cancelled);
+        if (stage == "body") Assert.True(handler.BodyDisposed);
+        Assert.Null(session.Reference);
+        if (stage == "query") Assert.Equal(1, handler.Requests);
+        if (action == "cancel")
+        {
+            Assert.False(form.IsDisposed);
+            if (stage == "body")
+                Assert.Equal("未获取", Assert.Single(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>()).Cells["State"].Value);
+            else Assert.Empty(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
+            Assert.Contains("已取消网络操作", Find<Label>(form, "Status").Text);
+            handler.BlockPath = null;
+            handler.BlockBody = false;
+            ClickAndWait(form, session, operationButton);
+            Assert.True(Find<Button>(form, "GetNetworkManifests").Enabled);
+        }
+        else Assert.True(form.IsDisposed);
+    });
+
+    private static void WaitUntil(Func<bool> condition)
+    {
+        long start = Environment.TickCount64;
+        while (!condition() && Environment.TickCount64 - start < 5000) { Application.DoEvents(); Thread.Yield(); }
+        Assert.True(condition());
+    }
+
+    [Fact]
+    public void ConfigurationFailureLeavesOfflineSourcesAvailable() => OnSta(() =>
+    {
+        using var form = new MainForm(new WizardSession(), loadNetworkServices: () =>
+            throw new CoreException(CoreErrorCode.NetworkConfigurationInvalid))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        Assert.Empty(Find<ListBox>(form, "NetworkRegions").Items);
+        Assert.False(Find<Button>(form, "QueryNetwork").Enabled);
+        Assert.Contains("网络服务配置缺失或无效", Find<Label>(form, "Status").Text);
+        foreach (string source in new[] { "LocalSource", "ManualSource" })
+        {
+            var option = Find<RadioButton>(form, source);
+            Assert.True(option.Enabled);
+            option.Checked = true;
+            Assert.True(option.Checked);
+        }
+    });
+
+    [Fact]
+    public void DoubleClickQueriesOnlyItsStageAndEmptySpaceDoesNothing() => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        var regions = Find<ListBox>(form, "NetworkRegions");
+        var games = Find<ListBox>(form, "NetworkGames");
+        void DoubleClick(ListBox list, Point location)
+        {
+            typeof(Control).GetMethod("OnMouseDoubleClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(list, [new MouseEventArgs(MouseButtons.Left, 2, location.X, location.Y, 0)]);
+            WaitUntil(() => !session.IsBusy && !Find<ProgressBar>(form, "OperationProgress").Visible);
+        }
+        DoubleClick(games, new Point(3, 3));
+        Assert.Equal(0, handler.Requests);
+        DoubleClick(regions, new Point(3, 3));
+        Assert.Equal(1, handler.Requests);
+        DoubleClick(games, new Point(3, 3));
+        Assert.Equal(2, handler.Requests);
+        Assert.Single(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
+        Assert.Empty(Find<ManifestTable>(form, "NetworkManifests").CheckedInputs);
+        DoubleClick(games, new Point(3, games.ClientSize.Height - 2));
+        Assert.Equal(2, handler.Requests);
+        var cancel = Find<Button>(form, "CancelNetwork");
+        Assert.False(cancel.Enabled);
+        Assert.NotEqual(cancel.Parent, Find<Button>(form, "CloseWizard").Parent);
+    });
+
+    [Fact]
+    public void DynamicGamesAndSelectedPackagesNeedOnlyExplicitStageRequests() => OnSta(() =>
+    {
+        using var handler = new Handler { ExtraGames = true, ExtraPackage = true };
+        using var http = new HttpClient(handler);
+        var session = new WizardSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        ClickAndWait(form, session, "QueryNetwork");
+        var games = Find<ListBox>(form, "NetworkGames");
+        var table = Find<ManifestTable>(form, "NetworkManifests");
+        Assert.Equal(new[] { "hk4e_cn", "future_cn (2)", "future_cn (3)" }, games.Items.Cast<object>().Select(item => item.ToString()));
+        Assert.Empty(table.Rows.Cast<DataGridViewRow>());
+        games.SelectedIndex = 2;
+        Find<RadioButton>(form, "CustomNetworkVersion").Checked = true;
+        Find<TextBox>(form, "NetworkVersion").Text = "7.1.0";
+        Assert.Equal(1, handler.Requests);
+        ClickAndWait(form, session, "GetNetworkManifests");
+        Assert.Equal(2, handler.Requests);
+        Assert.Equal(2, table.Rows.Count);
+        Assert.Empty(table.CheckedInputs);
+        Assert.False(Find<Button>(form, "ParseNetworkReference").Enabled);
+        Assert.All(table.Rows.Cast<DataGridViewRow>(), row =>
+        {
+            Assert.Equal("future_cn", row.Cells["Game"].Value);
+            Assert.Equal("7.1.0", row.Cells["Version"].Value);
+            Assert.Equal("未获取", row.Cells["State"].Value);
+            Assert.Equal("—", row.Cells["Modified"].Value);
+            Assert.Null(row.Cells["Entries"].Value);
+        });
+        foreach (DataGridViewRow row in table.Rows) row.Cells["Checked"].Value = (string?)row.Cells["Package"].Value == "future-voice";
+        Assert.Equal(2, handler.Requests);
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.Equal(3, handler.Requests);
+        Assert.EndsWith("manifest-future-voice", handler.Paths.Last());
+        Assert.DoesNotContain(handler.Paths, path => path.EndsWith("manifest-game"));
+        Assert.Equal(1, session.Reference!.FileCount);
+        foreach (DataGridViewRow row in table.Rows)
+        {
+            bool selected = (string?)row.Cells["Package"].Value == "future-voice";
+            Assert.Equal(selected ? "已解析" : "未获取", row.Cells["State"].Value);
+            Assert.Equal(selected ? 1 : (int?)null, row.Cells["Entries"].Value);
+        }
+        Find<TextBox>(form, "NetworkVersion").Text = "7.0.0";
+        Assert.Empty(table.Rows.Cast<DataGridViewRow>());
+        Assert.Null(session.Reference);
+        Assert.Equal(3, handler.Requests);
+        games.SelectedIndex = 1;
+        Assert.Equal(3, handler.Requests);
+        foreach (string name in new[] { "NetworkManifests", "LocalManifests", "Manifests" })
+        {
+            var columns = Find<ManifestTable>(form, name).Columns;
+            Assert.Equal(new[] { "Checked", "Name", "Modified", "Size", "State", "Game", "Version", "Package", "Entries" },
+                columns.Cast<DataGridViewColumn>().Select(column => column.Name));
+            Assert.Equal(new float[] { 8, 7, 3, 3, 3, 2, 4, 3 },
+                columns.Cast<DataGridViewColumn>().Skip(1).Select(column => column.FillWeight));
+        }
+    });
+
+    [Fact]
+    public void CorruptDownloadedManifestFailsWithoutPublishingReference() => OnSta(() =>
     {
         using var handler = new Handler { CorruptManifest = true };
         using var http = new HttpClient(handler);
@@ -220,10 +488,12 @@ public sealed class NetworkReferenceTests
         form.Show();
         ClickAndWait(form, session, "QueryNetwork");
         ClickAndWait(form, session, "GetNetworkManifests");
-        Assert.Contains("尚未解析", Find<Label>(form, "Status").Text);
+        Assert.Contains("请勾选", Find<Label>(form, "Status").Text);
+        Find<DataGridView>(form, "NetworkManifests").Rows[0].Cells["Checked"].Value = true;
         int requests = handler.Requests;
         ClickAndWait(form, session, "ParseNetworkReference");
-        Assert.Equal(requests, handler.Requests);
+        Assert.Equal(requests + 1, handler.Requests);
+        Assert.Equal("失败", Assert.Single(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>()).Cells["State"].Value);
         Assert.Null(session.Reference);
         Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
         Assert.DoesNotContain("勾选后解析", Find<Label>(form, "Status").Text);

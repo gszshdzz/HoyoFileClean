@@ -600,10 +600,11 @@ public sealed class WizardTests
         Assert.False(grid.Columns["Checked"]!.ReadOnly);
         Assert.All(grid.Columns.Cast<DataGridViewColumn>().Skip(1), column => Assert.True(column.ReadOnly));
         Assert.False(grid.Columns.Contains("Path"));
-        Assert.Equal(8, grid.Columns.Count);
+        Assert.Equal(9, grid.Columns.Count);
         Assert.False(grid.AllowUserToAddRows);
         Assert.False(grid.AllowUserToDeleteRows);
         Assert.Equal(2, grid.Rows.Count);
+        Assert.All(grid.Rows.Cast<DataGridViewRow>(), row => Assert.Null(row.Cells["Package"].Value));
         Assert.Equal("new", grid.Rows[0].Cells["Name"].Value);
         Assert.Equal("old", grid.Rows[1].Cells["Name"].Value);
         Assert.Equal(newer, grid.Rows[0].Cells["Modified"].Value);
@@ -766,7 +767,7 @@ public sealed class WizardTests
         Find<RadioButton>(form, "ManualSource").Checked = true;
         var manual = Find<ManifestTable>(form, "Manifests");
         var local = Find<DataGridView>(form, "LocalManifests");
-        Assert.Equal(new[] { "Checked", "Name", "Modified", "Size", "State", "Game", "Version", "Entries" },
+        Assert.Equal(new[] { "Checked", "Name", "Modified", "Size", "State", "Game", "Version", "Package", "Entries" },
             manual.Columns.Cast<DataGridViewColumn>().Select(column => column.Name));
         Assert.Equal(manual.Columns.Cast<DataGridViewColumn>().Select(column => column.HeaderText),
             local.Columns.Cast<DataGridViewColumn>().Select(column => column.HeaderText));

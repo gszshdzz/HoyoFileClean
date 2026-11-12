@@ -4,27 +4,42 @@ public sealed partial class MainForm
 {
     private readonly HttpClient networkHttp = NetworkManifestClient.CreateHttpClient();
     private readonly NetworkManifestClient networkClient;
+    private readonly Func<IReadOnlyList<NetworkService>> loadNetworkServices;
+    private string? networkConfigurationError;
     private readonly ListBox networkGames = new() { Name = "NetworkGames", Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly ListBox networkRegions = new() { Name = "NetworkRegions", Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly RadioButton latestNetworkVersion = new() { Name = "LatestNetworkVersion", Text = "最新版", AutoSize = true, Checked = true };
     private readonly RadioButton customNetworkVersion = new() { Name = "CustomNetworkVersion", Text = "自定义版本", AutoSize = true };
     private readonly TextBox networkVersion = new() { Name = "NetworkVersion", Dock = DockStyle.Top, PlaceholderText = "例如 7.1.0", Enabled = false };
-    private readonly Button queryNetwork = MakeButton("查询", "QueryNetwork");
-    private readonly Button getNetwork = MakeButton("获取", "GetNetworkManifests");
-    private readonly Button parseNetwork = MakeButton("解析", "ParseNetworkReference");
+    private readonly Button queryNetwork = MakeButton("查询游戏列表", "QueryNetwork");
+    private readonly Button getNetwork = MakeButton("查询 manifest 列表", "GetNetworkManifests");
+    private readonly Button parseNetwork = MakeButton("获取 manifest 并解析", "ParseNetworkReference");
+    private readonly Button cancelNetwork = MakeButton("取消网络操作", "CancelNetwork");
     private readonly ManifestTable networkManifests = new("NetworkManifests");
     private Panel networkReferencePage = null!;
+    private CancellationTokenSource? networkCancellation;
+    private bool closeAfterNetwork;
     private sealed record NetworkRegion(GenshinChannel Channel, string Name)
     {
         public override string ToString() => Name;
     }
 
+    private sealed record NetworkGame(RemoteGameVersion Version, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
     private Panel BuildNetworkReferencePage()
     {
-        networkManifests.Columns["Game"]!.MinimumWidth = 100;
-        networkManifests.Columns["Version"]!.MinimumWidth = 70;
-        networkGames.Items.Add("原神");
-        networkGames.SelectedIndex = 0;
+        try
+        {
+            networkRegions.Items.AddRange(loadNetworkServices().Select(service => (object)new NetworkRegion(service.Channel, service.Name)).ToArray());
+            if (networkRegions.Items.Count > 0) networkRegions.SelectedIndex = 0;
+        }
+        catch (CoreException error) when (error.Code == CoreErrorCode.NetworkConfigurationInvalid)
+        {
+            networkConfigurationError = DescribeDesktopError(error);
+        }
         var choices = new TableLayoutPanel { Name = "NetworkChoices", Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 2 };
         for (int i = 0; i < 3; i++) choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
         choices.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -37,11 +52,11 @@ public sealed partial class MainForm
         Shown += (_, _) => UpdateChoiceHeight();
         DpiChanged += (_, _) => UpdateChoiceHeight();
         networkGames.FontChanged += (_, _) => UpdateChoiceHeight();
-        choices.Controls.Add(Note("游戏（单选）"), 0, 0);
-        choices.Controls.Add(Note("区服（单选，查询后可选）"), 1, 0);
+        choices.Controls.Add(Note("区服（查询入口，单选）"), 0, 0);
+        choices.Controls.Add(Note("游戏（查询后可选）"), 1, 0);
         choices.Controls.Add(Note("版本（单选）"), 2, 0);
-        choices.Controls.Add(networkGames, 0, 1);
-        choices.Controls.Add(networkRegions, 1, 1);
+        choices.Controls.Add(networkRegions, 0, 1);
+        choices.Controls.Add(networkGames, 1, 1);
         var versions = Vertical();
         versions.Controls.Add(latestNetworkVersion);
         versions.Controls.Add(customNetworkVersion);
@@ -49,10 +64,14 @@ public sealed partial class MainForm
         choices.Controls.Add(versions, 2, 1);
         networkGames.SelectedIndexChanged += (_, _) =>
         {
-            networkRegions.Items.Clear();
+            latestNetworkVersion.Text = networkGames.SelectedItem is NetworkGame game
+                ? $"最新版（{game.Version.Version}）" : "最新版";
             ClearNetworkFiles();
         };
-        networkRegions.SelectedIndexChanged += (_, _) => ClearNetworkFiles();
+        networkRegions.SelectedIndexChanged += (_, _) =>
+        {
+            InvalidateNetworkQuery();
+        };
         latestNetworkVersion.CheckedChanged += (_, _) =>
         {
             networkVersion.Enabled = !session.IsBusy && customNetworkVersion.Checked;
@@ -62,11 +81,40 @@ public sealed partial class MainForm
         networkManifests.CheckedFilesChanged += ReferenceChanged;
         queryNetwork.Click += async (_, _) => await QueryNetworkAsync();
         getNetwork.Click += async (_, _) => await GetNetworkManifestsAsync();
-        parseNetwork.Click += async (_, _) => await ConvertAsync();
+        parseNetwork.Click += async (_, _) => await FetchAndParseNetworkAsync();
+        networkRegions.MouseDoubleClick += async (_, args) =>
+        {
+            if (args.Button == MouseButtons.Left && networkRegions.IndexFromPoint(args.Location) >= 0)
+                await QueryNetworkAsync();
+        };
+        networkGames.MouseDoubleClick += async (_, args) =>
+        {
+            if (args.Button == MouseButtons.Left && networkGames.IndexFromPoint(args.Location) >= 0)
+                await GetNetworkManifestsAsync();
+        };
+        cancelNetwork.Click += (_, _) =>
+        {
+            networkCancellation?.Cancel();
+            cancelNetwork.Enabled = false;
+            status.Text = "正在取消网络操作…";
+        };
         var input = Vertical();
         input.Controls.Add(choices);
-        input.Controls.Add(Buttons(queryNetwork, getNetwork, parseNetwork));
+        var actions = new TableLayoutPanel { Name = "NetworkActions", ColumnCount = 2, RowCount = 1, AutoSize = true, Dock = DockStyle.Top };
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        actions.Controls.Add(Buttons(queryNetwork, getNetwork, parseNetwork), 0, 0);
+        cancelNetwork.Anchor = AnchorStyles.Right;
+        actions.Controls.Add(cancelNetwork, 1, 0);
+        input.Controls.Add(actions);
         return Page(input, networkManifests);
+    }
+
+    private void InvalidateNetworkQuery()
+    {
+        networkGames.Items.Clear();
+        latestNetworkVersion.Text = "最新版";
+        ClearNetworkFiles();
     }
 
     private void ClearNetworkFiles()
@@ -76,66 +124,87 @@ public sealed partial class MainForm
         if (session.Step == 0 && networkSource.Checked) status.Text = DescribeNetworkInput();
     }
 
-    private string DescribeNetworkInput() => networkManifests.Rows.Count > 0
-        ? "网络清单尚无有效解析结果，请勾选后重新解析。"
-        : networkRegions.SelectedItem is null ? "请先查询可用区服，再选择区服与版本获取清单；不会自动联网。"
-        : "选择已变更，请点击获取；自定义版本是否可用以官方返回为准。";
+    private string DescribeNetworkInput() => networkConfigurationError ?? (networkManifests.Rows.Count > 0
+        ? "请勾选所需包体并获取、解析；改选后需重新获取并解析。"
+        : networkGames.SelectedItem is not NetworkGame game ? "请选择区服入口，再查询游戏列表；不会自动联网。"
+        : $"{game.Version.Biz} 当前版本 {game.Version.Version}；选择游戏与版本后查询 manifest 列表。");
 
     private async Task QueryNetworkAsync()
     {
-        if (session.IsBusy || !networkSource.Checked || networkGames.SelectedIndex < 0) return;
-        networkRegions.Items.Clear();
-        ClearNetworkFiles();
-        string completed = "";
-        await RunWorkAsync(() =>
+        if (session.IsBusy || !networkSource.Checked || networkRegions.SelectedItem is not NetworkRegion region) return;
+        InvalidateNetworkQuery();
+        await RunNetworkWorkAsync(token => networkClient.GetGameVersionsAsync(region.Channel, cancellationToken: token).GetAwaiter().GetResult(), result =>
         {
-            var available = new List<NetworkRegion>();
-            var failures = new List<string>();
-            foreach (var (channel, name) in new[] { (GenshinChannel.China, "官服"), (GenshinChannel.Global, "国际服") })
+            foreach (RemoteGameVersion game in result)
             {
-                try
-                {
-                    IReadOnlyList<RemoteGame> games = networkClient.GetGamesAsync(channel).GetAwaiter().GetResult();
-                    if (games.Any(game => game.Game == "hk4e")) available.Add(new NetworkRegion(channel, name));
-                }
-                catch (Exception error) when (error is CoreException or HttpRequestException or OperationCanceledException or IOException)
-                { failures.Add(name + "：" + DescribeDesktopError(error)); }
+                string label = result.Count(item => item.Biz == game.Biz) > 1
+                    ? $"{game.Biz} ({game.Id})" : game.Biz;
+                networkGames.Items.Add(new NetworkGame(game, label));
             }
-            return (available, failures);
-        }, result =>
-        {
-            networkRegions.Items.AddRange(result.available.Cast<object>().ToArray());
-            if (networkRegions.Items.Count > 0) networkRegions.SelectedIndex = 0;
-            completed = result.available.Count == 0
-                ? "未查询到可用区服。" + string.Join("；", result.failures) + " 请重新查询。"
-                : $"查询到 {result.available.Count} 个区服。" + string.Join("；", result.failures)
-                    + " 请选择可用区服与版本，再点击获取；其他渠道暂未确认，不提供替代结果。";
-        }, "正在查询官方区服信息…", () => completed);
+            if (networkGames.Items.Count > 0) networkGames.SelectedIndex = 0;
+        }, "正在查询所选入口的游戏列表与当前版本…",
+            () => networkGames.Items.Count == 0 ? "官方未返回游戏列表。" : DescribeNetworkInput());
     }
 
     private async Task GetNetworkManifestsAsync()
     {
-        if (session.IsBusy || !networkSource.Checked || networkRegions.SelectedItem is not NetworkRegion region) return;
+        if (session.IsBusy || !networkSource.Checked || networkGames.SelectedItem is not NetworkGame game) return;
         string? version = customNetworkVersion.Checked ? networkVersion.Text.Trim() : null;
         if (version is not null && (!Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0))
         { status.Text = "请输入三段版本号，例如 7.1.0。"; return; }
         ClearNetworkFiles();
-        await RunWorkAsync(() =>
+        await RunNetworkWorkAsync(token => networkClient.GetCatalogAsync(game.Version, token, version).GetAwaiter().GetResult(), catalog =>
         {
-            // Refresh even 'latest' at the explicit Get action, never silently reuse a stale version.
-            RemoteManifestCatalog catalog = networkClient.GetCatalogAsync(region.Channel, version: version).GetAwaiter().GetResult();
-            var files = new List<ReferenceInput>();
-            foreach (RemoteManifest manifest in catalog.Manifests)
+            var inputs = catalog.Manifests.Select(manifest => new ReferenceInput(
+                new LocalManifestFile(manifest.Category, manifest.Url.AbsoluteUri, manifest.DownloadSize, default), manifest));
+            networkManifests.AddNetworkFiles(inputs, game.Version.Biz, catalog.Version);
+        }, "正在查询所选游戏与版本的 manifest 列表…",
+            () => $"已查询 {networkManifests.Rows.Count} 份 manifest，请勾选所需包体后获取并解析。");
+    }
+
+    private async Task FetchAndParseNetworkAsync()
+    {
+        if (session.IsBusy || !networkSource.Checked) return;
+        ReferenceInput[] inputs = networkManifests.CheckedInputs;
+        if (inputs.Length == 0) return;
+        ReferenceChanged();
+        networkManifests.ResetResults();
+        networkManifests.ShowResults(inputs.Select(input => (input, "获取并解析中", (int?)null)));
+        await RunNetworkWorkAsync(token =>
+        {
+            var parser = new ReferenceParser((path, cancellation) =>
             {
-                byte[] bytes = networkClient.FetchAsync(manifest).GetAwaiter().GetResult();
-                var file = new LocalManifestFile(manifest.MatchingField + " — " + manifest.Category,
-                    manifest.Url.AbsoluteUri, bytes.Length, default);
-                files.Add(new ReferenceInput(file, manifest, bytes));
-            }
-            return (catalog, files);
+                ReferenceInput input = inputs.Single(item => item.File.FullPath == path);
+                return networkClient.ReadAsync(input.Remote!, cancellation).GetAwaiter().GetResult();
+            });
+            return parser.Parse(inputs.Select(input => input.File.FullPath).ToArray(), token);
         }, result =>
         {
-            networkManifests.AddNetworkFiles(result.files, "原神-" + region.Name, result.catalog.Version);
-        }, "正在从官方服务器获取 manifest…", () => $"已获取 {networkManifests.Rows.Count} 份 manifest，仅保留在内存，尚未解析；请勾选后解析。");
+            networkManifests.ShowResults(inputs.Select((input, index) => (input,
+                result.Items[index].Error is null ? "已解析" : "失败", result.Items[index].Entries)));
+            if (result.Items.Any(item => item.Error is not null))
+                throw new InvalidDataException("部分 manifest 获取或解析失败，本批结果不可用。", result.Items.First(item => item.Error is not null).Error);
+            if (result.CombinedError is not null)
+                throw new InvalidDataException("所选 manifest 存在同侧冲突，未启用结果。", result.CombinedError);
+            session.AcceptReference(result.Snapshot!);
+            referenceOrigin = "来源：\r\n" + string.Join("\r\n", inputs.Select(input => ResultText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
+        }, "正在获取所选 manifest 并解析…", () => $"已获取并解析 {inputs.Length} 份 manifest。", onFinished: () =>
+        {
+            foreach (DataGridViewRow row in networkManifests.Rows)
+                if ((string?)row.Cells["State"].Value == "获取并解析中") row.Cells["State"].Value = "未获取";
+        });
+    }
+
+    private async Task RunNetworkWorkAsync<T>(Func<CancellationToken, T> work, Action<T> apply,
+        string message, Func<string> completedMessage, Action? onFinished = null)
+    {
+        using var cancellation = new CancellationTokenSource();
+        networkCancellation = cancellation;
+        await RunWorkAsync(() => work(cancellation.Token), result =>
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            apply(result);
+        }, message, completedMessage, onFinished: () => { onFinished?.Invoke(); networkCancellation = null; });
+        if (closeAfterNetwork) Close();
     }
 }

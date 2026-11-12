@@ -11,7 +11,8 @@ public enum CoreErrorCode
     ScanDirectoryIsLink, ScanDirectoryMissing, ScanFileTypeChanged, ScanFileSizeChanged,
     ExclusionPathInvalid, ExclusionOutsideRoot, DevicePathUnsupported, DirectoryIsLink, DirectoryMissing,
     ManifestNetworkMetadataInvalid, ManifestChannelUnavailable, ManifestDownloadMismatch,
-    ManifestNetworkSizeLimit, ManifestNetworkUnsupported, ManifestVersionUnavailable, ManifestPackageUnavailable
+    ManifestNetworkSizeLimit, ManifestNetworkUnsupported, ManifestVersionUnavailable, ManifestPackageUnavailable,
+    NetworkConfigurationInvalid
 }
 
 // Diagnostic data only. Front ends own wording, localization and recovery advice.

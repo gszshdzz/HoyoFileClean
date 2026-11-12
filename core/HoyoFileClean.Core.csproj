@@ -9,5 +9,7 @@
     <PackageReference Include="Grpc.Tools" Version="2.85.0" PrivateAssets="All" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
     <Protobuf Include="..\Protos\Sophon.proto" GrpcServices="None" />
+    <Content Include="..\config\network-services.json" Link="config\network-services.json"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

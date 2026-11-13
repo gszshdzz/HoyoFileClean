@@ -1,11 +1,11 @@
 using System.Net;
-using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Google.Protobuf;
 using HoyoFileClean.Desktop;
 using HoyoFileClean.Protos;
 using Xunit;
+using static HoyoFileClean.Desktop.Tests.NativeTestHost;
 
 namespace HoyoFileClean.Desktop.Tests;
 
@@ -386,13 +386,6 @@ public sealed class NetworkReferenceTests
         else Assert.True(form.IsDisposed);
     });
 
-    private static void WaitUntil(Func<bool> condition)
-    {
-        long start = Environment.TickCount64;
-        while (!condition() && Environment.TickCount64 - start < 5000) { Application.DoEvents(); Thread.Yield(); }
-        Assert.True(condition());
-    }
-
     [Fact]
     public void ArbitraryConfiguredServiceIsUsedDirectlyAndGameRemainsUnselected() => OnSta(() =>
     {
@@ -646,36 +639,10 @@ public sealed class NetworkReferenceTests
     private static void ClickAndWait(MainForm form, WizardSession session, string name)
     {
         Find<Button>(form, name).PerformClick();
-        long start = Environment.TickCount64;
-        while ((session.IsBusy || Find<ProgressBar>(form, "OperationProgress").Visible)
-            && Environment.TickCount64 - start < 10000) { Application.DoEvents(); Thread.Yield(); }
+        WaitUntil(() => !session.IsBusy && !Find<ProgressBar>(form, "OperationProgress").Visible,
+            timeoutSeconds: 10);
         Application.DoEvents();
         Assert.False(session.IsBusy);
     }
 
-    private static T Find<T>(Control parent, string name) where T : Control => (T)Assert.Single(parent.Controls.Find(name, true));
-    private static void OnSta(Action action)
-    {
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                using var host = new Form { ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
-                    Location = new Point(-20000, -20000), Size = new Size(1, 1) };
-                host.Shown += (_, _) => host.BeginInvoke(() =>
-                {
-                    try { action(); }
-                    catch (Exception error) { failure = error; }
-                    finally { host.Close(); }
-                });
-                Application.Run(host);
-            }
-            catch (Exception error) { failure = error; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
-        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
-    }
 }

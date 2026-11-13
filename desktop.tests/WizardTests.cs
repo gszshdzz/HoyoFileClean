@@ -1,7 +1,7 @@
-using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using HoyoFileClean.Desktop;
 using Xunit;
+using static HoyoFileClean.Desktop.Tests.NativeTestHost;
 
 namespace HoyoFileClean.Desktop.Tests;
 
@@ -696,10 +696,9 @@ public sealed class WizardTests
 
     private static void PumpUntilLocalGetFinishes(MainForm form, WizardSession session)
     {
-        var timer = System.Diagnostics.Stopwatch.StartNew();
-        while ((session.IsBusy || Find<ProgressBar>(form, "OperationProgress").Visible || !Find<Button>(form, "GetLocalManifests").Enabled
-            || Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal))
-            && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+        WaitUntil(() => !session.IsBusy && !Find<ProgressBar>(form, "OperationProgress").Visible
+            && Find<Button>(form, "GetLocalManifests").Enabled
+            && !Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal), timeoutSeconds: 10);
         Application.DoEvents();
         Assert.False(session.IsBusy, "异步获取未按时完成");
         Assert.False(Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal), "界面未完成结果处理");
@@ -920,9 +919,8 @@ public sealed class WizardTests
         Find<TextBox>(form, "GameRoot").Text = root;
         void Wait()
         {
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            while ((session.IsBusy || Find<ProgressBar>(form, "OperationProgress").Visible)
-                && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            WaitUntil(() => !session.IsBusy && !Find<ProgressBar>(form, "OperationProgress").Visible,
+                timeoutSeconds: 10);
             Assert.False(session.IsBusy);
             Assert.DoesNotContain("处理失败", Find<Label>(form, "Status").Text);
         }
@@ -1052,8 +1050,7 @@ public sealed class WizardTests
         finally
         {
             release.Set();
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            while (!work.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            WaitUntil(() => work.IsCompleted, timeoutSeconds: 10);
             work.GetAwaiter().GetResult();
         }
         Assert.Equal("keep", File.ReadAllText(file));
@@ -1128,8 +1125,7 @@ public sealed class WizardTests
         finally
         {
             release.Set();
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            while (!work.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            WaitUntil(() => work.IsCompleted, timeoutSeconds: 10);
             work.GetAwaiter().GetResult();
         }
         session.AcceptReference(FileComparer.ReadInputs([WriteList("valid", null, [new ManifestFile("file", 1)])]));
@@ -1276,8 +1272,7 @@ public sealed class WizardTests
         {
             Find<Button>(form, local ? "ParseLocalReference" : "ParseManualReference").PerformClick();
             ProgressBar bar = Find<ProgressBar>(form, "OperationProgress");
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            while ((!enteredSecond.IsSet || bar.Value != 1) && timer.Elapsed < TimeSpan.FromSeconds(10)) Application.DoEvents();
+            WaitUntil(() => enteredSecond.IsSet && bar.Value == 1, timeoutSeconds: 10);
             Assert.True(enteredSecond.IsSet);
             Assert.Equal(ProgressBarStyle.Continuous, bar.Style);
             Assert.Equal(3, bar.Maximum);
@@ -1799,9 +1794,8 @@ public sealed class WizardTests
 
     private static void WaitForPageWork(MainForm form, WizardSession session, string button)
     {
-        var timer = System.Diagnostics.Stopwatch.StartNew();
-        while ((session.IsBusy || !Find<Button>(form, button).Enabled || Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal))
-            && timer.Elapsed < TimeSpan.FromSeconds(5)) Application.DoEvents();
+        WaitUntil(() => !session.IsBusy && Find<Button>(form, button).Enabled
+            && !Find<Label>(form, "Status").Text.StartsWith("正在", StringComparison.Ordinal));
         Application.DoEvents();
         Assert.False(session.IsBusy);
         Assert.True(Find<Button>(form, button).Enabled);
@@ -1838,15 +1832,4 @@ public sealed class WizardTests
         return path;
     }
 
-    private static T Find<T>(Control control, string name) where T : Control => (T)Assert.Single(control.Controls.Find(name, true));
-
-    private static void OnSta(Action action)
-    {
-        Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception error) { failure = error; } });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "原生控件测试未在 20 秒内完成。");
-        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
-    }
 }

@@ -239,13 +239,6 @@ internal sealed class ManifestTable : DataGridView
         }
     }
 
-    internal void ShowResult(ReferenceInput input, ReferenceState state, int? entries)
-    {
-        DataGridViewRow row = Rows.Cast<DataGridViewRow>().Single(row => ReferenceEquals(row.Tag, input));
-        SetState(row, state);
-        row.Cells["Entries"].Value = entries;
-    }
-
     internal void ShowResults(IEnumerable<(ReferenceInput Input, ReferenceState State, int? Entries)> results)
     {
         var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);

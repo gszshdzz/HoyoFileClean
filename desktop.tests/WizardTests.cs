@@ -64,15 +64,43 @@ public sealed class WizardTests
         using var table = new ManifestTable("state-test");
         table.AddFiles([new LocalManifestFile("file", @"C:\file", 1, DateTime.UtcNow)]);
         ReferenceInput input = Assert.IsType<ReferenceInput>(table.Rows[0].Tag);
-        table.ShowResult(input, ReferenceState.Fetching, null);
+        table.ShowResults([(input, ReferenceState.Fetching, null)]);
         table.Rows[0].Cells["State"].Value = "arbitrary translated text";
         table.ResetFetching();
         Assert.Equal(ReferenceState.Unfetched, table.Rows[0].Cells["State"].Tag);
         Assert.Equal(ManifestTable.StateText(ReferenceState.Unfetched), table.Rows[0].Cells["State"].Value);
-        table.ShowResult(input, ReferenceState.Parsed, 1);
+        table.ShowResults([(input, ReferenceState.Parsed, 1)]);
         table.Rows[0].Cells["State"].Value = ManifestTable.StateText(ReferenceState.Fetching);
         table.ResetFetching();
         Assert.Equal(ReferenceState.Parsed, table.Rows[0].Cells["State"].Tag);
+    });
+
+    [Fact]
+    public void BatchResultsFollowInputIdentityAfterTableSorting() => OnSta(() =>
+    {
+        using var table = new ManifestTable("batch-test");
+        table.AddFiles([
+            new LocalManifestFile("a", @"C:\a", 1, DateTime.UtcNow),
+            new LocalManifestFile("b", @"C:\b", 2, DateTime.UtcNow)]);
+        ReferenceInput[] inputs = table.Rows.Cast<DataGridViewRow>()
+            .Select(row => Assert.IsType<ReferenceInput>(row.Tag)).ToArray();
+        ReferenceInput a = inputs.Single(input => input.File.Name == "a");
+        ReferenceInput b = inputs.Single(input => input.File.Name == "b");
+        table.Sort(Assert.IsType<DataGridViewTextBoxColumn>(table.Columns["Name"]),
+            System.ComponentModel.ListSortDirection.Descending);
+        Assert.Same(b, table.Rows[0].Tag);
+        table.ShowResults([(a, ReferenceState.Parsed, 7), (b, ReferenceState.Fetching, null)]);
+        foreach (DataGridViewRow row in table.Rows)
+        {
+            bool parsed = ReferenceEquals(row.Tag, a);
+            Assert.Equal(parsed ? ReferenceState.Parsed : ReferenceState.Fetching, row.Cells["State"].Tag);
+            Assert.Equal(parsed ? 7 : (int?)null, row.Cells["Entries"].Value);
+            row.Cells["State"].Value = "arbitrary translated text";
+        }
+        table.ResetFetching();
+        Assert.Equal(ReferenceState.Unfetched, table.Rows[0].Cells["State"].Tag);
+        Assert.Equal(ReferenceState.Parsed, table.Rows[1].Cells["State"].Tag);
+        Assert.Equal(7, table.Rows[1].Cells["Entries"].Value);
     });
 
     [Fact]

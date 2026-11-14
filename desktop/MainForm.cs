@@ -13,7 +13,6 @@ public sealed partial class MainForm : Form
     private readonly Button close = MakeButton(L.Get("Button_CloseWizard"), "CloseWizard");
     private readonly Button cancelParsing = MakeButton(L.Get("Button_CancelParsing"), "CancelParsing");
     private readonly ReferenceParser referenceParser;
-    private CancellationTokenSource? parsingCancellation;
     private readonly Button parseManualReference = MakeButton(L.Get("Button_Execute"), "ParseManualReference");
     private readonly ProgressBar parsingProgress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
     private readonly ProgressBar comparisonProgress = new() { Name = "ComparisonProgress", Dock = DockStyle.Fill, Visible = false };
@@ -83,7 +82,7 @@ public sealed partial class MainForm : Form
         close.Click += (_, _) => Close();
         cancelParsing.Click += (_, _) =>
         {
-            parsingCancellation?.Cancel();
+            session.CancelOperation();
             cancelParsing.Enabled = false;
             status.Text = L.Get("CancellingParsing");
         };
@@ -91,16 +90,14 @@ public sealed partial class MainForm : Form
         heavy.CheckedChanged += (_, _) => GameChanged();
         FormClosing += (_, args) =>
         {
-            if (!session.IsBusy) return;
+            if (session.RequestClose()) return;
             args.Cancel = true;
-            if (networkCancellation is not null)
+            if (session.Operation == DesktopOperation.Network)
             {
-                closeAfterNetwork = true;
-                networkCancellation.Cancel();
                 status.Text = L.Get("CancellingNetworkAndClosing");
                 return;
             }
-            status.Text = parsingCancellation is not null
+            status.Text = session.Operation == DesktopOperation.Parsing
                 ? L.Get("CloseDuringParsingHint")
                 : L.Get("CloseDuringWorkHint");
         };
@@ -243,10 +240,10 @@ public sealed partial class MainForm : Form
         parseLocalReference.Enabled = !session.IsBusy && localSource.Checked && localManifests.CheckedInputs.Length > 0;
         if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
         next.Enabled = session.CanAdvance;
-        close.Enabled = !session.IsBusy || networkCancellation is not null;
-        cancelParsing.Visible = parsingCancellation is not null;
-        cancelParsing.Enabled = session.IsBusy && parsingCancellation is { IsCancellationRequested: false };
-        cancelNetwork.Enabled = session.IsBusy && networkCancellation is { IsCancellationRequested: false };
+        close.Enabled = !session.IsBusy || session.Operation == DesktopOperation.Network;
+        cancelParsing.Visible = session.Operation == DesktopOperation.Parsing;
+        cancelParsing.Enabled = session.Operation == DesktopOperation.Parsing && session.CanCancel;
+        cancelNetwork.Enabled = session.Operation == DesktopOperation.Network && session.CanCancel;
         execute.Text = L.Get("CompareAction");
         scanOptions.Visible = scanGameSource.Checked;
         gameJsonRow.Visible = importGameSource.Checked;

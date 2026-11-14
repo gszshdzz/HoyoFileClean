@@ -29,13 +29,11 @@ public sealed partial class MainForm
         differences.Render();
         RefreshView();
         table.ShowResults(inputs.Select(input => (input, ReferenceState.Pending, (int?)null)));
-        using var cancellation = new CancellationTokenSource();
-        parsingCancellation = cancellation;
         var reporter = new ParsingProgress();
         using var refreshProgress = new System.Windows.Forms.Timer { Interval = Maintenance.ParsingProgressIntervalMs };
         refreshProgress.Tick += (_, _) =>
         {
-            if (parsingCancellation != cancellation || !session.IsBusy || cancellation.IsCancellationRequested) return;
+            if (session.Operation != DesktopOperation.Parsing || !session.IsBusy || session.IsCancellationRequested) return;
             int completed = reporter.Completed;
             if (completed <= progress.Value) return;
             progress.Value = Math.Clamp(Math.Max(progress.Value, completed), 0, inputs.Length);
@@ -45,23 +43,21 @@ public sealed partial class MainForm
         };
         refreshProgress.Start();
         ReferenceParser parser = referenceParser;
-        await RunWorkAsync(() => parser.Parse(inputs,
-            cancellation.Token, progress: reporter), result =>
+        await RunWorkAsync(token => parser.Parse(inputs,
+            token, progress: reporter), result =>
         {
-            cancellation.Token.ThrowIfCancellationRequested();
             progress.Value = inputs.Length;
             table.ShowResults(inputs.Select((input, i) => (input,
                 result.Items[i].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[i].Entries)));
             session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
-        }, L.Format("ParsingStartProgress", inputs.Length), totalFiles: inputs.Length,
+        }, L.Format("ParsingStartProgress", inputs.Length), DesktopOperation.Parsing, totalFiles: inputs.Length,
         onFinished: () =>
         {
             refreshProgress.Stop();
             progress.Value = Math.Clamp(reporter.Completed, 0, inputs.Length);
-            if (cancellation.IsCancellationRequested)
+            if (session.IsCancellationRequested)
                 table.ShowResults(inputs.Select(input => (input, ReferenceState.Cancelled, (int?)null)));
-            parsingCancellation = null;
         });
     }
 
@@ -154,10 +150,19 @@ public sealed partial class MainForm
         }, L.Get("ReportValidating"));
     }
 
-    private async Task RunWorkAsync<T>(Func<T> work, Action<T> apply, string message,
+    private Task RunWorkAsync<T>(Func<T> work, Action<T> apply, string message,
         Func<string>? completedMessage = null, int? totalFiles = null, Action? onFinished = null)
+        => RunWorkAsync(_ => work(), apply, message, DesktopOperation.Work, completedMessage, totalFiles, onFinished);
+
+    private async Task RunWorkAsync<T>(Func<CancellationToken, T> work, Action<T> apply, string message,
+        DesktopOperation kind, Func<string>? completedMessage = null, int? totalFiles = null, Action? onFinished = null)
     {
-        Task operation = session.RunAsync(work, apply);
+        CancellationToken cancellation = default;
+        Task operation = session.RunAsync(token =>
+        {
+            cancellation = token;
+            return work(token);
+        }, apply, kind, onFinished);
         status.Text = message;
         progress.Value = 0;
         progress.Maximum = totalFiles ?? 100;
@@ -173,11 +178,11 @@ public sealed partial class MainForm
                 ? ResultText.DescribeGameStatus(session.Game, importGameSource.Checked)
                 : completedMessage?.Invoke() ?? L.Get("StepCompleted");
         }
-        catch (OperationCanceledException) when (networkCancellation is { IsCancellationRequested: true })
+        catch (OperationCanceledException) when (kind == DesktopOperation.Network && cancellation.IsCancellationRequested)
         {
             outcome = L.Get("NetworkCancelled");
         }
-        catch (OperationCanceledException) when (parsingCancellation is { IsCancellationRequested: true })
+        catch (OperationCanceledException) when (kind == DesktopOperation.Parsing && cancellation.IsCancellationRequested)
         {
             outcome = L.Get("ParsingCancelled");
         }
@@ -187,12 +192,12 @@ public sealed partial class MainForm
         }
         finally
         {
-            onFinished?.Invoke();
             differences.Render();
             RefreshView();
             progress.Visible = false;
         }
         status.Text = outcome;
+        if (session.CloseRequested) Close();
     }
 
     private static LocalManifestFile ReadReferenceMetadata(string path)

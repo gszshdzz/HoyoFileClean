@@ -2,6 +2,8 @@ namespace HoyoFileClean.Desktop;
 
 public enum DifferenceCategory { All, GameOnly, ReferenceOnly, Different, OutsideScope }
 
+internal enum DesktopOperation { Work, Parsing, Network }
+
 public sealed record DifferenceRow(string Path, ManifestFile? Game, ManifestFile? Reference,
     DifferenceCategory Category)
 {
@@ -20,6 +22,12 @@ public sealed class WizardSession
     public DifferenceCategory Filter { get; private set; }
     public int Step { get; private set; }
     public bool IsBusy { get; private set; }
+    private CancellationTokenSource? cancellation;
+    private bool applyingResult;
+    internal DesktopOperation? Operation { get; private set; }
+    internal bool IsCancellationRequested => cancellation?.IsCancellationRequested == true;
+    internal bool CanCancel => IsBusy && cancellation is not null && !IsCancellationRequested;
+    internal bool CloseRequested { get; private set; }
     public bool SelectionConfirmed { get; private set; }
     public int SelectedCount => selected.Count;
     public long SelectedSize => selected.Values.Sum(file => file.Size);
@@ -32,17 +40,54 @@ public sealed class WizardSession
         _ => false
     };
 
-    public async Task RunAsync<T>(Func<T> work, Action<T> apply)
+    public Task RunAsync<T>(Func<T> work, Action<T> apply)
+        => RunAsync(_ => work(), apply, DesktopOperation.Work);
+
+    internal async Task RunAsync<T>(Func<CancellationToken, T> work, Action<T> apply,
+        DesktopOperation operation, Action? onFinished = null)
     {
         RequireIdle();
+        Operation = operation;
+        CloseRequested = false;
+        using var source = operation == DesktopOperation.Work ? null : new CancellationTokenSource();
+        cancellation = source;
+        CancellationToken token = source?.Token ?? CancellationToken.None;
         IsBusy = true;
         try
         {
-            T result = await Task.Run(work);
-            IsBusy = false;
-            apply(result);
+            T result = await Task.Run(() => work(token));
+            token.ThrowIfCancellationRequested();
+            applyingResult = true;
+            try { apply(result); }
+            finally { applyingResult = false; }
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            try { onFinished?.Invoke(); }
+            finally
+            {
+                IsBusy = false;
+                cancellation = null;
+                Operation = null;
+            }
+        }
+    }
+
+    internal void CancelOperation()
+    {
+        if (CanCancel) cancellation!.Cancel();
+    }
+
+    // Only network operations support cancel-and-close. Other work must finish first.
+    internal bool RequestClose()
+    {
+        if (!IsBusy) return true;
+        if (Operation == DesktopOperation.Network)
+        {
+            CloseRequested = true;
+            CancelOperation();
+        }
+        return false;
     }
 
     public void Back()
@@ -59,21 +104,26 @@ public sealed class WizardSession
 
     public void InvalidateReference()
     {
-        RequireIdle();
+        RequireResultApplicationOrIdle();
         Reference = null;
         InvalidateComparison();
     }
 
     public void InvalidateGame()
     {
-        RequireIdle();
+        RequireResultApplicationOrIdle();
         Game = null;
         InvalidateComparison();
     }
 
     public void InvalidateComparison()
     {
-        RequireIdle();
+        RequireResultApplicationOrIdle();
+        ClearComparison();
+    }
+
+    private void ClearComparison()
+    {
         Comparison = null;
         Rows = [];
         rowsByPath.Clear();
@@ -83,8 +133,8 @@ public sealed class WizardSession
 
     public void AcceptReference(FileListSnapshot reference)
     {
-        RequireIdle();
-        InvalidateComparison();
+        RequireResultApplicationOrIdle();
+        ClearComparison();
         Reference = reference;
     }
 
@@ -102,17 +152,17 @@ public sealed class WizardSession
 
     public void AcceptGame(FileListSnapshot game, string root)
     {
-        RequireIdle();
+        RequireResultApplicationOrIdle();
         ValidateGameInput(game, root);
-        InvalidateComparison();
+        ClearComparison();
         Game = game;
     }
 
     public void AcceptComparison(ComparisonResult comparison)
     {
-        RequireIdle();
+        RequireResultApplicationOrIdle();
         if (Game is null || Reference is null) throw new InvalidOperationException(L.Get("ComparisonRequiresInputs"));
-        InvalidateComparison();
+        ClearComparison();
         Comparison = comparison;
         Rows = comparison.OnlyA.Select(file => new DifferenceRow(file.Path, file, null, DifferenceCategory.GameOnly))
             .Concat(comparison.OnlyB.Select(file => new DifferenceRow(file.Path, null, file, DifferenceCategory.ReferenceOnly)))
@@ -159,5 +209,12 @@ public sealed class WizardSession
     private void RequireIdle()
     {
         if (IsBusy) throw new InvalidOperationException(L.Get("OperationBusy"));
+    }
+
+    private void RequireResultApplicationOrIdle()
+    {
+        // Publishing controls can synchronously invalidate dependent results. This does
+        // not unlock navigation or another operation, and cleanup has no such permission.
+        if (!applyingResult) RequireIdle();
     }
 }

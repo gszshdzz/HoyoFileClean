@@ -17,3 +17,5 @@
 任务见 `issues/01-reference-input-identity.md` 至 `issues/05-language-validation.md`。维护入口与最新验证结果见 `docs/configuration-maintenance.md`。
 
 2026-11-13，session 7.5：新一轮总体审查后，用户授权自行选择值得的整理，常规测试及提交前审查通过、无需人工验收的工作可直接提交。本轮只统一桌面测试的原生运行环境与有界等待，保留真实消息循环和既有行为断言，不修改生产代码或界面。具体范围和验证见 `issues/07-native-test-host.md`；操作生命周期、结果来源和工程入口仅保留候选，不因总体授权扩展为大范围重写。
+
+2026-11-14，session 7.5：用户指出优先项未完成，继续落实桌面操作生命周期集中管理，保留不同操作的取消／关闭行为，范围见 `issues/08-operation-lifecycle.md`。结果来源与工程入口仍不扩展。

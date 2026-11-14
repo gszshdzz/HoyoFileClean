@@ -1333,6 +1333,11 @@ public sealed class WizardTests
         Button cancel = Find<Button>(form, "CancelParsing");
         Assert.True(cancel.Visible && cancel.Enabled);
         Assert.False(Find<RadioButton>(form, "LocalSource").Enabled);
+        form.Close();
+        Assert.False(form.IsDisposed);
+        Assert.True(session.IsBusy);
+        Assert.False(session.IsCancellationRequested);
+        Assert.False(session.CloseRequested);
         cancel.PerformClick();
         Assert.False(cancel.Enabled);
         PumpUntilLocalGetFinishes(form, session);

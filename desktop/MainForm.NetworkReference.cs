@@ -17,8 +17,6 @@ public sealed partial class MainForm
     private readonly Button cancelNetwork = MakeButton(L.Get("Button_CancelNetwork"), "CancelNetwork");
     private readonly ManifestTable networkManifests = new("NetworkManifests");
     private Panel networkReferencePage = null!;
-    private CancellationTokenSource? networkCancellation;
-    private bool closeAfterNetwork;
     private sealed record NetworkRegion(NetworkService Service)
     {
         public override string ToString() => L.Get(Service.NameTextId);
@@ -102,7 +100,7 @@ public sealed partial class MainForm
         };
         cancelNetwork.Click += (_, _) =>
         {
-            networkCancellation?.Cancel();
+            session.CancelOperation();
             cancelNetwork.Enabled = false;
             status.Text = L.Get("CancellingNetwork");
         };
@@ -142,7 +140,7 @@ public sealed partial class MainForm
     {
         if (session.IsBusy || !networkSource.Checked || networkRegions.SelectedItem is not NetworkRegion region) return;
         InvalidateNetworkQuery();
-        await RunNetworkWorkAsync(token => networkClient.GetGameVersionsAsync(region.Service, cancellationToken: token).GetAwaiter().GetResult(), result =>
+        await RunWorkAsync(token => networkClient.GetGameVersionsAsync(region.Service, cancellationToken: token).GetAwaiter().GetResult(), result =>
         {
             foreach (RemoteGameVersion game in result)
             {
@@ -150,7 +148,7 @@ public sealed partial class MainForm
                     ? L.Format("GameBranchLabel", game.Biz, game.Id) : game.Biz;
                 networkGames.Items.Add(new NetworkGame(game, label));
             }
-        }, L.Get("QueryingGames"),
+        }, L.Get("QueryingGames"), DesktopOperation.Network,
             () => networkGames.Items.Count == 0 ? L.Get("OfficialGameListEmpty") : DescribeNetworkInput());
     }
 
@@ -161,12 +159,12 @@ public sealed partial class MainForm
         if (version is not null && (!Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0))
         { status.Text = L.Get("ThreePartVersionRequired"); return; }
         ClearNetworkFiles();
-        await RunNetworkWorkAsync(token => networkClient.GetCatalogAsync(game.Version, token, version).GetAwaiter().GetResult(), catalog =>
+        await RunWorkAsync(token => networkClient.GetCatalogAsync(game.Version, token, version).GetAwaiter().GetResult(), catalog =>
         {
             var inputs = catalog.Manifests.Select(manifest => new ReferenceInput(
                 new LocalManifestFile(manifest.Category, manifest.Url.AbsoluteUri, manifest.DownloadSize, default), manifest));
             networkManifests.AddNetworkFiles(inputs, game.Version.Biz, catalog.Version);
-        }, L.Get("QueryingManifests"),
+        }, L.Get("QueryingManifests"), DesktopOperation.Network,
             () => L.Format("ManifestListFound", networkManifests.Rows.Count));
     }
 
@@ -178,7 +176,7 @@ public sealed partial class MainForm
         ReferenceChanged();
         networkManifests.ResetResults();
         networkManifests.ShowResults(inputs.Select(input => (input, ReferenceState.Fetching, (int?)null)));
-        await RunNetworkWorkAsync(token =>
+        await RunWorkAsync(token =>
         {
             var parser = new ReferenceParser((input, cancellation) =>
                 networkClient.ReadAsync(input.Remote!, cancellation).GetAwaiter().GetResult());
@@ -189,22 +187,10 @@ public sealed partial class MainForm
                 result.Items[index].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[index].Entries)));
             session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
-        }, L.Get("FetchingManifests"), () => L.Format("NetworkBatchParsed", inputs.Length), onFinished: () =>
+        }, L.Get("FetchingManifests"), DesktopOperation.Network, () => L.Format("NetworkBatchParsed", inputs.Length), onFinished: () =>
         {
             networkManifests.ResetFetching();
         });
     }
 
-    private async Task RunNetworkWorkAsync<T>(Func<CancellationToken, T> work, Action<T> apply,
-        string message, Func<string> completedMessage, Action? onFinished = null)
-    {
-        using var cancellation = new CancellationTokenSource();
-        networkCancellation = cancellation;
-        await RunWorkAsync(() => work(cancellation.Token), result =>
-        {
-            cancellation.Token.ThrowIfCancellationRequested();
-            apply(result);
-        }, message, completedMessage, onFinished: () => { onFinished?.Invoke(); networkCancellation = null; });
-        if (closeAfterNetwork) Close();
-    }
 }

@@ -34,11 +34,11 @@ public sealed class GameIdentifierTests
         GameIdentification result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
         Assert.Equal("7.2.0", result.Detections["ini_version"]);
         Assert.False(result.Information.ContainsKey("game"));
-        Assert.Equal("hk4e_cn", Assert.Single(result.Information["game_id"].Values).RawValue);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
         Assert.Equal("IdentificationChannelOfficial", Assert.Single(result.Information["channel"].Values).TextId);
-        Assert.Equal("1.0.0", Assert.Single(result.Information["packages"].Values).RawValue);
-        Assert.Equal("COa9vWaYX9", Assert.Single(result.Information["packages"].Values).Item);
-        Assert.Equal("IdentificationPluginVersion", Assert.Single(result.Information["packages"].Values).DisplayFormatTextId);
+        Assert.Equal("1.0.0", Assert.Single(result.Information["plugins"].Values).RawValue);
+        Assert.Equal("COa9vWaYX9", Assert.Single(result.Information["plugins"].Values).Item);
+        Assert.Equal("IdentificationPluginVersion", Assert.Single(result.Information["plugins"].Values).DisplayFormatTextId);
         Assert.Equal(Sample, File.ReadAllText(path));
         Assert.Equal(modified, File.GetLastWriteTimeUtc(path));
         Assert.Single(Directory.GetFiles(root));
@@ -175,10 +175,10 @@ public sealed class GameIdentifierTests
         string path = Path.Combine(repository, "refs", "config.ini");
         byte[] before = File.ReadAllBytes(path);
         var result = GameIdentifier.Identify(Path.GetDirectoryName(path)!, TestContext.Current.CancellationToken);
-        Assert.Equal("hk4e_cn", Assert.Single(result.Information["game_id"].Values).RawValue);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
         Assert.Equal("7.2.0", Assert.Single(result.Information["version"].Values).RawValue);
         Assert.Equal("IdentificationChannelOfficial", Assert.Single(result.Information["channel"].Values).TextId);
-        Assert.Equal("1.0.0", Assert.Single(result.Information["packages"].Values).RawValue);
+        Assert.Equal("1.0.0", Assert.Single(result.Information["plugins"].Values).RawValue);
         Assert.Equal(before, File.ReadAllBytes(path));
         string acceptance = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Temp", "opencode", "HoyoFileClean-session8-acceptance-" + Guid.NewGuid().ToString("N"));
@@ -256,7 +256,7 @@ public sealed class GameIdentifierTests
     {
         Write(Sample);
         var config = GameIdentifier.LoadConfiguration();
-        config.Information["game_id"] = config.Information["game_id"] with
+        config.Information["biz"] = config.Information["biz"] with
         { Rules = [new(new() { ["missing"] = "anything" }, TextId: "game")] };
         Assert.Equal(CoreErrorCode.GameIdentificationConfigurationInvalid,
             Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken)).Code);
@@ -288,7 +288,7 @@ public sealed class GameIdentifierTests
         configuration.Information.Remove("channel");
         var result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken);
         Assert.Equal(gameId, result.Detections["ini_game_id"]);
-        Assert.Equal(gameId, Assert.Single(result.Information["game_id"].Values).RawValue);
+        Assert.Equal(gameId, Assert.Single(result.Information["biz"].Values).RawValue);
     }
 
     [Theory]
@@ -307,7 +307,7 @@ public sealed class GameIdentifierTests
     {
         Write(Sample + "\nplugin_futurePlugin_version=2.9.0\nplugin_futurePlugin_version=2.10.0\nplugin_another_version=1.0.0");
         var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
-        var plugins = result.Information["packages"].Values.ToDictionary(value => value.Item!, value => value.RawValue);
+        var plugins = result.Information["plugins"].Values.ToDictionary(value => value.Item!, value => value.RawValue);
         Assert.Equal(3, plugins.Count);
         Assert.Equal("1.0.0", plugins["COa9vWaYX9"]);
         Assert.Equal("2.10.0", plugins["futurePlugin"]);
@@ -327,6 +327,7 @@ public sealed class GameIdentifierTests
     public void IdentifiedScanJsonRoundTripsWithoutAccessingGameRoot()
     {
         Write(Sample + "\nplugin_newPlugin_version=3.0.0");
+        Write("game", "YuanShen.exe");
         var identification = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
         string output = Path.Combine(Path.GetDirectoryName(root)!, Guid.NewGuid() + ".json");
         DirectoryScanner.Scan(root, output, cancellationToken: TestContext.Current.CancellationToken,
@@ -341,11 +342,22 @@ public sealed class GameIdentifierTests
         Directory.Move(root, root + "-moved");
         var imported = FileComparer.ReadInputs([output]);
         var restored = GameIdentifier.FromDetections(imported.Sources[0].Scan!.GameDetections!);
+        Assert.Equal(Assert.Single(restored.Information["biz"].Values).RawValue,
+            imported.Sources[0].Metadata!["biz"].Value);
+        Assert.Equal("hk4e", imported.Sources[0].Metadata!["game"].Value);
+        Assert.Equal("game", imported.Sources[0].Metadata!["package"].Value);
+        Assert.False(restored.Information.ContainsKey("package"));
         Assert.Equal(identification.Detections, restored.Detections);
-        Assert.Equal(identification.Information["packages"].Values, restored.Information["packages"].Values);
+        Assert.Equal(identification.Information["plugins"].Values, restored.Information["plugins"].Values);
         string converted = output + ".converted.json";
         ManifestConverter.Convert(output, converted);
         Assert.Equal(identification.Detections, FileComparer.ReadInputs([converted]).Sources[0].Scan!.GameDetections);
+        string exported = output + ".exported.json";
+        ManifestConverter.Export(imported, exported);
+        var reimported = FileComparer.ReadInputs([exported]);
+        Assert.Equal(identification.Detections, reimported.Sources[0].Scan!.GameDetections);
+        Assert.Equal("hk4e_cn", reimported.Sources[0].Metadata!["biz"].Value);
+        Assert.Equal(imported.Files.Values, reimported.Files.Values);
         Assert.False(Directory.Exists(root));
     }
 
@@ -376,7 +388,7 @@ public sealed class GameIdentifierTests
             ["future_version"] = new(["future.txt"], @"^release=(?<value>[^\r\n]+)", true)
         }, new()
         {
-            ["game_id"] = new("IdentificationLabelGame", true, false, [new(new(), Source: "future_id")]),
+            ["biz"] = new("IdentificationLabelGame", true, false, [new(new(), Source: "future_id")]),
             ["version"] = new("IdentificationLabelVersion", true, false, [new(new(), Source: "future_version")])
         });
         var identification = GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken);

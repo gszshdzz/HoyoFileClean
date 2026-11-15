@@ -88,6 +88,10 @@ public sealed class GameIdentificationTests
         // The UI continuation has not run: even very fast work must reject publication.
         Assert.True(session.IsBusy);
         Assert.True(cancel.Visible && cancel.Enabled);
+        var actions = Assert.IsType<TableLayoutPanel>(cancel.Parent);
+        Assert.Equal("ScanActions", actions.Name);
+        Assert.Equal(new TableLayoutPanelCellPosition(1, 0), actions.GetPositionFromControl(cancel));
+        Assert.True(actions.ClientSize.Width - cancel.Right <= cancel.Margin.Right + 1);
         cancel.PerformClick();
         Assert.False(cancel.Enabled);
         Assert.False(Find<Button>(form, "Next").Enabled);
@@ -101,6 +105,46 @@ public sealed class GameIdentificationTests
         ScanAndWait(form, session);
         Assert.NotNull(session.Game);
         Assert.NotNull(session.Identification);
+    });
+
+    [Fact]
+    public void IdentifiedGameAndManifestKeepBizAndPluginMeaningsThroughComparison() => OnSta(() =>
+    {
+        string root = CreateRoot();
+        WriteGameConfig(root);
+        File.AppendAllText(Path.Combine(root, "config.ini"), "\nplugin_newPlugin_version=3.0.0");
+        File.WriteAllText(Path.Combine(root, "YuanShen.exe"), "game");
+        string reference = root + ".reference.json";
+        File.WriteAllText(reference, """
+            {"fileCount":1,"totalSize":4,"files":[{"path":"YuanShen.exe","size":4}]}
+            """);
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        ScanAndWait(form, session);
+        GameIdentification identification = Assert.IsType<GameIdentification>(session.Identification);
+        Assert.Equal("newPlugin", Assert.Single(identification.Information["plugins"].Values).Item);
+        Assert.False(identification.Information.ContainsKey("package"));
+        Find<Button>(form, "Next").PerformClick();
+        Find<RadioButton>(form, "ManualSource").Checked = true;
+        var file = new FileInfo(reference);
+        var table = Find<ManifestTable>(form, "Manifests");
+        table.AddFiles([new LocalManifestFile(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc)], check: true);
+        Find<Button>(form, "ParseManualReference").PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        var metadata = Assert.Single(session.Reference!.Sources).Metadata!;
+        Assert.Equal(Assert.Single(identification.Information["biz"].Values).RawValue, metadata["biz"].Value);
+        Assert.Equal("game", metadata["package"].Value);
+        Assert.Equal("原神", table.Rows[0].Cells["Game"].Value);
+        Assert.Same(identification, session.Identification);
+        Find<Button>(form, "Next").PerformClick();
+        Find<Button>(form, "Execute").PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Assert.NotNull(session.Comparison);
+        Assert.Equal(1, session.Comparison.Summary.MatchedSizeOnly);
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Equal(3, session.Step);
+        Assert.True(File.Exists(Path.Combine(root, "config.ini")));
+        Assert.Equal("game", File.ReadAllText(Path.Combine(root, "YuanShen.exe")));
     });
 
     [Fact]

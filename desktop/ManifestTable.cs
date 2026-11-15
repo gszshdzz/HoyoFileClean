@@ -5,6 +5,7 @@ namespace HoyoFileClean.Desktop;
 internal sealed class ManifestTable : DataGridView
 {
     public event Action? CheckedFilesChanged;
+    internal event Action<ReferenceInput, FileListSnapshot, string>? DetailsRequested;
     private bool updating;
     private readonly bool groupByModifiedHour;
     private bool[] hourBands = [];
@@ -77,6 +78,7 @@ internal sealed class ManifestTable : DataGridView
             args.FormattingApplied = true;
         };
         SelectionChanged += (_, _) => { if (!updating) ClearSelection(); };
+        CellDoubleClick += (_, args) => OpenDetails(args.RowIndex, args.ColumnIndex);
         Sort(Columns[groupByModifiedHour ? "Modified" : "Name"]!,
             groupByModifiedHour ? ListSortDirection.Descending : ListSortDirection.Ascending);
     }
@@ -183,7 +185,7 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow[] added = complete.Where(file => known.Add(file.FullPath)).Select(file =>
         {
             var row = new DataGridViewRow { Tag = new ReferenceInput(file) };
-            row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, StateText(ReferenceState.Unparsed), L.Get("UnavailableValue"), L.Get("UnavailableValue"), null!, null!);
+            row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, StateText(ReferenceState.Unparsed), null!, null!, null!, null!);
             row.Cells[Columns["State"]!.Index].Tag = ReferenceState.Unparsed;
             return row;
         }).ToArray();
@@ -236,6 +238,8 @@ internal sealed class ManifestTable : DataGridView
         {
             SetState(row, ((ReferenceInput)row.Tag!).Remote is null ? ReferenceState.Unparsed : ReferenceState.Unfetched);
             row.Cells["Entries"].Value = null;
+            row.Cells["Entries"].Tag = null;
+            if (((ReferenceInput)row.Tag!).Remote is null) SetMetadata(row, null);
         }
     }
 
@@ -250,6 +254,8 @@ internal sealed class ManifestTable : DataGridView
                 DataGridViewRow row = rows[result.Input];
                 SetState(row, result.State);
                 row.Cells["Entries"].Value = result.Entries;
+                row.Cells["Entries"].Tag = null;
+                if (((ReferenceInput)row.Tag!).Remote is null) SetMetadata(row, null);
             }
         }
         finally { ResumeLayout(); }
@@ -261,10 +267,65 @@ internal sealed class ManifestTable : DataGridView
             if (row.Cells["State"].Tag is ReferenceState.Fetching) SetState(row, ReferenceState.Unfetched);
     }
 
+    internal void ShowParsedResults(ReferenceInput[] inputs, IReadOnlyList<ReferenceParseItem> items)
+    {
+        ShowResults(inputs.Select((input, index) => (input,
+            items[index].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, items[index].Entries)));
+        ShowMetadata(inputs.Select((input, index) => (input, items[index].Metadata)));
+        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);
+        for (int index = 0; index < inputs.Length; index++)
+            if (items[index].Error is null) rows[inputs[index]].Cells["Entries"].Tag = items[index].Snapshot;
+    }
+
+    internal void OpenDetails(int rowIndex, int columnIndex)
+    {
+        if (ReadOnly || rowIndex < 0 || rowIndex >= Rows.Count || columnIndex <= 0) return;
+        DataGridViewRow row = Rows[rowIndex];
+        if (row.Cells["State"].Tag is not ReferenceState.Parsed || row.Cells["Entries"].Tag is not FileListSnapshot snapshot) return;
+        string information = string.Join(Environment.NewLine, new[] { "Game", "Version", "Package" }.Select(column =>
+            Columns[column]!.HeaderText + ": " + row.Cells[column].Value
+            + (string.IsNullOrEmpty(row.Cells[column].ToolTipText) ? "" : " (" + row.Cells[column].ToolTipText + ")")));
+        DetailsRequested?.Invoke((ReferenceInput)row.Tag!, snapshot, information);
+    }
+
+    internal void ShowMetadata(IEnumerable<(ReferenceInput Input, IReadOnlyDictionary<string, ManifestMetadataField>? Metadata)> results)
+    {
+        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);
+        foreach (var result in results)
+            if (result.Input.Remote is null) SetMetadata(rows[result.Input], result.Metadata);
+    }
+
+    private static void SetMetadata(DataGridViewRow row, IReadOnlyDictionary<string, ManifestMetadataField>? metadata)
+    {
+        foreach (var (column, field) in new[] { ("Game", "game"), ("Version", "version"), ("Package", "package") })
+        {
+            ManifestMetadataField? result = metadata?.GetValueOrDefault(field);
+            bool attempted = row.Cells["State"].Tag is ReferenceState.Parsed or ReferenceState.Failed or ReferenceState.Cancelled;
+            string? display = result?.Value;
+            string nameId = "GameName_" + display;
+            if (field == "game" && display is not null && L.Contains(nameId)) display = L.Get(nameId);
+            row.Cells[column].Value = result is null ? (attempted ? L.Get("UnavailableValue") : null)
+                : result.Conflict ? L.Get("MetadataConflict") : display;
+            row.Cells[column].ToolTipText = result is null ? "" : string.Join(Environment.NewLine,
+                result.Matches.Select(match => $"{match.Id}: {match.Value}"));
+            if (field == "game" && metadata is not null)
+            {
+                ManifestMetadataField? biz = metadata.GetValueOrDefault("biz");
+                row.Cells[column].ToolTipText += Environment.NewLine + L.Get("ManifestOfficialBizLabel") + ": "
+                    + (biz is null ? L.Get("UnavailableValue") : biz.Conflict ? L.Get("MetadataConflict") : biz.Value);
+                if (biz is not null) row.Cells[column].ToolTipText += Environment.NewLine
+                    + string.Join(Environment.NewLine, biz.Matches.Select(match => $"{match.Id}: {match.Value}"));
+            }
+        }
+    }
+
     private static void SetState(DataGridViewRow row, ReferenceState state)
     {
         row.Cells["State"].Tag = state;
         row.Cells["State"].Value = StateText(state);
+        // Keep data numeric/null; the native null-display style owns presentation and repainting.
+        row.Cells["Entries"].Style.NullValue = state is ReferenceState.Failed or ReferenceState.Cancelled
+            ? L.Get("UnavailableValue") : "";
     }
 
     internal static string StateText(ReferenceState state) => L.Get(state switch

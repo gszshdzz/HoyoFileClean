@@ -21,6 +21,7 @@ public static class DiagnosticText
 
     public static string ForDesktop(Exception error) => error switch
     {
+        CoreException { Code: CoreErrorCode.OutputExists } core => DescribeCore(core.Code),
         CoreException { Code: CoreErrorCode.InputConflict } => Text.Get("DesktopInputConflict"),
         CoreException { Code: CoreErrorCode.OutputInsideScanRoot } => Text.Get("DesktopOutputInsideRoot"),
         CoreException { Code: CoreErrorCode.ManifestChannelUnavailable or CoreErrorCode.ManifestVersionUnavailable } => Text.Get("DesktopVersionUnavailable"),

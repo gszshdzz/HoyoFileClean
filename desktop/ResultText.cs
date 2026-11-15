@@ -13,7 +13,7 @@ internal static class ResultText
             L.Format("IdentifiedInformation", L.Get(info.LabelTextId), info.Values.Count == 0
                 ? L.Get("IdentificationNotDetected")
                 : string.Join(L.Get("ListSeparator"), info.Values.Select(DescribeValue)));
-        string[] primary = ["game_id", "version", "channel"];
+        string[] primary = ["biz", "version", "channel"];
         string header = string.Join(L.Get("ListSeparator"), primary.Where(identification.Information.ContainsKey)
             .Select(id => Describe(identification.Information[id])));
         return string.Join(Environment.NewLine, new[] { header }.Where(value => value.Length > 0)

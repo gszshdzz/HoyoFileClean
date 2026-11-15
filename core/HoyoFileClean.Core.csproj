@@ -8,6 +8,7 @@
     <Compile Include="..\config\Maintenance.cs" Link="Configuration\Maintenance.cs" />
     <Compile Include="..\config\NetworkServices.cs" Link="Configuration\NetworkServices.cs" />
     <Compile Include="..\config\GameIdentificationRules.cs" Link="Configuration\GameIdentificationRules.cs" />
+    <Compile Include="..\config\ManifestIdentification.cs" Link="Configuration\ManifestIdentification.cs" />
     <PackageReference Include="Google.Protobuf" Version="3.36.2" />
     <PackageReference Include="Grpc.Tools" Version="2.85.0" PrivateAssets="All" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />

@@ -47,8 +47,7 @@ public sealed partial class MainForm
             token, progress: reporter), result =>
         {
             progress.Value = inputs.Length;
-            table.ShowResults(inputs.Select((input, i) => (input,
-                result.Items[i].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[i].Entries)));
+            table.ShowParsedResults(inputs, result.Items);
             session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Format("ParsingStartProgress", inputs.Length), DesktopOperation.Parsing, totalFiles: inputs.Length,

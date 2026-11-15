@@ -753,8 +753,10 @@ public sealed class WizardTests
         form.Close();
     });
 
-    [Fact]
-    public void ParsingFailureUpdatesRowWithoutPublishingPartialReference() => OnSta(() =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ParsingFailureUpdatesRowWithoutPublishingPartialReference(bool local) => OnSta(() =>
     {
         Directory.CreateDirectory(directory);
         string source = Path.Combine(directory, "invalid");
@@ -765,12 +767,14 @@ public sealed class WizardTests
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
         };
         form.Show();
-        Find<RadioButton>(form, "LocalSource").Checked = true;
-        var table = Find<ManifestTable>(form, "LocalManifests");
+        Find<RadioButton>(form, local ? "LocalSource" : "ManualSource").Checked = true;
+        var table = Find<ManifestTable>(form, local ? "LocalManifests" : "Manifests");
         table.AddFiles([new LocalManifestFile("invalid", source, 1, DateTime.UtcNow)], check: true);
-        Find<Button>(form, "ParseLocalReference").PerformClick();
+        Assert.Equal("", table.Rows[0].Cells["Entries"].FormattedValue);
+        Find<Button>(form, local ? "ParseLocalReference" : "ParseManualReference").PerformClick();
         PumpUntilLocalGetFinishes(form, session);
         Assert.Equal("失败", table.Rows[0].Cells["State"].Value);
+        Assert.Equal("—", table.Rows[0].Cells["Entries"].FormattedValue);
         Assert.Null(session.Reference);
         Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
         form.Close();

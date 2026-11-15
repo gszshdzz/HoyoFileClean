@@ -1,6 +1,10 @@
 namespace HoyoFileClean.Desktop;
 
-internal sealed record ReferenceParseItem(int? Entries, Exception? Error);
+internal sealed record ReferenceParseItem(int? Entries, Exception? Error,
+    FileListSnapshot? Snapshot = null)
+{
+    public IReadOnlyDictionary<string, ManifestMetadataField>? Metadata => Snapshot?.Sources[0].Metadata;
+}
 
 internal sealed class ReferenceParseBatch(ReferenceParseItem[] items, FileListSnapshot? snapshot, Exception? combinedError)
 {
@@ -11,7 +15,7 @@ internal sealed class ReferenceParseBatch(ReferenceParseItem[] items, FileListSn
         Items.FirstOrDefault(item => item.Error is not null)?.Error ?? combinedError);
 }
 
-// Workers merge each file immediately. Failed batches retain summaries, not parsed file lists.
+// Retain successful per-file snapshots for details/export, even when batch merging fails.
 internal sealed class ReferenceParser
 {
     internal const int DefaultConcurrency = Maintenance.DefaultParsingConcurrency;
@@ -45,7 +49,7 @@ internal sealed class ReferenceParser
                 {
                     FileListSnapshot snapshot = read(inputs[index], cancellationToken);
                     cancellationToken.ThrowIfCancellationRequested();
-                    items[index] = new ReferenceParseItem(snapshot.FileCount, null);
+                    items[index] = new ReferenceParseItem(snapshot.FileCount, null, snapshot);
                     lock (gate)
                     {
                         if (accumulator is not null)

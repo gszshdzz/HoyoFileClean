@@ -18,14 +18,23 @@ public static class ManifestConverter
             throw new CoreException(CoreErrorCode.OutputExists, outputPath);
         }
         FileListSnapshot snapshot = Read(inputPath, out bool isJson, CancellationToken.None);
-        FileListSource source = snapshot.Sources[0];
-        JsonFileOutput.WriteNew(outputPath, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
-            snapshot.Files.Values.ToArray(), source.HashAlgorithm, source.Scan));
+        Export(snapshot, outputPath);
         return new ConversionSummary(snapshot.FileCount, snapshot.TotalSize);
     }
 
     public static FileListSnapshot Read(string inputPath, CancellationToken cancellationToken = default)
         => Read(inputPath, out _, cancellationToken);
+
+    public static void Export(FileListSnapshot snapshot, string outputPath)
+    {
+        if (snapshot.Sources.Count != 1) throw new ArgumentException("Export requires one source manifest.", nameof(snapshot));
+        if (File.Exists(outputPath) || Directory.Exists(outputPath))
+            throw new CoreException(CoreErrorCode.OutputExists, outputPath);
+        FileListSource source = snapshot.Sources[0];
+        JsonFileOutput.WriteNew(outputPath, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
+            snapshot.Files.Values.ToArray(), source.HashAlgorithm, source.Scan,
+            source.Metadata is { Count: > 0 } ? source.Metadata : null));
+    }
 
     private static FileListSnapshot Read(string inputPath, out bool isJson, CancellationToken cancellationToken)
     {

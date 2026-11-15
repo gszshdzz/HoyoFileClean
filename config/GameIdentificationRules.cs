@@ -20,7 +20,7 @@ internal static class GameIdentificationRules
         },
         Information: new()
         {
-            ["game_id"] = new("IdentificationLabelGame", Required: true, Multiple: false,
+            ["biz"] = new("IdentificationLabelGame", Required: true, Multiple: false,
                 Rules: [new(new(), Source: "ini_game_id")]),
             ["version"] = new("IdentificationLabelVersion", Required: true, Multiple: false,
                 Rules: [new(new(), Source: "ini_version")]),
@@ -29,7 +29,7 @@ internal static class GameIdentificationRules
                 {
                     ["ini_game_id"] = "hk4e_cn", ["ini_channel"] = "1", ["ini_sub_channel"] = "1"
                 }, TextId: "IdentificationChannelOfficial")]),
-            ["packages"] = new("IdentificationLabelPackages", Required: false, Multiple: true,
+            ["plugins"] = new("IdentificationLabelPlugins", Required: false, Multiple: true,
                 Rules: [new(new(), Source: "ini_plugin_version",
                     DisplayFormatTextId: "IdentificationPluginVersion")])
         });

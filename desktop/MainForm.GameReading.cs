@@ -44,7 +44,7 @@ public sealed partial class MainForm
             RefreshView();
             status.Text = L.Get("CancellingScan");
         };
-        input.Controls.Add(Buttons(readGame, heavy, cancelScan));
+        input.Controls.Add(OperationActions("ScanActions", cancelScan, readGame, heavy));
         input.Controls.Add(identificationResult);
 
         var options = CompactGameInputs();

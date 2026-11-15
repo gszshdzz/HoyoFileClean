@@ -581,6 +581,7 @@ public sealed class NetworkReferenceTests
         ClickAndWait(form, session, "ParseNetworkReference");
         Assert.Equal(requests + 1, handler.Requests);
         Assert.Equal("失败", Assert.Single(Find<DataGridView>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>()).Cells["State"].Value);
+        Assert.Equal("—", Find<DataGridView>(form, "NetworkManifests").Rows[0].Cells["Entries"].FormattedValue);
         Assert.Null(session.Reference);
         Assert.Contains("处理失败", Find<Label>(form, "Status").Text);
         Assert.DoesNotContain("勾选后解析", Find<Label>(form, "Status").Text);
@@ -615,6 +616,7 @@ public sealed class NetworkReferenceTests
             bool parsed = conflict || (string?)row.Cells["Package"].Value == "game";
             Assert.Equal(parsed ? "已解析" : "失败", row.Cells["State"].Value);
             Assert.Equal(parsed ? 1 : (int?)null, row.Cells["Entries"].Value);
+            if (!parsed) Assert.Equal("—", row.Cells["Entries"].FormattedValue);
         });
         Assert.False(Find<ProgressBar>(form, "OperationProgress").Visible);
         handler.FailExtraPackage = handler.ConflictingExtraPackage = false;

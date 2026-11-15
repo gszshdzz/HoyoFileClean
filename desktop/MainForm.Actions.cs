@@ -29,6 +29,7 @@ public sealed partial class MainForm
         differences.Render();
         RefreshView();
         table.ShowResults(inputs.Select(input => (input, ReferenceState.Pending, (int?)null)));
+        table.ShowMetadata(inputs.Select(input => (input, (IReadOnlyDictionary<string, ManifestMetadataField>?)null)));
         var reporter = new ParsingProgress();
         using var refreshProgress = new System.Windows.Forms.Timer { Interval = Maintenance.ParsingProgressIntervalMs };
         refreshProgress.Tick += (_, _) =>
@@ -47,8 +48,7 @@ public sealed partial class MainForm
             token, progress: reporter), result =>
         {
             progress.Value = inputs.Length;
-            table.ShowResults(inputs.Select((input, i) => (input,
-                result.Items[i].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[i].Entries)));
+            table.ShowParsedResults(inputs, result.Items);
             session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Format("ParsingStartProgress", inputs.Length), DesktopOperation.Parsing, totalFiles: inputs.Length,

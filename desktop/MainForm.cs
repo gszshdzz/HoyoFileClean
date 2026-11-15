@@ -12,6 +12,8 @@ public sealed partial class MainForm : Form
     private readonly Button next = MakeButton(L.Get("Button_Next"), "Next");
     private readonly Button close = MakeButton(L.Get("Button_CloseWizard"), "CloseWizard");
     private readonly Button cancelParsing = MakeButton(L.Get("Button_CancelParsing"), "CancelParsing");
+    private TableLayoutPanel manualReferenceActions = null!;
+    private TableLayoutPanel localReferenceActions = null!;
     private readonly ReferenceParser referenceParser;
     private readonly Button parseManualReference = MakeButton(L.Get("Button_Execute"), "ParseManualReference");
     private readonly ProgressBar parsingProgress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
@@ -53,6 +55,12 @@ public sealed partial class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         differences = new DifferencePanel(session);
         pages = [BuildReferencePage(), BuildScanPage(), BuildComparisonPage(), BuildDifferencePage()];
+        foreach (ManifestTable table in new[] { manifests, localManifests, networkManifests })
+            table.DetailsRequested += (input, snapshot, information) =>
+            {
+                using var dialog = new ManifestDetailsForm(input, snapshot, information);
+                dialog.ShowDialog(this);
+            };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -69,7 +77,7 @@ public sealed partial class MainForm : Form
         }
         foreach (Panel page in pages) content.Controls.Add(page);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
-        buttons.Controls.AddRange([back, skip, execute, next, cancelParsing, close]);
+        buttons.Controls.AddRange([back, skip, execute, next, close]);
         layout.Controls.Add(flow, 0, 0);
         layout.Controls.Add(content, 0, 1);
         layout.Controls.Add(status, 0, 2);
@@ -126,7 +134,8 @@ public sealed partial class MainForm : Form
         };
         var input = Vertical();
         input.Controls.Add(Note(L.Get("ManualManifestHint")));
-        input.Controls.Add(Buttons(add, remove, parseManualReference));
+        manualReferenceActions = ParsingActions("ManualReferenceActions", add, remove, parseManualReference);
+        input.Controls.Add(manualReferenceActions);
         parseManualReference.Click += async (_, _) => await ExecuteAsync();
         input.Controls.Add(referenceResult);
         manifests.CheckedFilesChanged += ReferenceChanged;
@@ -241,6 +250,8 @@ public sealed partial class MainForm : Form
         if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
         next.Enabled = session.CanAdvance;
         close.Enabled = !session.IsBusy || session.Operation == DesktopOperation.Network;
+        TableLayoutPanel parsingActions = localSource.Checked ? localReferenceActions : manualReferenceActions;
+        if (cancelParsing.Parent != parsingActions) parsingActions.Controls.Add(cancelParsing, 1, 0);
         cancelParsing.Visible = session.Operation == DesktopOperation.Parsing;
         cancelParsing.Enabled = session.Operation == DesktopOperation.Parsing && session.CanCancel;
         cancelNetwork.Enabled = session.Operation == DesktopOperation.Network && session.CanCancel;
@@ -298,6 +309,16 @@ public sealed partial class MainForm : Form
         var panel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, WrapContents = false };
         panel.Controls.AddRange(controls);
         return panel;
+    }
+
+    private TableLayoutPanel ParsingActions(string name, params Control[] operations)
+    {
+        var row = new TableLayoutPanel { Name = name, ColumnCount = 2, RowCount = 1, AutoSize = true, Dock = DockStyle.Top };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.Controls.Add(Buttons(operations), 0, 0);
+        cancelParsing.Anchor = AnchorStyles.Right;
+        return row;
     }
     private static Panel Page(Control input, Control result)
     {

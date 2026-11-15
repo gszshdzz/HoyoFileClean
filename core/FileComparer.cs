@@ -232,7 +232,10 @@ public static class FileComparer
                     SkippedLinks = NormalizeScope(scope.SkippedLinks, input)
                 };
             }
-            sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope));
+            // Never trust metadata saved in an input JSON: derive it again from validated contents.
+            var metadata = ManifestIdentification.Identifier.Identify(
+                new FileListDocument(normalized.Count, totalSize, normalized, list.HashAlgorithm, scope), cancellationToken);
+            sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope, metadata));
             MergeFiles(files, normalized, input, cancellationToken);
         }
         FilePathRules.ValidatePaths(files.Keys);

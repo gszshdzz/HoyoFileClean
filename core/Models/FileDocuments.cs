@@ -7,13 +7,15 @@ public sealed record ManifestFile(string Path, long Size,
 
 public sealed record FileListDocument(int FileCount, long TotalSize, IReadOnlyList<ManifestFile> Files,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HashAlgorithm = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ScanScope? Scan = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ScanScope? Scan = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, ManifestMetadataField>? Metadata = null);
 
 public sealed record ScanScope(string Root, IReadOnlyList<string> ExcludedDirectories,
     IReadOnlyList<string> ExcludedFiles, IReadOnlyList<string> SkippedLinks, string Mode);
 
 public sealed record FileListSource(string Path, int FileCount, long TotalSize,
-    string? HashAlgorithm, ScanScope? Scan);
+    string? HashAlgorithm, ScanScope? Scan,
+    IReadOnlyDictionary<string, ManifestMetadataField>? Metadata = null);
 
 public sealed record ComparisonSummary(
     int OnlyA, int OnlyB, int Different, int MatchedWithHash, int MatchedSizeOnly, int OutsideScope);

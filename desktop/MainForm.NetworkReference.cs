@@ -183,8 +183,7 @@ public sealed partial class MainForm
             return parser.Parse(inputs, token);
         }, result =>
         {
-            networkManifests.ShowResults(inputs.Select((input, index) => (input,
-                result.Items[index].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, result.Items[index].Entries)));
+            networkManifests.ShowParsedResults(inputs, result.Items);
             session.AcceptReference(result.GetSnapshot());
             referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Get("FetchingManifests"), DesktopOperation.Network, () => L.Format("NetworkBatchParsed", inputs.Length), onFinished: () =>

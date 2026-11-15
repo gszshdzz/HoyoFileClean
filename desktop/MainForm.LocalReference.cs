@@ -49,7 +49,8 @@ public sealed partial class MainForm
         parseLocalReference.Click += async (_, _) => await ConvertAsync();
         var input = Vertical();
         input.Controls.Add(pathRow);
-        input.Controls.Add(Buttons(getLocalManifests, parseLocalReference));
+        localReferenceActions = ParsingActions("LocalReferenceActions", getLocalManifests, parseLocalReference);
+        input.Controls.Add(localReferenceActions);
         input.Controls.Add(Note(L.Get("LocalManifestHint")));
         return Page(input, localManifests);
     }

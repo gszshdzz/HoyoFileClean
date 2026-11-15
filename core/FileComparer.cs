@@ -6,6 +6,13 @@ namespace HoyoFileClean;
 public static class FileComparer
 {
     private static readonly ManifestIdentifier manifestIdentifier = new(ManifestIdentificationRules.Create());
+    private static readonly JsonSerializerOptions readerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        AllowDuplicateProperties = false
+    };
 
     public static ComparisonSummary Compare(IEnumerable<string> aPaths, IEnumerable<string> bPaths, string outputPath)
     {
@@ -75,12 +82,11 @@ public static class FileComparer
     public static ComparisonResult ImportReport(string reportPath, FileListSnapshot a, FileListSnapshot b)
     {
         ComparisonResult expected = Compare(a, b);
-        var options = ReaderOptions();
         ComparisonResult imported;
         try
         {
             using var stream = File.OpenRead(reportPath);
-            imported = JsonSerializer.Deserialize<ComparisonResult>(stream, options)
+            imported = JsonSerializer.Deserialize<ComparisonResult>(stream, readerOptions)
                 ?? throw new JsonException();
         }
         catch (JsonException error)
@@ -102,14 +108,6 @@ public static class FileComparer
         return expected;
     }
 
-    private static JsonSerializerOptions ReaderOptions() => new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        RespectRequiredConstructorParameters = true,
-        RespectNullableAnnotations = true,
-        AllowDuplicateProperties = false
-    };
-
     public static FileListSnapshot ReadInputs(IEnumerable<string> paths)
         => ReadInputs(paths, File.OpenRead);
 
@@ -120,7 +118,7 @@ public static class FileComparer
             try
             {
                 using var stream = open(input);
-                return JsonSerializer.Deserialize<FileListDocument>(stream, ReaderOptions()) ?? throw new JsonException();
+                return JsonSerializer.Deserialize<FileListDocument>(stream, readerOptions) ?? throw new JsonException();
             }
             catch (JsonException error)
             {

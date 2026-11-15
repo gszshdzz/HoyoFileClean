@@ -100,7 +100,9 @@ public sealed class ManifestDetailsTests
         table.OpenDetails(0, 1);
         Assert.Equal(1, opened);
         table.ShowResults([(input, ReferenceState.Pending, null)]);
-        Assert.Null(table.Rows[0].Cells["Entries"].Tag);
+        table.OpenDetails(0, 1);
+        Assert.Equal(1, opened);
+        table.ShowResults([(input, ReferenceState.Parsed, 1)]);
         table.OpenDetails(0, 1);
         Assert.Equal(1, opened);
         table.ShowResults([(input, ReferenceState.Failed, null)]);
@@ -109,8 +111,10 @@ public sealed class ManifestDetailsTests
         Assert.Equal(1, opened);
         table.ShowParsedResults([input], [item]);
         table.ResetResults();
-        Assert.Null(table.Rows[0].Cells["Entries"].Tag);
         Assert.Null(table.Rows[0].Cells["Entries"].Value);
+        table.OpenDetails(0, 1);
+        Assert.Equal(1, opened);
+        table.ShowResults([(input, ReferenceState.Parsed, 1)]);
         table.OpenDetails(0, 1);
         Assert.Equal(1, opened);
     });

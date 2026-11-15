@@ -150,7 +150,7 @@ public sealed partial class MainForm
     {
         if (session.IsBusy || !networkSource.Checked || networkGames.SelectedItem is not NetworkGame game) return;
         string? version = customNetworkVersion.Checked ? networkVersion.Text.Trim() : null;
-        if (version is not null && (!Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0))
+        if (version is not null && !NetworkManifestClient.IsValidVersion(version))
         { status.Text = L.Get("ThreePartVersionRequired"); return; }
         ClearNetworkFiles();
         await RunWorkAsync(token => networkClient.GetCatalogAsync(game.Version, token, version).GetAwaiter().GetResult(), catalog =>
@@ -179,7 +179,6 @@ public sealed partial class MainForm
         {
             networkManifests.ShowParsedResults(inputs, result.Items);
             session.AcceptReference(result.GetSnapshot());
-            referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Get("FetchingManifests"), DesktopOperation.Network, () => L.Format("NetworkBatchParsed", inputs.Length), onFinished: () =>
         {
             networkManifests.ResetFetching();

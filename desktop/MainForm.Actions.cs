@@ -21,11 +21,11 @@ public sealed partial class MainForm
     {
         if (session.IsBusy) return;
         if (networkSource.Checked) { await FetchAndParseNetworkAsync(); return; }
-        ManifestTable table = networkSource.Checked ? networkManifests : localSource.Checked ? localManifests : manifests;
+        ManifestTable table = localSource.Checked ? localManifests : manifests;
         ReferenceInput[] inputs = table.CheckedInputs;
         if (inputs.Length == 0) { status.Text = L.Get("SelectFilesToParse"); return; }
         session.InvalidateReference();
-        referenceOrigin = reportOrigin = "";
+        reportOrigin = "";
         differences.Render();
         RefreshView();
         table.ShowResults(inputs.Select(input => (input, ReferenceState.Pending, (int?)null)));
@@ -49,7 +49,6 @@ public sealed partial class MainForm
             progress.Value = inputs.Length;
             table.ShowParsedResults(inputs, result.Items);
             session.AcceptReference(result.GetSnapshot());
-            referenceOrigin = L.Get("SourceHeading") + string.Join("\r\n", inputs.Select(input => DiagnosticText.DisplaySource(input.File.FullPath))) + "\r\n\r\n";
         }, L.Format("ParsingStartProgress", inputs.Length), DesktopOperation.Parsing, totalFiles: inputs.Length,
         onFinished: () =>
         {
@@ -249,7 +248,6 @@ public sealed partial class MainForm
             // AddFiles materializes metadata first: a directory/missing file rejects the batch,
             // never recursively imports a folder or leaves a partially changed table.
             manifests.AddFiles(paths.Select(ReadReferenceMetadata), check: true);
-            ReferenceChanged();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
             or NotSupportedException or System.Security.SecurityException)

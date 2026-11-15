@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Xunit;
@@ -308,11 +307,11 @@ public sealed class FileComparerTests
         string b = WriteList("b", true, new ManifestFile("file", 4, OtherHash));
         string extra = WriteList("extra", false, new ManifestFile("extra", 1));
 
-        var result = RunCli("compare", Output, "--b", b, "--a", a, extra, "--b", b);
+        var result = CliRunner.Run("compare", Output, "--b", b, "--a", a, extra, "--b", b);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Empty(result.Error);
-        Assert.Contains("共有但不同 1", result.Text);
+        Assert.Contains("共有但不同 1", result.Output);
         Assert.Equal(1, ReadReport()["summary"]!["different"]!.GetValue<int>());
     }
 
@@ -324,9 +323,26 @@ public sealed class FileComparerTests
     {
         string input = WriteList("input", false);
 
-        var result = RunCli("compare", Output, "--a", input, "--a", input, lastOption);
+        var result = CliRunner.Run("compare", Output, "--a", input, "--a", input, lastOption);
 
         Assert.Equal(2, result.ExitCode);
+        Assert.False(File.Exists(Output));
+    }
+
+    [Theory]
+    [InlineData("--a", "")]
+    [InlineData("--a", " ")]
+    [InlineData("--b", "")]
+    [InlineData("--b", " ")]
+    public void CliRejectsBlankValuesEvenWithBothSidesPresent(string option, string value)
+    {
+        string input = WriteList("input", false);
+
+        var result = CliRunner.Run("compare", Output, "--a", input, "--b", input, option, value);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("用法", result.Output);
+        Assert.Empty(result.Error);
         Assert.False(File.Exists(Output));
     }
 
@@ -336,7 +352,7 @@ public sealed class FileComparerTests
         string a = WriteList("a", true, new ManifestFile("file", 3, Hash));
         string b = WriteList("b", true, new ManifestFile("file", 4, Hash));
 
-        var result = RunCli("compare", Output, "--a", a, b, "--b", a);
+        var result = CliRunner.Run("compare", Output, "--a", a, b, "--b", a);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("同一侧", result.Error);
@@ -362,20 +378,4 @@ public sealed class FileComparerTests
     private static string[] Paths(JsonObject report, string property)
         => report[property]!.AsArray().Select(item => item!["path"]!.GetValue<string>()).ToArray();
 
-    private static (int ExitCode, string Text, string Error) RunCli(params string[] arguments)
-    {
-        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "HoyoFileClean.exe"))
-        {
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
-        };
-        foreach (string argument in arguments)
-        {
-            start.ArgumentList.Add(argument);
-        }
-        using Process process = Process.Start(start) ?? throw new InvalidOperationException("无法启动比较命令。");
-        Task<string> output = process.StandardOutput.ReadToEndAsync();
-        Task<string> error = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
-    }
 }

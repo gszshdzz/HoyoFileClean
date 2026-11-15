@@ -29,7 +29,7 @@ internal sealed record NetworkConvertOptions(string OutputPath, string Service, 
             || !values.TryGetValue("--biz", out string? biz)
             || !values.TryGetValue("--package", out string? package)
             || !values.TryGetValue("--version", out string? version)) return false;
-        if (version != "latest" && (!System.Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)) return false;
+        if (version != "latest" && !NetworkManifestClient.IsValidVersion(version)) return false;
         options = new(output, service, biz, version == "latest" ? null : version, package, values.GetValueOrDefault("--game-id"));
         return true;
     }

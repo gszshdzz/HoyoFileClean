@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Google.Protobuf;
 using HoyoFileClean.Protos;
@@ -283,22 +282,10 @@ public sealed class ManifestConverterTests
             }
         });
         string output = Path.Combine(directory, "files.json");
-        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "HoyoFileClean.exe"))
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardError = true
-        };
-        start.ArgumentList.Add("convert");
-        start.ArgumentList.Add(input);
-        start.ArgumentList.Add(output);
-        using Process process = Process.Start(start)
-            ?? throw new InvalidOperationException("无法启动转换命令。");
-        string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        var result = CliRunner.Run("convert", input, output);
 
-        Assert.Equal(1, process.ExitCode);
-        Assert.Contains("总大小超过", error);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("总大小超过", result.Error);
         Assert.False(File.Exists(output));
     }
 

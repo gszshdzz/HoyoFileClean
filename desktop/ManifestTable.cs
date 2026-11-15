@@ -180,24 +180,41 @@ internal sealed class ManifestTable : DataGridView
     internal void AddFiles(IEnumerable<LocalManifestFile> files, bool check = false)
     {
         LocalManifestFile[] complete = files.ToArray();
-        var known = Rows.Cast<DataGridViewRow>().Select(row => ((ReferenceInput)row.Tag!).File.FullPath)
+        var known = Rows.Cast<DataGridViewRow>().Select(row => Data(row).Input.File.FullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         DataGridViewRow[] added = complete.Where(file => known.Add(file.FullPath)).Select(file =>
         {
-            var row = new DataGridViewRow { Tag = new ReferenceInput(file) };
+            var row = new DataGridViewRow { Tag = new ManifestRow(new ReferenceInput(file)) };
             row.CreateCells(this, check, file.Name, file.LastWriteTimeUtc, file.Size, StateText(ReferenceState.Unparsed), null!, null!, null!, null!);
-            row.Cells[Columns["State"]!.Index].Tag = ReferenceState.Unparsed;
             return row;
         }).ToArray();
         if (added.Length == 0) return;
-        SuspendLayout();
-        updating = true;
-        try
+        ChangeRows(() =>
         {
             Rows.AddRange(added);
             Sort(SortedColumn!, SortOrder == SortOrder.Descending ? ListSortDirection.Descending : ListSortDirection.Ascending);
-            ClearSelection();
-        }
+        });
+    }
+
+    internal ReferenceInput[] CheckedInputs => Rows.Cast<DataGridViewRow>()
+        .Where(row => row.Cells[0].Value is true).Select(row => Data(row).Input).ToArray();
+
+    internal void RemoveCheckedFiles()
+    {
+        if (ReadOnly) return;
+        DataGridViewRow[] removed = Rows.Cast<DataGridViewRow>().Where(row => row.Cells[0].Value is true).ToArray();
+        if (removed.Length == 0) return;
+        ChangeRows(() =>
+        {
+            foreach (DataGridViewRow row in removed) Rows.Remove(row);
+        });
+    }
+
+    private void ChangeRows(Action change)
+    {
+        SuspendLayout();
+        updating = true;
+        try { change(); ClearSelection(); }
         finally
         {
             updating = false;
@@ -208,44 +225,37 @@ internal sealed class ManifestTable : DataGridView
         CheckedFilesChanged?.Invoke();
     }
 
-    internal ReferenceInput[] CheckedInputs => Rows.Cast<DataGridViewRow>()
-        .Where(row => row.Cells[0].Value is true).Select(row => (ReferenceInput)row.Tag!).ToArray();
-
     internal void AddNetworkFiles(IEnumerable<ReferenceInput> inputs, string game, string version)
     {
         DataGridViewRow[] rows = inputs.Select(input =>
         {
-            var row = new DataGridViewRow { Tag = input };
+            var row = new DataGridViewRow { Tag = new ManifestRow(input) { State = ReferenceState.Unfetched } };
             row.CreateCells(this, false, input.Remote!.Category, L.Get("UnavailableValue"),
                 input.Remote.DownloadSize, StateText(ReferenceState.Unfetched), game, version, input.Remote.MatchingField, null!);
-            row.Cells[Columns["State"]!.Index].Tag = ReferenceState.Unfetched;
             return row;
         }).ToArray();
-        updating = true;
-        try
+        ChangeRows(() =>
         {
             Rows.AddRange(rows);
             Sort(Columns["Name"]!, ListSortDirection.Ascending);
-            ClearSelection();
-        }
-        finally { updating = false; RefreshSelectAll(); }
-        CheckedFilesChanged?.Invoke();
+        });
     }
 
     internal void ResetResults()
     {
         foreach (DataGridViewRow row in Rows)
         {
-            SetState(row, ((ReferenceInput)row.Tag!).Remote is null ? ReferenceState.Unparsed : ReferenceState.Unfetched);
+            ManifestRow data = Data(row);
+            SetState(row, data.Input.Remote is null ? ReferenceState.Unparsed : ReferenceState.Unfetched);
             row.Cells["Entries"].Value = null;
-            row.Cells["Entries"].Tag = null;
-            if (((ReferenceInput)row.Tag!).Remote is null) SetMetadata(row, null);
+            data.Snapshot = null;
+            if (data.Input.Remote is null) SetMetadata(row, null);
         }
     }
 
     internal void ShowResults(IEnumerable<(ReferenceInput Input, ReferenceState State, int? Entries)> results)
     {
-        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);
+        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => Data(row).Input);
         SuspendLayout();
         try
         {
@@ -254,8 +264,8 @@ internal sealed class ManifestTable : DataGridView
                 DataGridViewRow row = rows[result.Input];
                 SetState(row, result.State);
                 row.Cells["Entries"].Value = result.Entries;
-                row.Cells["Entries"].Tag = null;
-                if (((ReferenceInput)row.Tag!).Remote is null) SetMetadata(row, null);
+                Data(row).Snapshot = null;
+                if (result.Input.Remote is null) SetMetadata(row, null);
             }
         }
         finally { ResumeLayout(); }
@@ -264,7 +274,7 @@ internal sealed class ManifestTable : DataGridView
     internal void ResetFetching()
     {
         foreach (DataGridViewRow row in Rows)
-            if (row.Cells["State"].Tag is ReferenceState.Fetching) SetState(row, ReferenceState.Unfetched);
+            if (Data(row).State is ReferenceState.Fetching) SetState(row, ReferenceState.Unfetched);
     }
 
     internal void ShowParsedResults(ReferenceInput[] inputs, IReadOnlyList<ReferenceParseItem> items)
@@ -272,25 +282,26 @@ internal sealed class ManifestTable : DataGridView
         ShowResults(inputs.Select((input, index) => (input,
             items[index].Error is null ? ReferenceState.Parsed : ReferenceState.Failed, items[index].Entries)));
         ShowMetadata(inputs.Select((input, index) => (input, items[index].Metadata)));
-        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);
+        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => Data(row).Input);
         for (int index = 0; index < inputs.Length; index++)
-            if (items[index].Error is null) rows[inputs[index]].Cells["Entries"].Tag = items[index].Snapshot;
+            if (items[index].Error is null) Data(rows[inputs[index]]).Snapshot = items[index].Snapshot;
     }
 
     internal void OpenDetails(int rowIndex, int columnIndex)
     {
         if (ReadOnly || rowIndex < 0 || rowIndex >= Rows.Count || columnIndex <= 0) return;
         DataGridViewRow row = Rows[rowIndex];
-        if (row.Cells["State"].Tag is not ReferenceState.Parsed || row.Cells["Entries"].Tag is not FileListSnapshot snapshot) return;
+        ManifestRow data = Data(row);
+        if (data.State is not ReferenceState.Parsed || data.Snapshot is not { } snapshot) return;
         string information = string.Join(Environment.NewLine, new[] { "Game", "Version", "Package" }.Select(column =>
             Columns[column]!.HeaderText + ": " + row.Cells[column].Value
             + (string.IsNullOrEmpty(row.Cells[column].ToolTipText) ? "" : " (" + row.Cells[column].ToolTipText + ")")));
-        DetailsRequested?.Invoke((ReferenceInput)row.Tag!, snapshot, information);
+        DetailsRequested?.Invoke(data.Input, snapshot, information);
     }
 
     internal void ShowMetadata(IEnumerable<(ReferenceInput Input, IReadOnlyDictionary<string, ManifestMetadataField>? Metadata)> results)
     {
-        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => (ReferenceInput)row.Tag!);
+        var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => Data(row).Input);
         foreach (var result in results)
             if (result.Input.Remote is null) SetMetadata(rows[result.Input], result.Metadata);
     }
@@ -302,7 +313,7 @@ internal sealed class ManifestTable : DataGridView
             ManifestMetadataField? result = field == "game"
                 ? metadata?.GetValueOrDefault("biz") ?? metadata?.GetValueOrDefault("game")
                 : metadata?.GetValueOrDefault(field);
-            bool attempted = row.Cells["State"].Tag is ReferenceState.Parsed or ReferenceState.Failed or ReferenceState.Cancelled;
+            bool attempted = Data(row).State is ReferenceState.Parsed or ReferenceState.Failed or ReferenceState.Cancelled;
             string? display = result?.Value;
             if (result is { Multiple: true, Conflict: false } && display is null)
                 display = string.Join(L.Get("ListSeparator"), result.Matches.Select(match => match.Value).Distinct(StringComparer.Ordinal));
@@ -323,11 +334,20 @@ internal sealed class ManifestTable : DataGridView
 
     private static void SetState(DataGridViewRow row, ReferenceState state)
     {
-        row.Cells["State"].Tag = state;
+        Data(row).State = state;
         row.Cells["State"].Value = StateText(state);
         // Keep data numeric/null; the native null-display style owns presentation and repainting.
         row.Cells["Entries"].Style.NullValue = state is ReferenceState.Failed or ReferenceState.Cancelled
             ? L.Get("UnavailableValue") : "";
+    }
+
+    private static ManifestRow Data(DataGridViewRow row) => (ManifestRow)row.Tag!;
+
+    private sealed class ManifestRow(ReferenceInput input)
+    {
+        internal ReferenceInput Input { get; } = input;
+        internal ReferenceState State { get; set; }
+        internal FileListSnapshot? Snapshot { get; set; }
     }
 
     internal static string StateText(ReferenceState state) => L.Get(state switch

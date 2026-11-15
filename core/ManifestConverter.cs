@@ -17,13 +17,17 @@ public static class ManifestConverter
         {
             throw new CoreException(CoreErrorCode.OutputExists, outputPath);
         }
-        FileListSnapshot snapshot = Read(inputPath, out bool isJson, CancellationToken.None);
+        FileListSnapshot snapshot = Read(inputPath, CancellationToken.None);
         Export(snapshot, outputPath);
         return new ConversionSummary(snapshot.FileCount, snapshot.TotalSize);
     }
 
     public static FileListSnapshot Read(string inputPath, CancellationToken cancellationToken = default)
-        => Read(inputPath, out _, cancellationToken);
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var input = File.OpenRead(inputPath);
+        return Read(input, Path.GetFullPath(inputPath), cancellationToken);
+    }
 
     public static void Export(FileListSnapshot snapshot, string outputPath)
     {
@@ -36,19 +40,10 @@ public static class ManifestConverter
             source.Metadata is { Count: > 0 } ? source.Metadata : null));
     }
 
-    private static FileListSnapshot Read(string inputPath, out bool isJson, CancellationToken cancellationToken)
-    {
-        isJson = false;
-        cancellationToken.ThrowIfCancellationRequested();
-        using var input = File.OpenRead(inputPath);
-        return Read(input, Path.GetFullPath(inputPath), out isJson, cancellationToken);
-    }
-
-    internal static FileListSnapshot Read(Stream input, string inputPath, out bool isJson,
+    internal static FileListSnapshot Read(Stream input, string inputPath,
         CancellationToken cancellationToken, long? decodedSize = null, string? decodedMd5 = null,
         bool? expectedCompression = null)
     {
-        isJson = false;
         Span<byte> header = stackalloc byte[4];
         int headerLength = input.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
         input.Position = 0;
@@ -63,7 +58,7 @@ public static class ManifestConverter
         }
         if (!compressed)
         {
-            return ReadDecoded(input, inputPath, out isJson, cancellationToken, () =>
+            return ReadDecoded(input, inputPath, cancellationToken, () =>
             {
                 input.Position = 0;
                 return new PrefixReadStream(Stream.Null, input);
@@ -72,7 +67,7 @@ public static class ManifestConverter
         try
         {
             using var decompressor = new DecompressionStream(input);
-            return ReadDecoded(decompressor, inputPath, out isJson, cancellationToken, () =>
+            return ReadDecoded(decompressor, inputPath, cancellationToken, () =>
             {
                 input.Position = 0;
                 return new DecompressionStream(input);
@@ -84,12 +79,12 @@ public static class ManifestConverter
         }
     }
 
-    private static FileListSnapshot ReadDecoded(Stream decoded, string inputPath, out bool isJson,
+    private static FileListSnapshot ReadDecoded(Stream decoded, string inputPath,
         CancellationToken cancellationToken, Func<Stream> replayDecoded,
         long? decodedSize = null, string? decodedMd5 = null, bool allowJson = true)
     {
         using var limited = new ManifestReadStream(decoded, Maintenance.DecodedLimit, cancellationToken, decodedSize, decodedMd5);
-        try { return ReadContent(limited, inputPath, out isJson, cancellationToken, replayDecoded, allowJson); }
+        try { return ReadContent(limited, inputPath, cancellationToken, replayDecoded, allowJson); }
         finally
         {
             // Preserve the original decode-limit/invalid-compression precedence even if parsing
@@ -99,10 +94,9 @@ public static class ManifestConverter
         }
     }
 
-    private static FileListSnapshot ReadContent(Stream limited, string inputPath, out bool isJson,
+    private static FileListSnapshot ReadContent(Stream limited, string inputPath,
         CancellationToken cancellationToken, Func<Stream> replayDecoded, bool allowJson)
     {
-        isJson = false;
         // Probe only format-leading bytes. Replay them for protobuf; strip only a JSON BOM.
         using var prefix = new MemoryStream();
         int first = limited.ReadByte();
@@ -135,7 +129,6 @@ public static class ManifestConverter
         if (first == (byte)'{')
         {
             if (!allowJson) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported, inputPath);
-            isJson = true;
             // JSON does not need its leading whitespace replayed.
             if (prefixOverflow)
             {

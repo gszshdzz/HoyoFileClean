@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 
 namespace HoyoFileClean;
 
-// Created only by the common validated reader. Callers cannot replace its entries.
+// Only the common validated reader creates snapshots; callers cannot replace entries.
 public sealed class FileListSnapshot
 {
     public IReadOnlyList<FileListSource> Sources { get; }

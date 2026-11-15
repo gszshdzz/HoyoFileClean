@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 
@@ -34,8 +33,8 @@ public sealed class CliPresentationTests
                 arguments = ["convert", a, output];
                 break;
         }
-        var result = Run(arguments);
-        Assert.Equal(1, result.Code);
+        var result = CliRunner.Run(arguments);
+        Assert.Equal(1, result.ExitCode);
         Assert.Empty(result.Output);
         Assert.Contains("错误：" + message, result.Error);
         Assert.Contains("错误代码：" + code, result.Error);
@@ -54,8 +53,8 @@ public sealed class CliPresentationTests
     {
         Directory.CreateDirectory(directory);
         string missing = Path.Combine(directory, "missing.manifest");
-        var result = Run(["convert", missing, Path.Combine(directory, "output.json")]);
-        Assert.Equal(1, result.Code);
+        var result = CliRunner.Run(["convert", missing, Path.Combine(directory, "output.json")]);
+        Assert.Equal(1, result.ExitCode);
         Assert.Contains("错误：输入文件不存在。", result.Error);
         Assert.Contains(missing, result.Error);
         Assert.Contains("诊断代码：0x", result.Error);
@@ -79,12 +78,12 @@ public sealed class CliPresentationTests
     [Fact]
     public void RemovedCompressionOptionIsNotAdvertisedOrAccepted()
     {
-        var help = Run(["--help"]);
-        Assert.Equal(0, help.Code);
+        var help = CliRunner.Run(["--help"]);
+        Assert.Equal(0, help.ExitCode);
         Assert.DoesNotContain("--uncompressed", help.Output);
         Assert.DoesNotContain("protobuf", help.Output);
         Assert.DoesNotContain("zstd", help.Output);
-        Assert.Equal(2, Run(["convert", "input", "output", "--uncompressed"]).Code);
+        Assert.Equal(2, CliRunner.Run(["convert", "input", "output", "--uncompressed"]).ExitCode);
     }
 
     [Fact]
@@ -114,8 +113,8 @@ public sealed class CliPresentationTests
     [InlineData("--network --service china --biz hk4e_cn --version latest --package game --biz other")]
     public void NetworkConvertRequiresExplicitValidSelection(string arguments)
     {
-        var result = Run(new[] { "convert", "unused.json" }.Concat(arguments.Split(' ')).ToArray());
-        Assert.Equal(2, result.Code);
+        var result = CliRunner.Run(new[] { "convert", "unused.json" }.Concat(arguments.Split(' ')).ToArray());
+        Assert.Equal(2, result.ExitCode);
         Assert.Contains("--network", result.Output);
         Assert.Empty(result.Error);
     }
@@ -128,8 +127,8 @@ public sealed class CliPresentationTests
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "keep.json");
         File.WriteAllText(output, "keep");
-        var result = Run(["convert", output, "--network", "--biz", biz, "--service", service, "--version", "latest", "--package", package]);
-        Assert.Equal(1, result.Code);
+        var result = CliRunner.Run(["convert", output, "--network", "--biz", biz, "--service", service, "--version", "latest", "--package", package]);
+        Assert.Equal(1, result.ExitCode);
         Assert.Contains("OutputExists", result.Error);
         Assert.Equal("keep", File.ReadAllText(output));
     }
@@ -137,7 +136,7 @@ public sealed class CliPresentationTests
     [Fact]
     public void NetworkUsageHasGenericPlaceholdersAndExamplesBelow()
     {
-        string help = Run(["--help"]).Output;
+        string help = CliRunner.Run(["--help"]).Output;
         string usage = Assert.Single(help.Split('\n'), line => line.Contains("convert <output.json> --network"));
         Assert.Contains("--service <service> --biz <biz> --version <version>", usage);
         Assert.Contains("--package <package>", usage);
@@ -154,9 +153,9 @@ public sealed class CliPresentationTests
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "keep.json");
         File.WriteAllText(output, "keep");
-        var result = Run(["convert", output, "--service", "china", "--biz", "hk4e_cn", "--version", "latest",
+        var result = CliRunner.Run(["convert", output, "--service", "china", "--biz", "hk4e_cn", "--version", "latest",
             "--package", "game", "--package", secondPackage, "--network"]);
-        Assert.Equal(2, result.Code);
+        Assert.Equal(2, result.ExitCode);
         Assert.Contains("--package 最多指定一次", result.Error);
         Assert.DoesNotContain("OutputExists", result.Error);
         Assert.Equal("keep", File.ReadAllText(output));
@@ -192,16 +191,4 @@ public sealed class CliPresentationTests
         return input;
     }
 
-    private static (int Code, string Output, string Error) Run(string[] arguments)
-    {
-        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "HoyoFileClean.exe"))
-        {
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
-        };
-        foreach (string argument in arguments) start.ArgumentList.Add(argument);
-        using Process process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 CLI。");
-        Task<string> output = process.StandardOutput.ReadToEndAsync(), error = process.StandardError.ReadToEndAsync();
-        Assert.True(process.WaitForExit(20000), "CLI 未在 20 秒内结束。");
-        return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
-    }
 }

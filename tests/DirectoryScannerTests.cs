@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -332,15 +331,15 @@ public sealed class DirectoryScannerTests
         WriteFile("also-ignored.bin", "abc");
         File.CreateSymbolicLink(Path.Combine(Root, "broken.bin"), Path.Combine(directory, "missing.bin"));
 
-        var result = RunCli("scan", Root, Output,
+        var result = CliRunner.Run("scan", Root, Output,
             "--exclude-dir", "skip", "--exclude-dir", "other-skip",
             "--exclude-file", "ignored.bin", "--exclude-file", "also-ignored.bin");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("扫描完成", result.StandardOutput);
-        Assert.Contains("警告", result.StandardError);
-        Assert.Contains("未跟随", result.StandardError);
-        Assert.Contains("broken.bin", result.StandardError);
+        Assert.Contains("扫描完成", result.Output);
+        Assert.Contains("警告", result.Error);
+        Assert.Contains("未跟随", result.Error);
+        Assert.Contains("broken.bin", result.Error);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal(new[] { "keep.bin" }, FilePaths(json.RootElement));
     }
@@ -349,7 +348,11 @@ public sealed class DirectoryScannerTests
     [InlineData("--unknown", "entry.bin")]
     [InlineData("--exclude-dir", null)]
     [InlineData("--exclude-dir", "--exclude-file")]
+    [InlineData("--exclude-dir", "")]
+    [InlineData("--exclude-dir", " ")]
     [InlineData("--exclude-file", null)]
+    [InlineData("--exclude-file", "")]
+    [InlineData("--exclude-file", " ")]
     [InlineData("--hash", "unexpected-value")]
     public void InvalidCliOptionsReturnUsageError(string option, string? value)
     {
@@ -360,10 +363,10 @@ public sealed class DirectoryScannerTests
             arguments.Add(value);
         }
 
-        var result = RunCli(arguments.ToArray());
+        var result = CliRunner.Run(arguments.ToArray());
 
         Assert.Equal(2, result.ExitCode);
-        Assert.Contains("用法", result.StandardOutput);
+        Assert.Contains("用法", result.Output);
         AssertNoResult();
     }
 
@@ -561,11 +564,11 @@ public sealed class DirectoryScannerTests
             arguments.Add("--hash");
         }
 
-        var result = RunCli(arguments.ToArray());
+        var result = CliRunner.Run(arguments.ToArray());
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains(computeHashes ? "重扫描完成" : "轻扫描完成", result.StandardOutput);
-        Assert.DoesNotContain("哈希进度", result.StandardOutput);
+        Assert.Contains(computeHashes ? "重扫描完成" : "轻扫描完成", result.Output);
+        Assert.DoesNotContain("哈希进度", result.Output);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal(new[] { "keep.bin" }, FilePaths(json.RootElement));
         Assert.Equal(computeHashes, json.RootElement.TryGetProperty("hashAlgorithm", out _));
@@ -609,24 +612,4 @@ public sealed class DirectoryScannerTests
         Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
     }
 
-    private static (int ExitCode, string StandardOutput, string StandardError) RunCli(params string[] arguments)
-    {
-        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "HoyoFileClean.exe"))
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        foreach (string argument in arguments)
-        {
-            start.ArgumentList.Add(argument);
-        }
-        using Process process = Process.Start(start)
-            ?? throw new InvalidOperationException("无法启动扫描命令。");
-        Task<string> output = process.StandardOutput.ReadToEndAsync();
-        Task<string> error = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
-    }
 }

@@ -33,7 +33,6 @@ public sealed partial class MainForm : Form
     private readonly CheckBox heavy = new() { Text = L.Get("HeavyScanHint"), AutoSize = true, Name = "HeavyScan" };
     private readonly TextBox comparisonResult = OutputBox("ComparisonResult");
     private readonly DifferencePanel differences;
-    private string referenceOrigin = "";
     private string scanOrigin = "";
     private string reportOrigin = "";
 
@@ -127,12 +126,7 @@ public sealed partial class MainForm : Form
         manifests.AllowDrop = true;
         manifests.DragEnter += (_, args) => ManualFilesDragEnter(args);
         manifests.DragDrop += (_, args) => ManualFilesDragDrop(args);
-        remove.Click += (_, _) =>
-        {
-            foreach (DataGridViewRow row in manifests.Rows.Cast<DataGridViewRow>().Where(row => row.Cells[0].Value is true).ToArray())
-                manifests.Rows.Remove(row);
-            ReferenceChanged();
-        };
+        remove.Click += (_, _) => manifests.RemoveCheckedFiles();
         var input = Vertical();
         input.Controls.Add(Note(L.Get("ManualManifestHint")));
         manualReferenceActions = OperationActions("ManualReferenceActions", cancelParsing, add, remove, parseManualReference);
@@ -200,7 +194,7 @@ public sealed partial class MainForm : Form
     private void ReferenceChanged()
     {
         session.InvalidateReference();
-        referenceOrigin = reportOrigin = "";
+        reportOrigin = "";
         if (session.Step == 1) status.Text = networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
         differences.Render();
         RefreshView();
@@ -269,7 +263,7 @@ public sealed partial class MainForm : Form
         referenceResult.Text = session.Reference is { } reference
             ? L.Format("ReferenceSummary", reference.FileCount, reference.TotalSize) : L.Get("ReferenceResultMissing");
         comparisonResult.Text = L.Get("GameSideHeading") + scanOrigin + ResultText.Describe(session.Game, L.Get("GameScanTitle"))
-            + L.Get("ReferenceSideHeading") + referenceOrigin + ResultText.Describe(session.Reference, L.Get("ReferenceListTitle"))
+            + L.Get("ReferenceSideHeading") + ResultText.Describe(session.Reference, L.Get("ReferenceListTitle"))
             + L.Get("ComparisonResultHeading") + reportOrigin + ResultText.Describe(session.Comparison);
     }
 

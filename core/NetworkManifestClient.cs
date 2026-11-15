@@ -27,6 +27,9 @@ public sealed class NetworkManifestClient(HttpClient client)
     private static readonly Lazy<IReadOnlyList<NetworkService>> services = new(() => NetworkService.Load());
     public static IReadOnlyList<NetworkService> Services => services.Value;
 
+    public static bool IsValidVersion(string? version)
+        => Version.TryParse(version, out var parsed) && parsed.Build >= 0 && parsed.Revision < 0;
+
     private async Task<IReadOnlyList<OfficialGameBranch>> GetBranchesAsync(NetworkService service, CancellationToken token)
     {
         if (service is null || !service.IsValid) throw new CoreException(CoreErrorCode.NetworkConfigurationInvalid);
@@ -83,7 +86,7 @@ public sealed class NetworkManifestClient(HttpClient client)
             {
                 RemoteGame identity = Identity(item);
                 string version = Text(item.Main?.Tag);
-                if (!Version.TryParse(version, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)
+                if (!IsValidVersion(version))
                     throw new FormatException();
                 versions.Add(new RemoteGameVersion(service, identity, version, item));
             }
@@ -109,7 +112,7 @@ public sealed class NetworkManifestClient(HttpClient client)
         {
             OfficialBuildRequest main = game.Main ?? throw new FormatException();
             string requestedVersion = version ?? Text(main.Tag);
-            if (!Version.TryParse(requestedVersion, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)
+            if (!IsValidVersion(requestedVersion))
                 throw new ArgumentException("A three-part version is required.", nameof(version));
             string query = OfficialProtocol.BuildQuery(main with { Tag = requestedVersion });
             OfficialBuild data = await GetJsonAsync<OfficialBuild>(new Uri(
@@ -161,7 +164,7 @@ public sealed class NetworkManifestClient(HttpClient client)
         ValidateManifest(manifest);
         if (bytes.LongLength != manifest.DownloadSize) throw new CoreException(CoreErrorCode.ManifestDownloadMismatch);
         using var input = new MemoryStream(bytes, writable: false);
-        FileListSnapshot snapshot = ManifestConverter.Read(input, manifest.Url.AbsoluteUri, out _,
+        FileListSnapshot snapshot = ManifestConverter.Read(input, manifest.Url.AbsoluteUri,
             cancellationToken, manifest.DecodedSize, manifest.Md5, manifest.Compressed);
         cancellationToken.ThrowIfCancellationRequested();
         return snapshot;

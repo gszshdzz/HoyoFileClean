@@ -67,17 +67,7 @@ try
                     PrintUsage();
                     return 2;
                 }
-                int start = index;
-                while (index < args.Length && !args[index].StartsWith("--", StringComparison.Ordinal))
-                {
-                    if (string.IsNullOrWhiteSpace(args[index]))
-                    {
-                        PrintUsage();
-                        return 2;
-                    }
-                    paths.Add(args[index++]);
-                }
-                if (index == start)
+                if (!TryReadValues(args, ref index, paths))
                 {
                     PrintUsage();
                     return 2;
@@ -130,17 +120,7 @@ try
                     PrintUsage();
                     return 2;
                 }
-                int start = index;
-                while (index < args.Length && !args[index].StartsWith("--", StringComparison.Ordinal))
-                {
-                    if (string.IsNullOrWhiteSpace(args[index]))
-                    {
-                        PrintUsage();
-                        return 2;
-                    }
-                    inputs.Add(args[index++]);
-                }
-                if (index == start)
+                if (!TryReadValues(args, ref index, inputs))
                 {
                     PrintUsage();
                     return 2;
@@ -169,6 +149,20 @@ catch (Exception error) when (error is CoreException or IOException or InvalidDa
 {
     CliOutput.Error(error);
     return 1;
+}
+
+static bool TryReadValues(string[] arguments, ref int index, List<string> values)
+{
+    int start = index;
+    while (index < arguments.Length && !arguments[index].StartsWith("--", StringComparison.Ordinal))
+    {
+        if (string.IsNullOrWhiteSpace(arguments[index]))
+        {
+            return false;
+        }
+        values.Add(arguments[index++]);
+    }
+    return index != start;
 }
 
 static void PrintUsage()

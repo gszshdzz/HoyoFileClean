@@ -61,17 +61,16 @@ public sealed class WizardTests
         foreach (ReferenceState state in Enum.GetValues<ReferenceState>())
             Assert.False(string.IsNullOrWhiteSpace(ManifestTable.StateText(state)));
         using var table = new ManifestTable("state-test");
-        table.AddFiles([new LocalManifestFile("file", @"C:\file", 1, DateTime.UtcNow)]);
-        ReferenceInput input = Assert.IsType<ReferenceInput>(table.Rows[0].Tag);
+        table.AddFiles([new LocalManifestFile("file", @"C:\file", 1, DateTime.UtcNow)], check: true);
+        ReferenceInput input = Assert.Single(table.CheckedInputs);
         table.ShowResults([(input, ReferenceState.Fetching, null)]);
         table.Rows[0].Cells["State"].Value = "arbitrary translated text";
         table.ResetFetching();
-        Assert.Equal(ReferenceState.Unfetched, table.Rows[0].Cells["State"].Tag);
         Assert.Equal(ManifestTable.StateText(ReferenceState.Unfetched), table.Rows[0].Cells["State"].Value);
         table.ShowResults([(input, ReferenceState.Parsed, 1)]);
-        table.Rows[0].Cells["State"].Value = ManifestTable.StateText(ReferenceState.Fetching);
+        table.Rows[0].Cells["State"].Value = "arbitrary parsed text";
         table.ResetFetching();
-        Assert.Equal(ReferenceState.Parsed, table.Rows[0].Cells["State"].Tag);
+        Assert.Equal("arbitrary parsed text", table.Rows[0].Cells["State"].Value);
     });
 
     [Fact]
@@ -80,25 +79,24 @@ public sealed class WizardTests
         using var table = new ManifestTable("batch-test");
         table.AddFiles([
             new LocalManifestFile("a", @"C:\a", 1, DateTime.UtcNow),
-            new LocalManifestFile("b", @"C:\b", 2, DateTime.UtcNow)]);
-        ReferenceInput[] inputs = table.Rows.Cast<DataGridViewRow>()
-            .Select(row => Assert.IsType<ReferenceInput>(row.Tag)).ToArray();
+            new LocalManifestFile("b", @"C:\b", 2, DateTime.UtcNow)], check: true);
+        ReferenceInput[] inputs = table.CheckedInputs;
         ReferenceInput a = inputs.Single(input => input.File.Name == "a");
         ReferenceInput b = inputs.Single(input => input.File.Name == "b");
         table.Sort(Assert.IsType<DataGridViewTextBoxColumn>(table.Columns["Name"]),
             System.ComponentModel.ListSortDirection.Descending);
-        Assert.Same(b, table.Rows[0].Tag);
+        Assert.Same(b, table.CheckedInputs[0]);
         table.ShowResults([(a, ReferenceState.Parsed, 7), (b, ReferenceState.Fetching, null)]);
         foreach (DataGridViewRow row in table.Rows)
         {
-            bool parsed = ReferenceEquals(row.Tag, a);
-            Assert.Equal(parsed ? ReferenceState.Parsed : ReferenceState.Fetching, row.Cells["State"].Tag);
+            bool parsed = row.Cells["Name"].Value is "a";
+            Assert.Equal(ManifestTable.StateText(parsed ? ReferenceState.Parsed : ReferenceState.Fetching), row.Cells["State"].Value);
             Assert.Equal(parsed ? 7 : (int?)null, row.Cells["Entries"].Value);
             row.Cells["State"].Value = "arbitrary translated text";
         }
         table.ResetFetching();
-        Assert.Equal(ReferenceState.Unfetched, table.Rows[0].Cells["State"].Tag);
-        Assert.Equal(ReferenceState.Parsed, table.Rows[1].Cells["State"].Tag);
+        Assert.Equal(ManifestTable.StateText(ReferenceState.Unfetched), table.Rows[0].Cells["State"].Value);
+        Assert.Equal("arbitrary translated text", table.Rows[1].Cells["State"].Value);
         Assert.Equal(7, table.Rows[1].Cells["Entries"].Value);
     });
 
@@ -733,12 +731,15 @@ public sealed class WizardTests
         Assert.NotNull(session.Reference);
         Assert.Equal(1, session.Reference.FileCount);
         Assert.Equal(source, Assert.Single(session.Reference.Sources).Path);
+        Find<Button>(form, "Next").PerformClick();
+        Assert.Equal(1, Find<TextBox>(form, "ComparisonResult").Text.Split(source, StringSplitOptions.None).Length - 1);
+        Find<Button>(form, "Back").PerformClick();
         Assert.Equal(new[] { source }, Directory.GetFiles(directory, "*", SearchOption.AllDirectories));
         Assert.False(Directory.Exists(Path.Combine(directory, ".temp")));
         Find<Button>(form, local ? "ParseLocalReference" : "ParseManualReference").PerformClick();
         PumpUntilLocalGetFinishes(form, session);
         Assert.Equal(new[] { source }, Directory.GetFiles(directory, "*", SearchOption.AllDirectories));
-        DataGridViewRow row = table.Rows.Cast<DataGridViewRow>().Single(row => ((ReferenceInput)row.Tag!).File.FullPath == source);
+        DataGridViewRow row = table.Rows.Cast<DataGridViewRow>().Single(row => row.Cells["Name"].Value is "manifest");
         Assert.Equal("已解析", row.Cells["State"].Value);
         Assert.Equal(1, row.Cells["Entries"].Value);
         Assert.Equal("—", row.Cells["Game"].Value);

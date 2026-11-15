@@ -17,7 +17,7 @@ Session：7.3。按用户要求，结构性检查由自动化与审查承担，�
 
 | 内容 | 文件 | 说明 |
 | --- | --- | --- |
-| 服务配置 | `config/network-services.json` | Id、NameTextId、BranchUrl、BuildUrl、LauncherId；Id 唯一，URL 无预设查询串，无默认游戏／包。 |
+| 服务配置 | `config/NetworkServices.cs` | C# 编译期数据，不使用适配 JSON；Id、NameTextId、BranchUrl、BuildUrl、LauncherId；Id 唯一，URL 无预设查询串，无默认游戏／包。 |
 | 编译前策略 | `config/Maintenance.cs` | 默认目录、大小、超时、连接节拍、线程数、刷新和缓冲；修改后重新构建。 |
 | 官方请求／响应 | `core/Models/OfficialProtocol.cs` | 字段映射、数值和请求参数集中；改名不等于支持新格式或算法。 |
 | 网络结果 | `core/Models/NetworkModels.cs` | 原始身份和可信下载来源标记。 |

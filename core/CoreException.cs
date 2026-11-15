@@ -12,7 +12,8 @@ public enum CoreErrorCode
     ExclusionPathInvalid, ExclusionOutsideRoot, DevicePathUnsupported, DirectoryIsLink, DirectoryMissing,
     ManifestNetworkMetadataInvalid, ManifestChannelUnavailable, ManifestDownloadMismatch,
     ManifestNetworkSizeLimit, ManifestNetworkUnsupported, ManifestVersionUnavailable, ManifestPackageUnavailable,
-    NetworkConfigurationInvalid, ManifestGameAmbiguous
+    NetworkConfigurationInvalid, ManifestGameAmbiguous,
+    GameIdentificationConfigurationInvalid, GameIdentificationFailed, GameDetectionInvalid, GameDetectionConflict
 }
 
 // Diagnostic data only. Front ends own wording, localization and recovery advice.

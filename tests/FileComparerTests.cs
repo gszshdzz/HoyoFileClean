@@ -156,8 +156,8 @@ public sealed class FileComparerTests
         File.WriteAllText(Path.Combine(root, "file"), "abc");
         string light = Path.Combine(directory, "light.json");
         string heavy = Path.Combine(directory, "heavy.json");
-        DirectoryScanner.Scan(root, light);
-        DirectoryScanner.Scan(root, heavy, computeHashes: true);
+        DirectoryScanner.Scan(root, light, cancellationToken: TestContext.Current.CancellationToken);
+        DirectoryScanner.Scan(root, heavy, computeHashes: true, cancellationToken: TestContext.Current.CancellationToken);
         Directory.Move(root, Path.Combine(directory, "moved-root"));
 
         Assert.Equal(new ComparisonSummary(0, 0, 0, 0, 1, 0), FileComparer.Compare([light], [heavy], Output));

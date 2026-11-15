@@ -24,7 +24,7 @@ public sealed class DirectoryScannerTests
         File.SetAttributes(hidden, File.GetAttributes(hidden) | FileAttributes.Hidden | FileAttributes.System);
         DateTime modified = File.GetLastWriteTimeUtc(normal);
 
-        ScanSummary summary = DirectoryScanner.Scan(Root + Path.DirectorySeparatorChar, Output, computeHashes: true);
+        ScanSummary summary = DirectoryScanner.Scan(Root + Path.DirectorySeparatorChar, Output, computeHashes: true, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         JsonElement result = json.RootElement;
@@ -56,7 +56,7 @@ public sealed class DirectoryScannerTests
         WriteFile("nested/ignored.bin", "abc");
 
         DirectoryScanner.Scan(Root, Output,
-            ["Data/skip", @"data\SKIP\"], [Path.Combine(Root, "ignored.bin")]);
+            ["Data/skip", @"data\SKIP\"], [Path.Combine(Root, "ignored.bin")], cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal(new[] { "Data/skip-other/keep.bin", "nested/ignored.bin" }, FilePaths(json.RootElement));
@@ -71,7 +71,7 @@ public sealed class DirectoryScannerTests
     {
         Directory.CreateDirectory(Root);
 
-        ScanSummary summary = DirectoryScanner.Scan(Root, Output);
+        ScanSummary summary = DirectoryScanner.Scan(Root, Output, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal((0, 0L), (summary.FileCount, summary.TotalSize));
@@ -95,7 +95,7 @@ public sealed class DirectoryScannerTests
         Directory.CreateSymbolicLink(Path.Combine(Root, "loop"), Root);
         using var locked = new FileStream(externalFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
-        ScanSummary summary = DirectoryScanner.Scan(Root, Output, computeHashes: computeHashes);
+        ScanSummary summary = DirectoryScanner.Scan(Root, Output, computeHashes: computeHashes, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal(new[] { "keep.bin" }, FilePaths(json.RootElement));
@@ -118,7 +118,7 @@ public sealed class DirectoryScannerTests
         Directory.CreateSymbolicLink(Path.Combine(Root, "still-skipped"), externalDirectory);
 
         ScanSummary summary = DirectoryScanner.Scan(Root, Output,
-            ["excluded-directory"], ["excluded-file.bin"], computeHashes: computeHashes);
+            ["excluded-directory"], ["excluded-file.bin"], computeHashes: computeHashes, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("still-skipped", Assert.Single(summary.SkippedLinks));
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
@@ -139,7 +139,7 @@ public sealed class DirectoryScannerTests
         string expectedHash = Convert.ToHexString(MD5.HashData(content)).ToLowerInvariant();
         long before = GC.GetAllocatedBytesForCurrentThread();
 
-        ScanSummary summary = DirectoryScanner.Scan(Root, Output, computeHashes: true);
+        ScanSummary summary = DirectoryScanner.Scan(Root, Output, computeHashes: true, cancellationToken: TestContext.Current.CancellationToken);
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.True(allocated < content.Length, $"扫描分配了 {allocated} 字节，不应分配整文件缓冲区。");
@@ -154,7 +154,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
         File.WriteAllText(Output, "keep-existing-content");
 
-        Assert.Equal(CoreErrorCode.OutputExists, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output)).Code);
+        Assert.Equal(CoreErrorCode.OutputExists, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         Assert.Equal("keep-existing-content", File.ReadAllText(Output));
         Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
@@ -169,7 +169,7 @@ public sealed class DirectoryScannerTests
         WriteFile("nested/keep.bin", "abc");
         string output = Path.GetFullPath(relativeOutput, Root);
 
-        Assert.Equal(CoreErrorCode.OutputInsideScanRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, output)).Code);
+        Assert.Equal(CoreErrorCode.OutputInsideScanRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, output, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         Assert.False(File.Exists(output));
         Assert.Empty(Directory.EnumerateFiles(Root, "*.partial", SearchOption.AllDirectories));
@@ -183,7 +183,7 @@ public sealed class DirectoryScannerTests
         Directory.CreateDirectory(sibling);
         string output = Path.Combine(sibling, "scan.json");
 
-        ScanSummary summary = DirectoryScanner.Scan(Root, output);
+        ScanSummary summary = DirectoryScanner.Scan(Root, output, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal((1, 3L), (summary.FileCount, summary.TotalSize));
         Assert.True(File.Exists(output));
@@ -201,12 +201,12 @@ public sealed class DirectoryScannerTests
 
         if (invalidName)
         {
-            Assert.Equal(CoreErrorCode.RelativePathInvalid, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path])).Code);
+            Assert.Equal(CoreErrorCode.RelativePathInvalid, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path], cancellationToken: TestContext.Current.CancellationToken)).Code);
         }
         else
         {
             Assert.Equal(path == "C:relative.bin" ? CoreErrorCode.ExclusionPathInvalid : CoreErrorCode.ExclusionOutsideRoot,
-                Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path])).Code);
+                Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output, excludedFiles: [path], cancellationToken: TestContext.Current.CancellationToken)).Code);
         }
 
         AssertNoResult();
@@ -218,7 +218,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
 
         Assert.Equal(CoreErrorCode.ExclusionOutsideRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output,
-            excludedDirectories: [Path.Combine(directory, "external")])).Code);
+            excludedDirectories: [Path.Combine(directory, "external")], cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         AssertNoResult();
     }
@@ -232,9 +232,9 @@ public sealed class DirectoryScannerTests
         string root = useFile ? file : Path.Combine(directory, "missing");
 
         if (useFile)
-            Assert.Equal(CoreErrorCode.DirectoryMissing, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(root, Output)).Code);
+            Assert.Equal(CoreErrorCode.DirectoryMissing, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(root, Output, cancellationToken: TestContext.Current.CancellationToken)).Code);
         else
-            Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(root, Output));
+            Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(root, Output, cancellationToken: TestContext.Current.CancellationToken));
 
         AssertNoResult();
     }
@@ -246,7 +246,7 @@ public sealed class DirectoryScannerTests
         string parent = Path.Combine(directory, "missing");
         string output = Path.Combine(parent, "scan.json");
 
-        Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(Root, output));
+        Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(Root, output, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.False(Directory.Exists(parent));
         Assert.False(File.Exists(output));
@@ -258,7 +258,7 @@ public sealed class DirectoryScannerTests
         string file = WriteFile("locked.bin", "abc");
         using (var writer = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
         {
-            Assert.Throws<IOException>(() => DirectoryScanner.Scan(Root, Output, computeHashes: true));
+            Assert.Throws<IOException>(() => DirectoryScanner.Scan(Root, Output, computeHashes: true, cancellationToken: TestContext.Current.CancellationToken));
         }
 
         AssertNoResult();
@@ -275,7 +275,7 @@ public sealed class DirectoryScannerTests
         using var locked = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
         ScanSummary summary = DirectoryScanner.Scan(Root, Output,
-            excludedFiles: ["locked.bin"], computeHashes: computeHashes);
+            excludedFiles: ["locked.bin"], computeHashes: computeHashes, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal(new[] { "keep.bin" }, FilePaths(json.RootElement));
@@ -292,7 +292,7 @@ public sealed class DirectoryScannerTests
         Directory.CreateSymbolicLink(alias, Root);
         string root = useChild ? Path.Combine(alias, "child") : alias;
 
-        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(root, Output)).Code);
+        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(root, Output, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         AssertNoResult();
     }
@@ -304,7 +304,7 @@ public sealed class DirectoryScannerTests
         string alias = Path.Combine(directory, "output-alias");
         Directory.CreateSymbolicLink(alias, Root);
 
-        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Path.Combine(alias, "scan.json"))).Code);
+        Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Path.Combine(alias, "scan.json"), cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         Assert.False(File.Exists(Path.Combine(Root, "scan.json")));
         Assert.Empty(Directory.EnumerateFiles(Root, "*.partial"));
@@ -316,7 +316,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
         string output = Path.Combine(directory, new string('a', 256) + ".json");
 
-        Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(Root, output));
+        Assert.ThrowsAny<IOException>(() => DirectoryScanner.Scan(Root, output, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.False(File.Exists(output));
         Assert.Single(Directory.EnumerateFiles(directory, "*.partial"));
@@ -375,7 +375,7 @@ public sealed class DirectoryScannerTests
     {
         WriteFile("keep.bin", "abc");
 
-        ScanSummary summary = DirectoryScanner.Scan(prefix + Root, Output);
+        ScanSummary summary = DirectoryScanner.Scan(prefix + Root, Output, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal((1, 3L), (summary.FileCount, summary.TotalSize));
@@ -392,7 +392,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
         string actualOutput = Path.Combine(Root, "unsafe-scan.json");
 
-        Assert.Equal(CoreErrorCode.OutputInsideScanRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, prefix + actualOutput)).Code);
+        Assert.Equal(CoreErrorCode.OutputInsideScanRoot, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, prefix + actualOutput, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         Assert.False(File.Exists(actualOutput));
         Assert.Empty(Directory.EnumerateFiles(Root, "*.partial"));
@@ -407,7 +407,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
         string ignored = WriteFile("ignored.bin", "abc");
 
-        DirectoryScanner.Scan(Root, Output, excludedFiles: [prefix + ignored]);
+        DirectoryScanner.Scan(Root, Output, excludedFiles: [prefix + ignored], cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal(new[] { "keep.bin" }, FilePaths(json.RootElement));
@@ -421,7 +421,7 @@ public sealed class DirectoryScannerTests
         WriteFile("keep.bin", "abc");
 
         Assert.Equal(CoreErrorCode.DevicePathUnsupported, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(
-            @"\\?\Volume{00000000-0000-0000-0000-000000000000}\missing", Output)).Code);
+            @"\\?\Volume{00000000-0000-0000-0000-000000000000}\missing", Output, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         AssertNoResult();
     }
@@ -433,7 +433,7 @@ public sealed class DirectoryScannerTests
         using var locked = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         var updates = new List<ScanProgress>();
 
-        ScanSummary summary = DirectoryScanner.Scan(Root, Output, progress: updates.Add);
+        ScanSummary summary = DirectoryScanner.Scan(Root, Output, progress: updates.Add, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal((1, 3L), (summary.FileCount, summary.TotalSize));
@@ -460,7 +460,7 @@ public sealed class DirectoryScannerTests
             }
         }
 
-        ScanSummary summary = DirectoryScanner.Scan(Root, Output, computeHashes: true, progress: Progress);
+        ScanSummary summary = DirectoryScanner.Scan(Root, Output, computeHashes: true, progress: Progress, cancellationToken: TestContext.Current.CancellationToken);
 
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(Output));
         Assert.Equal((3, 8L), (summary.FileCount, summary.TotalSize));
@@ -492,7 +492,7 @@ public sealed class DirectoryScannerTests
         }
         var updates = new List<ScanProgress>();
 
-        DirectoryScanner.Scan(Root, Output, computeHashes: true, progress: updates.Add);
+        DirectoryScanner.Scan(Root, Output, computeHashes: true, progress: updates.Add, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(new ScanProgress(count, count, 0, 0), updates[^1]);
         Assert.Equal(100, updates[^1].Percentage);
@@ -514,7 +514,7 @@ public sealed class DirectoryScannerTests
         }
 
         Assert.Equal(CoreErrorCode.ScanFileSizeChanged, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output,
-            computeHashes: true, progress: Progress)).Code);
+            computeHashes: true, progress: Progress, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         AssertNoResult();
     }
@@ -539,7 +539,7 @@ public sealed class DirectoryScannerTests
         }
 
         Assert.Equal(CoreErrorCode.DirectoryIsLink, Assert.Throws<CoreException>(() => DirectoryScanner.Scan(Root, Output,
-            computeHashes: true, progress: Progress)).Code);
+            computeHashes: true, progress: Progress, cancellationToken: TestContext.Current.CancellationToken)).Code);
 
         AssertNoResult();
     }

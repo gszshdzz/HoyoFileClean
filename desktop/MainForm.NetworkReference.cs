@@ -127,7 +127,7 @@ public sealed partial class MainForm
     {
         networkManifests.Rows.Clear();
         ReferenceChanged();
-        if (session.Step == 0 && networkSource.Checked) status.Text = DescribeNetworkInput();
+        if (session.Step == 1 && networkSource.Checked) status.Text = DescribeNetworkInput();
     }
 
     private string DescribeNetworkInput() => networkConfigurationError ?? (networkManifests.Rows.Count > 0

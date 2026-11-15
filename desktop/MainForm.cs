@@ -52,7 +52,7 @@ public sealed partial class MainForm : Form
         ClientSize = new Size(1040, 780);
         AutoScaleMode = AutoScaleMode.Dpi;
         differences = new DifferencePanel(session);
-        pages = [BuildReferencePage(), BuildScanPage(), BuildComparisonPage(), BuildDifferencePage()];
+        pages = [BuildScanPage(), BuildReferencePage(), BuildComparisonPage(), BuildDifferencePage()];
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -102,7 +102,8 @@ public sealed partial class MainForm : Form
                 : L.Get("CloseDuringWorkHint");
         };
         RefreshView();
-        ActiveControl = session.Step == 0 ? (manualSource.Checked ? manualSource : networkSource) : execute;
+        ActiveControl = session.Step == 0 ? gameRoot
+            : session.Step == 1 ? (manualSource.Checked ? manualSource : networkSource) : execute;
     }
 
     private Panel BuildReferencePage()
@@ -191,7 +192,7 @@ public sealed partial class MainForm : Form
     {
         session.InvalidateReference();
         referenceOrigin = reportOrigin = "";
-        if (session.Step == 0) status.Text = networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
+        if (session.Step == 1) status.Text = networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
         differences.Render();
         RefreshView();
     }
@@ -201,7 +202,7 @@ public sealed partial class MainForm : Form
         session.InvalidateGame();
         scanOrigin = reportOrigin = "";
         ResetScanProgress();
-        if (session.Step == 1) status.Text = L.Get("GameInputChanged");
+        if (session.Step == 0) status.Text = L.Get("GameInputChanged");
         differences.Render();
         RefreshView();
     }
@@ -213,9 +214,9 @@ public sealed partial class MainForm : Form
             displayedStep = session.Step;
             status.Text = session.Step switch
             {
-                0 => session.Reference is not null ? L.Get("ReferenceReady")
+                1 => session.Reference is not null ? L.Get("ReferenceReady")
                     : networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputRequired"),
-                1 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : L.Get("GameInputRequired"),
+                0 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : L.Get("GameInputRequired"),
                 2 => session.Comparison is not null ? L.Get("ComparisonReady") : L.Get("ComparisonInputRequired"),
                 _ => L.Get("DifferenceReviewHint")
             };
@@ -244,11 +245,16 @@ public sealed partial class MainForm : Form
         cancelParsing.Visible = session.Operation == DesktopOperation.Parsing;
         cancelParsing.Enabled = session.Operation == DesktopOperation.Parsing && session.CanCancel;
         cancelNetwork.Enabled = session.Operation == DesktopOperation.Network && session.CanCancel;
+        cancelScan.Visible = session.Operation == DesktopOperation.Scan;
+        cancelScan.Enabled = session.Operation == DesktopOperation.Scan && session.CanCancel;
         execute.Text = L.Get("CompareAction");
         scanOptions.Visible = scanGameSource.Checked;
         gameJsonRow.Visible = importGameSource.Checked;
         heavy.Visible = scanGameSource.Checked;
         readGame.Text = importGameSource.Checked ? L.Get("ImportAction") : L.Get("ScanAction");
+        identificationResult.Text = session.Identification is { } identification
+            ? ResultText.DescribeIdentification(identification)
+            : L.Get("IdentificationMissing");
         referenceResult.Text = session.Reference is { } reference
             ? L.Format("ReferenceSummary", reference.FileCount, reference.TotalSize) : L.Get("ReferenceResultMissing");
         comparisonResult.Text = L.Get("GameSideHeading") + scanOrigin + ResultText.Describe(session.Game, L.Get("GameScanTitle"))
@@ -281,7 +287,7 @@ public sealed partial class MainForm : Form
     }
 
     private static Button MakeButton(string text, string name) => new() { Text = text, Name = name, AutoSize = true, MinimumSize = new Size(90, 30) };
-    private static string[] StepTitles() => [L.Get("StepReference"), L.Get("StepGame"),
+    private static string[] StepTitles() => [L.Get("StepGame"), L.Get("StepReference"),
         L.Get("StepComparison"), L.Get("StepDifferences")];
     private static Label Note(string text)
         => new() { Text = text, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 5) };

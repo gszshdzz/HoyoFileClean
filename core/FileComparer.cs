@@ -229,7 +229,9 @@ public static class FileComparer
                 {
                     ExcludedDirectories = NormalizeScope(scope.ExcludedDirectories, input),
                     ExcludedFiles = NormalizeScope(scope.ExcludedFiles, input),
-                    SkippedLinks = NormalizeScope(scope.SkippedLinks, input)
+                    SkippedLinks = NormalizeScope(scope.SkippedLinks, input),
+                    GameDetections = scope.GameDetections is { } recorded
+                        ? GameIdentifier.ValidateRecordedDetections(recorded) : null
                 };
             }
             sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope));

@@ -5,11 +5,11 @@ public sealed partial class MainForm
     private async Task ExecuteAsync()
     {
         if (session.IsBusy) return;
-        if (session.Step == 0 && !manualSource.Checked) return;
+        if (session.Step == 1 && !manualSource.Checked) return;
         switch (session.Step)
         {
-            case 0: await ConvertAsync(); break;
-            case 1:
+            case 1: await ConvertAsync(); break;
+            case 0:
                 if (importGameSource.Checked) await ImportGameAsync();
                 else await ScanAsync();
                 break;
@@ -67,28 +67,39 @@ public sealed partial class MainForm
         if (!Path.IsPathFullyQualified(root)) { status.Text = L.Get("GameRootRequired"); return; }
         bool hashes = heavy.Checked;
         string[] dirs = excludedDirectories.Items.Cast<string>().ToArray(), files = excludedFiles.Items.Cast<string>().ToArray();
+        long generation = ++scanGeneration;
         var reporter = new Progress<ScanProgress>(value =>
         {
-            if (!session.IsBusy) return;
+            if (generation != scanGeneration || session.Operation != DesktopOperation.Scan
+                || !session.IsBusy || session.IsCancellationRequested) return;
             ShowScanProgress(value);
             status.Text = L.Format("GameHashProgress", value.CompletedFiles, value.TotalFiles, value.ProcessedBytes, value.TotalBytes);
         });
         session.InvalidateGame();
+        RefreshView();
         scanOrigin = reportOrigin = "";
         ResetScanProgress();
         scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Marquee;
         scanProgressPanel.Visible = true;
-        await RunWorkAsync(() =>
+        await RunWorkAsync(token =>
         {
-            return DirectoryScanner.Scan(root, dirs, files, hashes,
-                value => ((IProgress<ScanProgress>)reporter).Report(value));
+            GameIdentification identification = GameIdentifier.Identify(root, token);
+            FileListSnapshot scan = DirectoryScanner.Scan(root, dirs, files, hashes,
+                value => ((IProgress<ScanProgress>)reporter).Report(value), token, identification);
+            return (scan, identification);
         }, result =>
         {
-            session.AcceptGame(result, root);
-            ShowScanProgress(new ScanProgress(result.FileCount, result.FileCount, result.TotalSize, result.TotalSize));
+            session.AcceptGame(result.scan, root, result.identification);
+            ShowScanProgress(new ScanProgress(result.scan.FileCount, result.scan.FileCount, result.scan.TotalSize, result.scan.TotalSize));
             scanOrigin = L.Get("ActualScanOrigin");
-        }, hashes ? L.Get("EnumeratingBeforeHash") : L.Get("LightScanRunning"), onFinished: StopScanProgress);
+        }, L.Get("IdentifyingBeforeScan"), DesktopOperation.Scan, onFinished: () =>
+        {
+            scanGeneration++;
+            StopScanProgress();
+        });
     }
+
+    private long scanGeneration;
 
     private void StopScanProgress()
     {
@@ -167,14 +178,14 @@ public sealed partial class MainForm
         progress.Value = 0;
         progress.Maximum = totalFiles ?? 100;
         progress.Style = totalFiles is null ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
-        progress.Visible = session.Step != 1;
+        progress.Visible = session.Step != 0;
         differences.Render();
         RefreshView();
         string outcome;
         try
         {
             await operation;
-            outcome = session.Step == 1 && session.Game is not null
+            outcome = session.Step == 0 && session.Game is not null
                 ? ResultText.DescribeGameStatus(session.Game, importGameSource.Checked)
                 : completedMessage?.Invoke() ?? L.Get("StepCompleted");
         }
@@ -185,6 +196,10 @@ public sealed partial class MainForm
         catch (OperationCanceledException) when (kind == DesktopOperation.Parsing && cancellation.IsCancellationRequested)
         {
             outcome = L.Get("ParsingCancelled");
+        }
+        catch (OperationCanceledException) when (kind == DesktopOperation.Scan && cancellation.IsCancellationRequested)
+        {
+            outcome = L.Get("ScanCancelled");
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -206,7 +221,7 @@ public sealed partial class MainForm
         return new LocalManifestFile(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc);
     }
 
-    private bool CanAddManualFiles => !session.IsBusy && session.Step == 0 && manualSource.Checked;
+    private bool CanAddManualFiles => !session.IsBusy && session.Step == 1 && manualSource.Checked;
 
     private void ManualFilesDragEnter(DragEventArgs args)
     {

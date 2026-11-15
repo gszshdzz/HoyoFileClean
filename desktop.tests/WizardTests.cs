@@ -12,7 +12,6 @@ public sealed class WizardTests
     public void GameReadingOffersSourcesSingleLineInputsAndEditableExclusionLists() => OnSta(() =>
     {
         WizardSession session = Ready();
-        session.Next();
         using var form = new MainForm(session);
         form.Location = new Point(-20000, -20000);
         form.StartPosition = FormStartPosition.Manual;
@@ -146,7 +145,6 @@ public sealed class WizardTests
         string file = Path.Combine(directory, "settings.ini");
         File.WriteAllText(file, "test");
         WizardSession session = Ready();
-        session.Next();
         using var form = new MainForm(session) { StartPosition = FormStartPosition.Manual,
             Location = new Point(-20000, -20000), ShowInTaskbar = false, Size = new Size(800, height) };
         form.Show();
@@ -192,11 +190,11 @@ public sealed class WizardTests
         Assert.False(session.CanAdvance);
         Assert.Throws<InvalidOperationException>(session.Next);
         var (game, reference, root) = Inputs();
-        session.AcceptReference(reference);
+        session.AcceptGame(game, root);
         session.Next();
         Assert.Equal(1, session.Step);
         Assert.Throws<InvalidOperationException>(session.Next);
-        session.AcceptGame(game, root);
+        session.AcceptReference(reference);
         session.Next();
         Assert.Throws<InvalidOperationException>(session.Next);
         session.AcceptComparison(FileComparer.Compare(game, reference));
@@ -452,8 +450,8 @@ public sealed class WizardTests
         Rectangle client = form.RectangleToScreen(form.ClientRectangle);
         string[] controls = step switch
         {
-            0 => ["Manifests", "ReferenceResult", "Next", "ParseManualReference"],
-            1 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "Next", "ReadGame"],
+            1 => ["Manifests", "ReferenceResult", "Next", "ParseManualReference"],
+            0 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "Next", "ReadGame"],
             2 => ["ComparisonResult", "Next", "Execute"],
             _ => ["GameTree", "ReferenceTree", "ConfirmSelection", "DemonstrateDelete"]
         };
@@ -489,14 +487,14 @@ public sealed class WizardTests
         next.PerformClick();
         Assert.Equal(1, session.Step);
         Assert.True(next.Enabled);
+        back.PerformClick();
         Find<CheckBox>(form, "HeavyScan").Checked = true;
         Assert.Null(session.Game);
         Assert.Null(session.Comparison);
         Assert.False(next.Enabled);
-        back.PerformClick();
         Assert.Equal(0, session.Step);
         Assert.NotNull(session.Reference);
-        Assert.True(next.Enabled);
+        Assert.False(next.Enabled);
         form.Close();
     });
 
@@ -506,7 +504,7 @@ public sealed class WizardTests
     [InlineData("ManualSource", true)]
     public void ReferenceModesShowOnlyTheirOwnInterface(string mode, bool manual) => OnSta(() =>
     {
-        using var form = new MainForm
+        using var form = new MainForm(ReferenceSession())
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000),
             ShowInTaskbar = false, Size = new Size(800, 650)
@@ -557,7 +555,7 @@ public sealed class WizardTests
     [InlineData("Manual", "Local")]
     public void ReferenceModeSwitchAlwaysCoversContentBeforeHidingOldPage(string from, string to) => OnSta(() =>
     {
-        using var form = new MainForm
+        using var form = new MainForm(ReferenceSession())
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
         };
@@ -595,6 +593,7 @@ public sealed class WizardTests
     public void SwitchingReferenceModeInvalidatesReferenceAndDownstreamButKeepsScan() => OnSta(() =>
     {
         WizardSession session = Ready();
+        session.Next();
         session.Select("game-only", true);
         session.ConfirmSelection(true);
         using var form = new MainForm(session)
@@ -648,7 +647,7 @@ public sealed class WizardTests
         DateTime newer = new(2026, 11, 1, 6, 10, 0, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(first, older);
         File.SetLastWriteTimeUtc(second, newer);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -718,7 +717,7 @@ public sealed class WizardTests
         });
         byte[] bytes = Google.Protobuf.MessageExtensions.ToByteArray(manifest);
         File.WriteAllBytes(source, bytes);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -760,7 +759,7 @@ public sealed class WizardTests
         Directory.CreateDirectory(directory);
         string source = Path.Combine(directory, "invalid");
         File.WriteAllBytes(source, [0xff]);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -787,8 +786,8 @@ public sealed class WizardTests
         Directory.CreateDirectory(root);
         string file = Path.Combine(root, "file");
         File.WriteAllText(file, "abc");
-        FileListSnapshot light = DirectoryScanner.Scan(root);
-        FileListSnapshot heavy = DirectoryScanner.Scan(root, computeHashes: true);
+        FileListSnapshot light = DirectoryScanner.Scan(root, cancellationToken: TestContext.Current.CancellationToken);
+        FileListSnapshot heavy = DirectoryScanner.Scan(root, computeHashes: true, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(light.Files["file"].Hash);
         Assert.Equal("900150983cd24fb0d6963f7d28e17f72", heavy.Files["file"].Hash);
         Assert.Equal(1, FileComparer.Compare(light, heavy).Summary.MatchedSizeOnly);
@@ -814,14 +813,14 @@ public sealed class WizardTests
     {
         string program = Path.Combine(directory, "program");
         Directory.CreateDirectory(program);
-        Assert.Equal(0, DirectoryScanner.Scan(directory).FileCount);
+        Assert.Equal(0, DirectoryScanner.Scan(directory, cancellationToken: TestContext.Current.CancellationToken).FileCount);
         Assert.Empty(Directory.EnumerateFileSystemEntries(program));
     }
 
     [Fact]
     public void ReferenceTablesShareColumnsAndSkipPrecedesManifestActions() => OnSta(() =>
     {
-        using var form = new MainForm
+        using var form = new MainForm(ReferenceSession())
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
         };
@@ -907,10 +906,10 @@ public sealed class WizardTests
         Directory.CreateDirectory(root);
         string file = Path.Combine(root, "file");
         File.WriteAllText(file, "abc");
+        string config = WriteGameConfig(root);
         string reference = WriteList("reference", null, [new ManifestFile("file", 3)]);
         var session = new WizardSession();
         session.AcceptReference(ManifestConverter.Read(reference));
-        session.Next();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -929,11 +928,12 @@ public sealed class WizardTests
         Assert.NotNull(session.Game);
         Assert.Contains("仅保留在内存", Find<Label>(form, "Status").Text);
         Find<Button>(form, "Next").PerformClick();
+        Find<Button>(form, "Next").PerformClick();
         Find<Button>(form, "Execute").PerformClick();
         Wait();
         Assert.Equal(1, session.Comparison!.Summary.MatchedSizeOnly);
         Assert.Contains("仅保留在内存", Find<TextBox>(form, "ComparisonResult").Text);
-        Assert.Equal(new[] { file, reference }.Order(),
+        Assert.Equal(new[] { file, reference, config }.Order(),
             Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order());
         Assert.Equal(root, Assert.Single(session.Game.Sources).Path);
         form.Close();
@@ -958,7 +958,7 @@ public sealed class WizardTests
     [InlineData(10000, true)]
     public void LargeManifestBatchIsPublishedOnceAndResizeWorkStaysBounded(int count, bool local) => OnSta(() =>
     {
-        using var form = new MainForm
+        using var form = new MainForm(ReferenceSession())
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
         };
@@ -999,7 +999,7 @@ public sealed class WizardTests
         Directory.CreateDirectory(other);
         string file = Path.Combine(directory, "file");
         File.WriteAllText(file, "keep");
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session);
         TextBox box = Find<TextBox>(form, "LocalManifestDirectory");
         ManifestTable table = Find<ManifestTable>(form, "LocalManifests");
@@ -1063,7 +1063,7 @@ public sealed class WizardTests
         string first = Path.Combine(directory, "first"), second = Path.Combine(directory, "second.json");
         File.WriteAllText(first, "not parsed on drop");
         File.WriteAllText(second, "invalid json is still a candidate");
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session);
         ManifestTable table = Find<ManifestTable>(form, "Manifests");
         Assert.True(table.AllowDrop);
@@ -1171,7 +1171,7 @@ public sealed class WizardTests
     {
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "candidate"), "metadata only");
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1202,7 +1202,7 @@ public sealed class WizardTests
     [Fact]
     public void StatusTextFitsItsAllocatedRowWhileProgressChanges() => OnSta(() =>
     {
-        using var form = new MainForm
+        using var form = new MainForm(ReferenceSession())
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false,
             Font = new Font(SystemFonts.MessageBoxFont!.FontFamily, 14)
@@ -1254,7 +1254,7 @@ public sealed class WizardTests
             }
             return ManifestConverter.Read(input.File.FullPath, token);
         });
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, parser)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1297,7 +1297,7 @@ public sealed class WizardTests
     {
         Directory.CreateDirectory(directory);
         string path = WriteList("reference", null, [new ManifestFile("file", 3)]);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         WeakReference oldReference = InstallOldReference(session, path);
         using var entered = new ManualResetEventSlim();
         int calls = 0;
@@ -1364,7 +1364,7 @@ public sealed class WizardTests
     [Fact]
     public void RapidWidthChangesKeepWrappedReferenceNotesAboveTables() => OnSta(() =>
     {
-        using var form = new MainForm
+        using var form = new MainForm(ReferenceSession())
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
         };
@@ -1475,7 +1475,7 @@ public sealed class WizardTests
     public void SwitchingSourceParsesOnlyActiveTableEvenWhenBothKeepCheckedRows() => OnSta(() =>
     {
         Directory.CreateDirectory(directory);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1515,7 +1515,7 @@ public sealed class WizardTests
     public void JsonRowsWithSameSideConflictDoNotEnableNext() => OnSta(() =>
     {
         Directory.CreateDirectory(directory);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1555,11 +1555,11 @@ public sealed class WizardTests
         File.WriteAllBytes(raw, Google.Protobuf.MessageExtensions.ToByteArray(manifest));
         ManifestConverter.Convert(raw, converted);
         string scanned = Path.Combine(directory, "scan.json");
-        DirectoryScanner.Scan(root, scanned);
+        DirectoryScanner.Scan(root, scanned, cancellationToken: TestContext.Current.CancellationToken);
         var session = new WizardSession();
-        session.AcceptReference(FileComparer.ReadInputs([converted]));
-        session.Next();
         session.AcceptGame(FileComparer.ReadInputs([scanned]), root);
+        session.Next();
+        session.AcceptReference(FileComparer.ReadInputs([converted]));
         session.Next();
         ComparisonResult comparison = FileComparer.Compare(session.Game!, session.Reference!);
         string report = Path.Combine(directory, "comparison.json");
@@ -1579,7 +1579,6 @@ public sealed class WizardTests
     public void ScanProgressIsHiddenBeforeReadingAndWhileImporting() => OnSta(() =>
     {
         WizardSession session = Ready();
-        session.Next();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1601,8 +1600,8 @@ public sealed class WizardTests
     {
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "file"), "abc");
+        WriteGameConfig(directory);
         WizardSession session = Ready();
-        session.Next();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false,
@@ -1641,8 +1640,8 @@ public sealed class WizardTests
         Assert.False(file.Visible);
         Assert.False(bytes.Visible);
         Assert.Contains(hashes ? "MD5 重扫完成" : "轻扫（未校验内容）完成", Find<Label>(form, "Status").Text);
-        Find<Button>(form, "Back").PerformClick();
         Find<Button>(form, "Next").PerformClick();
+        Find<Button>(form, "Back").PerformClick();
         Assert.False(file.Visible);
         Assert.False(bytes.Visible);
     });
@@ -1654,9 +1653,9 @@ public sealed class WizardTests
         string root = Path.Combine(directory, "game");
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "file"), "abc");
+        WriteGameConfig(root);
         var session = new WizardSession();
         session.AcceptReference(FileComparer.ReadInputs([WriteList("reference", null, [new ManifestFile("file", 3)])]));
-        session.Next();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1699,7 +1698,7 @@ public sealed class WizardTests
         Assert.NotSame(parsing.Parent, comparison.Parent);
         status.Text = "上一个页面的解析完成提示";
         Find<Button>(form, "Next").PerformClick();
-        Assert.Contains("轻扫", status.Text);
+        Assert.Contains("参考", status.Text);
         Assert.DoesNotContain("上一个页面", status.Text);
         Assert.False(parsing.Visible);
         Find<Button>(form, "Next").PerformClick();
@@ -1710,11 +1709,9 @@ public sealed class WizardTests
         Find<Button>(form, "Back").PerformClick();
         Assert.Contains("比较", status.Text);
         Find<Button>(form, "Back").PerformClick();
-        Find<CheckBox>(form, "HeavyScan").Checked = true;
-        Assert.Contains("尚无有效结果", status.Text);
-        Find<Button>(form, "Back").PerformClick();
         Assert.Contains("参考", status.Text);
-        Find<Button>(form, "Next").PerformClick();
+        Find<Button>(form, "Back").PerformClick();
+        Find<CheckBox>(form, "HeavyScan").Checked = true;
         Assert.Contains("尚无有效结果", status.Text);
         form.Close();
     });
@@ -1724,7 +1721,6 @@ public sealed class WizardTests
     {
         WizardSession session = Ready();
         FileListSnapshot game = session.Game!;
-        session.Next();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1754,7 +1750,6 @@ public sealed class WizardTests
     {
         WizardSession session = Ready();
         string root = session.Game!.Sources[0].Scan!.Root;
-        session.Next();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -1789,9 +1784,8 @@ public sealed class WizardTests
         Assert.Null(session.Game);
         Assert.Contains("处理失败", status.Text);
         Assert.False(Find<Button>(form, "Next").Enabled);
-        Find<Button>(form, "Back").PerformClick();
-        Find<Button>(form, "Next").PerformClick();
-        Assert.Contains("尚无有效结果", status.Text);
+        Assert.False(Find<Button>(form, "Back").Enabled);
+        Assert.Contains("处理失败", status.Text);
         Assert.DoesNotContain("已导入历史扫描", status.Text);
         Assert.False(showedScanProgress);
         form.Close();

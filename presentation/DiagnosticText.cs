@@ -28,6 +28,8 @@ public static class DiagnosticText
         CoreException { Code: CoreErrorCode.ManifestDownloadMismatch } => Text.Get("DesktopDownloadMismatch"),
         CoreException { Code: CoreErrorCode.ManifestNetworkSizeLimit } core => DescribeCore(core.Code),
         CoreException { Code: CoreErrorCode.NetworkConfigurationInvalid } => Text.Format("DesktopConfigurationInvalid", Maintenance.NetworkServicesRelativePath),
+        CoreException { Code: CoreErrorCode.GameIdentificationConfigurationInvalid or CoreErrorCode.GameIdentificationFailed
+            or CoreErrorCode.GameDetectionInvalid or CoreErrorCode.GameDetectionConflict } core => DescribeCore(core.Code),
         CoreException { Code: CoreErrorCode.ManifestNetworkMetadataInvalid or CoreErrorCode.ManifestNetworkUnsupported } => Text.Get("DesktopNetworkMetadataInvalid"),
         CoreException => Text.Get("DesktopListInvalid"),
         FileNotFoundException => Text.Get("DesktopFileMissing"),
@@ -87,6 +89,10 @@ public static class DiagnosticText
         CoreErrorCode.ManifestDownloadMismatch => Text.Get("CoreErrorCode_ManifestDownloadMismatch"),
         CoreErrorCode.ManifestNetworkSizeLimit => Text.Get("CoreErrorCode_ManifestNetworkSizeLimit"),
         CoreErrorCode.ManifestNetworkUnsupported => Text.Get("CoreErrorCode_ManifestNetworkUnsupported"),
+        CoreErrorCode.GameIdentificationConfigurationInvalid => Text.Get("CoreErrorCode_GameIdentificationConfigurationInvalid"),
+        CoreErrorCode.GameIdentificationFailed => Text.Get("CoreErrorCode_GameIdentificationFailed"),
+        CoreErrorCode.GameDetectionInvalid => Text.Get("CoreErrorCode_GameDetectionInvalid"),
+        CoreErrorCode.GameDetectionConflict => Text.Get("CoreErrorCode_GameDetectionConflict"),
         _ => Text.Get("UnknownCoreError")
     };
 }

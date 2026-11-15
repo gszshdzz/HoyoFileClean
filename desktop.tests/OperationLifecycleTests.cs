@@ -6,12 +6,14 @@ namespace HoyoFileClean.Desktop.Tests;
 public sealed class OperationLifecycleTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CancelledWorkStaysBusyUntilItExitsAndCannotPublish(bool network)
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task CancelledWorkStaysBusyUntilItExitsAndCannotPublish(int operationKind)
     {
         var session = new WizardSession();
-        var kind = network ? DesktopOperation.Network : DesktopOperation.Parsing;
+        var kind = (DesktopOperation)operationKind;
+        bool network = kind == DesktopOperation.Network;
         using var release = new ManualResetEventSlim();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         bool published = false, finished = false;

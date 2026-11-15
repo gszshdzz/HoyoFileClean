@@ -27,7 +27,7 @@ public sealed class ParsingDiagnosticsTests
     private static void Measure()
     {
         var files = ManifestDiscovery.Find(MainForm.DefaultManifestDirectory);
-        var session = new WizardSession();
+        var session = NativeTestHost.ReferenceSession();
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false

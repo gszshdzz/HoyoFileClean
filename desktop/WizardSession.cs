@@ -2,7 +2,7 @@ namespace HoyoFileClean.Desktop;
 
 public enum DifferenceCategory { All, GameOnly, ReferenceOnly, Different, OutsideScope }
 
-internal enum DesktopOperation { Work, Parsing, Network }
+internal enum DesktopOperation { Work, Parsing, Network, Scan }
 
 public sealed record DifferenceRow(string Path, ManifestFile? Game, ManifestFile? Reference,
     DifferenceCategory Category)
@@ -17,6 +17,7 @@ public sealed class WizardSession
     private readonly Dictionary<string, DifferenceRow> rowsByPath = new(StringComparer.OrdinalIgnoreCase);
     public FileListSnapshot? Reference { get; private set; }
     public FileListSnapshot? Game { get; private set; }
+    public GameIdentification? Identification { get; private set; }
     public ComparisonResult? Comparison { get; private set; }
     public IReadOnlyList<DifferenceRow> Rows { get; private set; } = [];
     public DifferenceCategory Filter { get; private set; }
@@ -34,8 +35,8 @@ public sealed class WizardSession
     public bool CanDemonstrateDeletion => !IsBusy && selected.Count > 0 && SelectionConfirmed && Comparison is not null;
     public bool CanAdvance => !IsBusy && Step switch
     {
-        0 => Reference is not null,
-        1 => Game is not null,
+        0 => Game is not null,
+        1 => Reference is not null,
         2 => Comparison is not null,
         _ => false
     };
@@ -113,6 +114,7 @@ public sealed class WizardSession
     {
         RequireResultApplicationOrIdle();
         Game = null;
+        Identification = null;
         InvalidateComparison();
     }
 
@@ -150,12 +152,15 @@ public sealed class WizardSession
             throw new InvalidDataException(L.Get("ImportedRootMismatch"));
     }
 
-    public void AcceptGame(FileListSnapshot game, string root)
+    public void AcceptGame(FileListSnapshot game, string root, GameIdentification? identification = null)
     {
         RequireResultApplicationOrIdle();
         ValidateGameInput(game, root);
+        GameIdentification? restored = identification ?? (game.Sources[0].Scan?.GameDetections is { } recorded
+            ? GameIdentifier.FromDetections(recorded) : null);
         ClearComparison();
         Game = game;
+        Identification = restored;
     }
 
     public void AcceptComparison(ComparisonResult comparison)

@@ -56,7 +56,7 @@ public sealed partial class MainForm
 
     private string? DroppedManifestDirectory(DragEventArgs args)
     {
-        if (session.IsBusy || session.Step != 0 || !localSource.Checked
+        if (session.IsBusy || session.Step != 1 || !localSource.Checked
             || (args.AllowedEffect & DragDropEffects.Copy) == 0) return null;
         if (args.Data is ITypedDataObject data && data.TryGetData(DataFormats.FileDrop, out string[]? paths)
             && paths is { Length: 1 } && !string.IsNullOrWhiteSpace(paths[0])

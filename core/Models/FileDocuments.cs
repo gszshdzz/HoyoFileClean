@@ -10,7 +10,8 @@ public sealed record FileListDocument(int FileCount, long TotalSize, IReadOnlyLi
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ScanScope? Scan = null);
 
 public sealed record ScanScope(string Root, IReadOnlyList<string> ExcludedDirectories,
-    IReadOnlyList<string> ExcludedFiles, IReadOnlyList<string> SkippedLinks, string Mode);
+    IReadOnlyList<string> ExcludedFiles, IReadOnlyList<string> SkippedLinks, string Mode,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, string>? GameDetections = null);
 
 public sealed record FileListSource(string Path, int FileCount, long TotalSize,
     string? HashAlgorithm, ScanScope? Scan);

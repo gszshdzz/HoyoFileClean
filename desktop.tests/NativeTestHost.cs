@@ -8,6 +8,32 @@ namespace HoyoFileClean.Desktop.Tests;
 // Exercise controls on their owning thread with the same message loop as the application.
 internal static class NativeTestHost
 {
+    internal static WizardSession ReferenceSession()
+    {
+        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var session = new WizardSession();
+        session.AcceptGame(DirectoryScanner.Scan(root), root);
+        session.Next();
+        return session;
+    }
+
+    internal static MainForm ReferenceForm() => new(ReferenceSession());
+
+    internal static string WriteGameConfig(string root)
+    {
+        string path = Path.Combine(root, "config.ini");
+        File.WriteAllText(path, """
+            [General]
+            game_version=7.2.0
+            channel=1
+            sub_channel=1
+            uapc={"hk4e_cn":{"uapc":""},"hyp":{"uapc":""}}
+            """);
+        return path;
+    }
+
     internal static void OnSta(Action action, [CallerMemberName] string testName = "")
     {
         Exception? failure = null;

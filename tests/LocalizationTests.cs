@@ -133,6 +133,31 @@ public sealed class LocalizationTests
     }
 
     [Fact]
+    public void IdentificationRuleTextIdsExistAndTemplatesAcceptExtractedValues()
+    {
+        var configuration = GameIdentifier.LoadConfiguration();
+        foreach (InformationDefinition information in configuration.Information.Values)
+        {
+            Assert.True(Text.Contains(information.LabelTextId), information.LabelTextId);
+            Assert.Equal(0, CompositeFormat.Parse(Text.Get(information.LabelTextId)).MinimumArgumentCount);
+            foreach (InformationRule rule in information.Rules)
+            {
+                if (rule.TextId is { } textId)
+                {
+                    Assert.True(Text.Contains(textId), textId);
+                    Assert.Equal(0, CompositeFormat.Parse(Text.Get(textId)).MinimumArgumentCount);
+                }
+                if (rule.DisplayFormatTextId is { } formatId)
+                {
+                    Assert.True(Text.Contains(formatId), formatId);
+                    Assert.InRange(CompositeFormat.Parse(Text.Get(formatId)).MinimumArgumentCount, 1, 2);
+                    Assert.NotEmpty(Text.Format(formatId, "1.0.0", "dynamic-plugin"));
+                }
+            }
+        }
+    }
+
+    [Fact]
     public void ConfiguredDisplayNamesAreLanguageIdsAndUnknownCultureFallsBack()
     {
         foreach (NetworkService service in NetworkManifestClient.Services) Assert.True(Text.Contains(service.NameTextId));

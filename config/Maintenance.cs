@@ -3,7 +3,9 @@ namespace HoyoFileClean;
 // Maintainer-owned build-time policy. These are not end-user settings.
 public static class Maintenance
 {
-    public const string NetworkServicesRelativePath = "config/network-services.json";
+    public const string NetworkServicesRelativePath = "config/NetworkServices.cs";
+    public const string GameIdentificationRelativePath = "config/GameIdentificationRules.cs";
+    public static readonly TimeSpan IdentificationMatchTimeout = TimeSpan.FromSeconds(1);
     public static readonly IReadOnlyList<string> ManifestDirectorySegments =
         Array.AsReadOnly(new[] { "miHoYo", "HYP", "1_1", "modules", "sophon", "manifest" });
 

@@ -22,7 +22,9 @@ public static class DirectoryScanner
         IEnumerable<string>? excludedDirectories = null,
         IEnumerable<string>? excludedFiles = null,
         bool computeHashes = false,
-        Action<ScanProgress>? progress = null)
+        Action<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        GameIdentification? identification = null)
     {
         string root = NormalizeRootPath(rootPath);
         string output = FullPath(outputPath);
@@ -38,9 +40,10 @@ public static class DirectoryScanner
             ?? throw new CoreException(CoreErrorCode.OutputFileNameRequired, output);
         ValidateDirectoryPath(root);
         ValidateDirectoryPath(outputParent);
-        FileListSnapshot snapshot = Scan(root, excludedDirectories, excludedFiles, computeHashes, progress);
+        FileListSnapshot snapshot = Scan(root, excludedDirectories, excludedFiles, computeHashes, progress, cancellationToken, identification);
         FileListSource source = snapshot.Sources[0];
         ValidateDirectoryPath(outputParent);
+        cancellationToken.ThrowIfCancellationRequested();
         JsonFileOutput.WriteNew(output, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
             snapshot.Files.Values.ToArray(), source.HashAlgorithm, source.Scan));
         return new ScanSummary(snapshot.FileCount, snapshot.TotalSize, source.Scan!.SkippedLinks);
@@ -50,14 +53,17 @@ public static class DirectoryScanner
         IEnumerable<string>? excludedDirectories = null,
         IEnumerable<string>? excludedFiles = null,
         bool computeHashes = false,
-        Action<ScanProgress>? progress = null)
+        Action<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        GameIdentification? identification = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         string root = NormalizeRootPath(rootPath);
         ValidateDirectoryPath(root);
         HashSet<string> excludedDirs = NormalizeExclusions(root, excludedDirectories);
         HashSet<string> excludedFilePaths = NormalizeExclusions(root, excludedFiles);
         var skippedLinks = new List<string>();
-        List<ManifestFile> files = ReadFileList(root, excludedDirs, excludedFilePaths, skippedLinks);
+        List<ManifestFile> files = ReadFileList(root, excludedDirs, excludedFilePaths, skippedLinks, cancellationToken);
         files.Sort((left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
         skippedLinks.Sort(StringComparer.Ordinal);
         FilePathRules.ValidatePaths(files.Select(file => file.Path));
@@ -72,18 +78,20 @@ public static class DirectoryScanner
         }
         if (computeHashes)
         {
-            ComputeHashes(root, files, totalSize, progress);
+            ComputeHashes(root, files, totalSize, progress, cancellationToken);
         }
+        cancellationToken.ThrowIfCancellationRequested();
         IReadOnlyList<string> links = skippedLinks.AsReadOnly();
         var details = new ScanScope(root,
             excludedDirs.OrderBy(path => path, StringComparer.Ordinal).ToArray(),
             excludedFilePaths.OrderBy(path => path, StringComparer.Ordinal).ToArray(), links,
-            computeHashes ? FileValues.HeavyScan : FileValues.LightScan);
-        return FileComparer.FromFiles(root, files, totalSize, computeHashes ? FileValues.Md5 : null, details);
+            computeHashes ? FileValues.HeavyScan : FileValues.LightScan, identification?.Detections);
+        return FileComparer.FromFiles(root, files, totalSize, computeHashes ? FileValues.Md5 : null, details, cancellationToken);
     }
 
     private static List<ManifestFile> ReadFileList(
-        string root, HashSet<string> excludedDirs, HashSet<string> excludedFiles, List<string> skippedLinks)
+        string root, HashSet<string> excludedDirs, HashSet<string> excludedFiles, List<string> skippedLinks,
+        CancellationToken cancellationToken)
     {
         var files = new List<ManifestFile>();
         var directories = new Stack<string>();
@@ -97,6 +105,7 @@ public static class DirectoryScanner
 
         while (directories.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string directory = directories.Pop();
             FileAttributes directoryAttributes = File.GetAttributes(directory);
             if ((directoryAttributes & FileAttributes.ReparsePoint) != 0)
@@ -109,6 +118,7 @@ public static class DirectoryScanner
             }
             foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos("*", options))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string relative = FilePathRules.NormalizeRelative(RelativePath(root, entry.FullName));
                 FileAttributes attributes = entry.Attributes;
                 bool isDirectory = (attributes & FileAttributes.Directory) != 0;
@@ -136,7 +146,8 @@ public static class DirectoryScanner
     }
 
     private static void ComputeHashes(
-        string root, List<ManifestFile> files, long totalSize, Action<ScanProgress>? progress)
+        string root, List<ManifestFile> files, long totalSize, Action<ScanProgress>? progress,
+        CancellationToken cancellationToken)
     {
         byte[] buffer = new byte[Maintenance.HashBufferSize];
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
@@ -157,6 +168,7 @@ public static class DirectoryScanner
         Report(0, force: true);
         for (int index = 0; index < files.Count; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ManifestFile file = files[index];
             string path = Path.Combine(root, file.Path);
             // 列表和哈希分两个阶段，读取前重新确认路径及文件类型。
@@ -175,6 +187,7 @@ public static class DirectoryScanner
             int count;
             while ((count = input.Read(buffer, 0, buffer.Length)) != 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 hash.AppendData(buffer, 0, count);
                 processedBytes += count;
                 Report(index);
@@ -243,7 +256,7 @@ public static class DirectoryScanner
     private static bool IsOutsideRoot(string relative)
         => Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal);
 
-    private static void ValidateDirectoryPath(string path)
+    internal static void ValidateDirectoryPath(string path)
     {
         var ancestors = new Stack<string>();
         for (string? current = path; current is not null; current = Path.GetDirectoryName(current))

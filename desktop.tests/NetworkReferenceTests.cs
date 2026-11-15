@@ -114,7 +114,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler();
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false, Size = new Size(800, 650) };
         form.Show();
@@ -263,7 +263,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler { FailChina = !noGame, NoGame = noGame };
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -295,7 +295,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler();
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -336,7 +336,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler();
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -393,7 +393,7 @@ public sealed class NetworkReferenceTests
         using var http = new HttpClient(handler);
         var service = new NetworkService("future", "ServiceGlobal", new Uri("https://future.example/getGameBranches"),
             new Uri("https://build.future.example/getBuild"), "launcher&new");
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http), loadNetworkServices: () => [service])
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -416,13 +416,14 @@ public sealed class NetworkReferenceTests
     [Fact]
     public void ConfigurationFailureLeavesOfflineSourcesAvailable() => OnSta(() =>
     {
-        using var form = new MainForm(new WizardSession(), loadNetworkServices: () =>
+        using var form = new MainForm(ReferenceSession(), loadNetworkServices: () =>
             throw new CoreException(CoreErrorCode.NetworkConfigurationInvalid))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
         Assert.Empty(Find<ListBox>(form, "NetworkRegions").Items);
         Assert.False(Find<Button>(form, "QueryNetwork").Enabled);
-        Assert.Contains("网络服务配置缺失或无效", Find<Label>(form, "Status").Text);
+        Assert.Contains("网络服务开发配置无效", Find<Label>(form, "Status").Text);
+        Assert.Contains(Maintenance.NetworkServicesRelativePath, Find<Label>(form, "Status").Text);
         foreach (string source in new[] { "LocalSource", "ManualSource" })
         {
             var option = Find<RadioButton>(form, source);
@@ -437,7 +438,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler();
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -470,7 +471,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler { ExtraGames = true, ExtraPackage = true };
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -532,7 +533,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler { ExtraPackage = true, SharedManifestUrl = sharedUrl };
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -567,7 +568,7 @@ public sealed class NetworkReferenceTests
     {
         using var handler = new Handler { CorruptManifest = true };
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
@@ -595,7 +596,7 @@ public sealed class NetworkReferenceTests
         using var handler = new Handler
         { ExtraPackage = true, FailExtraPackage = !conflict, ConflictingExtraPackage = conflict };
         using var http = new HttpClient(handler);
-        var session = new WizardSession();
+        var session = ReferenceSession();
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();

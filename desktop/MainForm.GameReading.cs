@@ -19,6 +19,8 @@ public sealed partial class MainForm
     private Panel scanOptions = null!;
     private TableLayoutPanel gameJsonRow = null!;
     private readonly Button readGame = MakeButton(L.Get("ScanAction"), "ReadGame");
+    private readonly Button cancelScan = MakeButton(L.Get("Button_CancelScan"), "CancelScan");
+    private readonly Label identificationResult = new() { Name = "IdentificationResult", AutoSize = true, Dock = DockStyle.Top };
 
     private Panel BuildScanPage()
     {
@@ -36,7 +38,14 @@ public sealed partial class MainForm
         EnablePathDrop(gameJson, directory: false);
         gameJson.TextChanged += (_, _) => GameChanged();
         readGame.Click += async (_, _) => await ExecuteAsync();
-        input.Controls.Add(Buttons(readGame, heavy));
+        cancelScan.Click += (_, _) =>
+        {
+            session.CancelOperation();
+            RefreshView();
+            status.Text = L.Get("CancellingScan");
+        };
+        input.Controls.Add(Buttons(readGame, heavy, cancelScan));
+        input.Controls.Add(identificationResult);
 
         var options = CompactGameInputs();
         Button browseRules = MakeButton(L.Get("Button_BrowseGame"), "BrowseExclusionJson");

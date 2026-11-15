@@ -5,6 +5,8 @@ namespace HoyoFileClean;
 
 public static class FileComparer
 {
+    private static readonly ManifestIdentifier manifestIdentifier = new(ManifestIdentificationRules.Create());
+
     public static ComparisonSummary Compare(IEnumerable<string> aPaths, IEnumerable<string> bPaths, string outputPath)
     {
         if (File.Exists(outputPath) || Directory.Exists(outputPath))
@@ -235,7 +237,7 @@ public static class FileComparer
                 };
             }
             // Never trust metadata saved in an input JSON: derive it again from validated contents.
-            var metadata = ManifestIdentification.Identifier.Identify(
+            var metadata = manifestIdentifier.Identify(
                 new FileListDocument(normalized.Count, totalSize, normalized, list.HashAlgorithm, scope), cancellationToken);
             sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope, metadata));
             MergeFiles(files, normalized, input, cancellationToken);

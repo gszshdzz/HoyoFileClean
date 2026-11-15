@@ -8,10 +8,12 @@ namespace HoyoFileClean.Desktop.Tests;
 public sealed class ManifestMetadataTests
 {
     [Theory]
-    [InlineData("StarRail.exe", "崩坏：星穹铁道")]
-    [InlineData("ZenlessZoneZero.exe", "绝区零")]
-    [InlineData("BH3.exe", "崩坏 3")]
-    public void KnownGameNameRemainsVisibleWithoutCertainOfficialBiz(string executable, string name) => NativeTestHost.OnSta(() =>
+    [InlineData("YuanShen.exe", "hk4e_cn")]
+    [InlineData("GenshinImpact.exe", "hk4e_global")]
+    [InlineData("StarRail.exe", "hkrpg")]
+    [InlineData("ZenlessZoneZero.exe", "nap")]
+    [InlineData("BH3.exe", "bh3")]
+    public void OfficialBizTakesPrecedenceAndGameIsTheFallback(string executable, string name) => NativeTestHost.OnSta(() =>
     {
         string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
@@ -22,14 +24,29 @@ public sealed class ManifestMetadataTests
             fileCount = 1, totalSize = 1, files = new[] { new { path = executable, size = 1 } }
         }));
         FileListSnapshot snapshot = ManifestConverter.Read(path, TestContext.Current.CancellationToken);
-        Assert.False(snapshot.Sources[0].Metadata!.ContainsKey("biz"));
         using var table = new ManifestTable("test");
         table.AddFiles([new LocalManifestFile("sample", path, 1, default)], check: true);
         ReferenceInput input = Assert.Single(table.CheckedInputs);
         table.ShowParsedResults([input], [new ReferenceParseItem(1, null, snapshot)]);
         Assert.Equal(name, table.Rows[0].Cells["Game"].Value);
         Assert.Equal("game", table.Rows[0].Cells["Package"].Value);
-        Assert.Contains(L.Get("ManifestOfficialBizLabel") + ": " + L.Get("UnavailableValue"), table.Rows[0].Cells["Game"].ToolTipText);
+    });
+
+    [Fact]
+    public void ConflictingBizIsNotHiddenByAnUnambiguousGameFallback() => NativeTestHost.OnSta(() =>
+    {
+        using var table = new ManifestTable("test");
+        table.AddFiles([new LocalManifestFile("input", "input", 1, default)], check: true);
+        ReferenceInput input = Assert.Single(table.CheckedInputs);
+        table.ShowResults([(input, ReferenceState.Parsed, 1)]);
+        table.ShowMetadata([(input, new Dictionary<string, ManifestMetadataField>
+        {
+            ["game"] = new([new("cn", "hk4e"), new("global", "hk4e")]),
+            ["biz"] = new([new("cn", "hk4e_cn"), new("global", "hk4e_global")])
+        })]);
+        Assert.Equal(L.Get("MetadataConflict"), table.Rows[0].Cells["Game"].Value);
+        Assert.Contains("hk4e_cn", table.Rows[0].Cells["Game"].ToolTipText);
+        Assert.Contains("hk4e_global", table.Rows[0].Cells["Game"].ToolTipText);
     });
 
     [Fact]
@@ -78,7 +95,7 @@ public sealed class ManifestMetadataTests
         };
         table.ShowMetadata([(input, metadata)]);
         DataGridViewRow row = table.Rows[0];
-        Assert.Equal("原神", row.Cells["Game"].Value);
+        Assert.Equal("hk4e", row.Cells["Game"].Value);
         Assert.Equal(L.Get("MetadataConflict"), row.Cells["Version"].Value);
         Assert.Contains("v1: 1.0.0", row.Cells["Version"].ToolTipText);
         Assert.Contains("v2: 2.0.0", row.Cells["Version"].ToolTipText);

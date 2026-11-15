@@ -299,11 +299,13 @@ internal sealed class ManifestTable : DataGridView
     {
         foreach (var (column, field) in new[] { ("Game", "game"), ("Version", "version"), ("Package", "package") })
         {
-            ManifestMetadataField? result = metadata?.GetValueOrDefault(field);
+            ManifestMetadataField? result = field == "game"
+                ? metadata?.GetValueOrDefault("biz") ?? metadata?.GetValueOrDefault("game")
+                : metadata?.GetValueOrDefault(field);
             bool attempted = row.Cells["State"].Tag is ReferenceState.Parsed or ReferenceState.Failed or ReferenceState.Cancelled;
             string? display = result?.Value;
-            string nameId = "GameName_" + display;
-            if (field == "game" && display is not null && L.Contains(nameId)) display = L.Get(nameId);
+            if (result is { Multiple: true, Conflict: false } && display is null)
+                display = string.Join(L.Get("ListSeparator"), result.Matches.Select(match => match.Value).Distinct(StringComparer.Ordinal));
             row.Cells[column].Value = result is null ? (attempted ? L.Get("UnavailableValue") : null)
                 : result.Conflict ? L.Get("MetadataConflict") : display;
             row.Cells[column].ToolTipText = result is null ? "" : string.Join(Environment.NewLine,

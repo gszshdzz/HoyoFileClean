@@ -136,11 +136,12 @@ public sealed class LocalizationTests
     public void IdentificationRuleTextIdsExistAndTemplatesAcceptExtractedValues()
     {
         var configuration = GameIdentifier.LoadConfiguration();
-        foreach (InformationDefinition information in configuration.Information.Values)
+        foreach (IdentificationResultDefinition information in configuration.Results.Values)
         {
+            Assert.NotNull(information.LabelTextId);
             Assert.True(Text.Contains(information.LabelTextId), information.LabelTextId);
             Assert.Equal(0, CompositeFormat.Parse(Text.Get(information.LabelTextId)).MinimumArgumentCount);
-            foreach (InformationRule rule in information.Rules)
+            foreach (IdentificationResultRule rule in information.Rules)
             {
                 if (rule.TextId is { } textId)
                 {

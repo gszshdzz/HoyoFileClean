@@ -21,4 +21,6 @@ Session：8。用户要求整项连续完成，自行验证后统一交付；未
 
 ## 验证与交付
 
+主线验收纠正（`8,9->7.5`）：与 manifest 共用 `IdentificationConfiguration<TDetection>` 的 `Detections`／`Results` 结构和 `IdentificationEvaluator`；共用结果模型、条件映射、值去重、证据归并及单／多值约束，只让格式读取保留差异。原配置中的 `Information` 改为 `Results`；原始 `scan.gameDetections` 不变。manifest 游戏列有 `biz` 用 `biz`，否则用 `game`，不得替换成自定中文名。
+
 任务记录见 `issues/01-identification-and-scan.md`；规则和验收说明见 `docs/game-identification.md`。提交前仍须用户认可，提交编号为 8。

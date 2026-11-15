@@ -7,9 +7,9 @@ namespace HoyoFileClean;
 
 public static class GameIdentifier
 {
-    public static GameIdentificationConfiguration LoadConfiguration()
+    public static IdentificationConfiguration<GameDetectionDefinition> LoadConfiguration()
     {
-        GameIdentificationConfiguration configuration = GameIdentificationRules.Create();
+        IdentificationConfiguration<GameDetectionDefinition> configuration = GameIdentificationRules.Create();
         Validate(configuration);
         return configuration;
     }
@@ -17,7 +17,7 @@ public static class GameIdentifier
     public static GameIdentification Identify(string rootPath, CancellationToken cancellationToken = default)
         => Identify(rootPath, LoadConfiguration(), cancellationToken);
 
-    public static GameIdentification Identify(string rootPath, GameIdentificationConfiguration configuration,
+    public static GameIdentification Identify(string rootPath, IdentificationConfiguration<GameDetectionDefinition> configuration,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -26,7 +26,7 @@ public static class GameIdentifier
         DirectoryScanner.ValidateDirectoryPath(root);
         var texts = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var detections = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach ((string id, DetectionDefinition definition) in configuration.Detections)
+        foreach ((string id, GameDetectionDefinition definition) in configuration.Detections)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var matches = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -86,14 +86,14 @@ public static class GameIdentifier
         => FromDetections(detections, LoadConfiguration());
 
     public static GameIdentification FromDetections(IReadOnlyDictionary<string, string> detections,
-        GameIdentificationConfiguration configuration)
+        IdentificationConfiguration<GameDetectionDefinition> configuration)
     {
         Validate(configuration);
         ValidateRecordedDetections(detections);
         foreach ((string key, string value) in detections)
         {
             string id = key.Split(':')[0];
-            if (!configuration.Detections.TryGetValue(id, out DetectionDefinition? definition)
+            if (!configuration.Detections.TryGetValue(id, out GameDetectionDefinition? definition)
                 || string.IsNullOrWhiteSpace(value) || key.EndsWith(':') || key.Count(character => character == ':') > 1
                 || key.Contains(':') != CreatePattern(definition.Pattern).GetGroupNames().Contains("item"))
                 throw new CoreException(CoreErrorCode.GameDetectionInvalid, input: key);
@@ -119,38 +119,17 @@ public static class GameIdentifier
         && !item.Any(character => char.IsWhiteSpace(character) || char.IsControl(character) || character is ':' or '=');
 
     private static GameIdentification Interpret(Dictionary<string, string> detections,
-        GameIdentificationConfiguration configuration, CancellationToken cancellationToken)
+        IdentificationConfiguration<GameDetectionDefinition> configuration, CancellationToken cancellationToken)
     {
-        var information = new Dictionary<string, IdentifiedInformation>(StringComparer.Ordinal);
-        foreach ((string id, InformationDefinition definition) in configuration.Information)
+        IdentificationClue[] clues = detections.Select(pair =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var values = new List<IdentifiedValue>();
-            foreach (InformationRule rule in definition.Rules)
-            {
-                if (!rule.When.All(condition => detections.TryGetValue(condition.Key, out string? value)
-                    && value == condition.Value)) continue;
-                if (rule.Source is null)
-                {
-                    var result = new IdentifiedValue(null, rule.TextId, null);
-                    if (!values.Contains(result)) values.Add(result);
-                    continue;
-                }
-                foreach ((string key, string rawValue) in detections.Where(pair => pair.Key == rule.Source
-                    || pair.Key.StartsWith(rule.Source + ":", StringComparison.Ordinal)))
-                {
-                    string? item = key == rule.Source ? null : key[(rule.Source.Length + 1)..];
-                    var result = new IdentifiedValue(rawValue, null, rule.DisplayFormatTextId, item);
-                    if (!values.Contains(result)) values.Add(result);
-                }
-            }
-            if (values.Count == 0 && definition.Required)
-                throw new CoreException(CoreErrorCode.GameIdentificationFailed, input: id);
-            if (values.Count > 1 && !definition.Multiple)
-                throw new CoreException(CoreErrorCode.GameDetectionConflict, input: id);
-            information.Add(id, new IdentifiedInformation(definition.LabelTextId, values.AsReadOnly()));
-        }
-        cancellationToken.ThrowIfCancellationRequested();
+            int separator = pair.Key.IndexOf(':');
+            return separator < 0 ? new IdentificationClue(pair.Key, pair.Value)
+                : new IdentificationClue(pair.Key[..separator], pair.Value, pair.Key[(separator + 1)..]);
+        }).ToArray();
+        var information = IdentificationEvaluator.Evaluate(clues, configuration.Results, cancellationToken)
+            .ToDictionary(pair => pair.Key, pair => new IdentifiedInformation(
+                configuration.Results[pair.Key].LabelTextId!, pair.Value.Values), StringComparer.Ordinal);
         return new GameIdentification(new ReadOnlyDictionary<string, string>(detections),
             new ReadOnlyDictionary<string, IdentifiedInformation>(information));
     }
@@ -213,34 +192,22 @@ public static class GameIdentifier
         => FilePathRules.NormalizeRelative(path.StartsWith("./", StringComparison.Ordinal)
             || path.StartsWith(@".\", StringComparison.Ordinal) ? path[2..] : path);
 
-    private static void Validate(GameIdentificationConfiguration configuration)
+    private static void Validate(IdentificationConfiguration<GameDetectionDefinition> configuration)
     {
         try
         {
-            if (configuration.Detections.Count == 0 || configuration.Information.Count == 0
-                || !configuration.Information.Values.Any(info => info.Required)) throw ConfigurationError();
-            foreach ((string id, DetectionDefinition detection) in configuration.Detections)
+            if (configuration.Detections.Count == 0 || !configuration.Results.Values.Any(info => info.Required))
+                throw ConfigurationError();
+            foreach ((string id, GameDetectionDefinition detection) in configuration.Detections)
             {
                 if (!IsValidItem(id) || detection is null || detection.Paths.Length == 0
                     || string.IsNullOrWhiteSpace(detection.Pattern)
                     || !CreatePattern(detection.Pattern).GetGroupNames().Contains("value")) throw ConfigurationError();
                 foreach (string path in detection.Paths) NormalizeCandidatePath(path);
             }
-            foreach ((string id, InformationDefinition info) in configuration.Information)
-            {
-                if (string.IsNullOrWhiteSpace(id) || info is null || string.IsNullOrWhiteSpace(info.LabelTextId)
-                    || info.Rules.Length == 0) throw ConfigurationError();
-                foreach (InformationRule rule in info.Rules)
-                {
-                    if (rule is null || rule.When is null
-                        || rule.When.Any(pair => !configuration.Detections.ContainsKey(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
-                        || (rule.Source is null) == (rule.TextId is null)
-                        || (rule.Source is not null && !configuration.Detections.ContainsKey(rule.Source))
-                        || (rule.TextId is not null && string.IsNullOrWhiteSpace(rule.TextId))
-                        || (rule.DisplayFormatTextId is not null && (rule.Source is null
-                            || string.IsNullOrWhiteSpace(rule.DisplayFormatTextId)))) throw ConfigurationError();
-                }
-            }
+            IdentificationEvaluator.Validate(configuration.Detections.Keys, configuration.Results);
+            if (configuration.Results.Values.Any(info => string.IsNullOrWhiteSpace(info.LabelTextId)))
+                throw ConfigurationError();
         }
         catch (Exception error) when (error is ArgumentException or FormatException or NullReferenceException
             || error is CoreException { Code: not CoreErrorCode.GameIdentificationConfigurationInvalid })

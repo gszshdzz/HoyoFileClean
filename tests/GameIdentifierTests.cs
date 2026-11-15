@@ -83,7 +83,7 @@ public sealed class GameIdentifierTests
     {
         Write("release=1.9.0\nrelease=1.10.0", "future.txt");
         Write("identity=future\nchannel=42", "identity.txt");
-        var configuration = new GameIdentificationConfiguration(new()
+        var configuration = new IdentificationConfiguration<GameDetectionDefinition>(new()
         {
             ["release"] = new(["./missing.ini", "./future.txt"], @"^release=(?<value>[^\r\n]+)", true),
             ["id"] = new(["identity.txt"], @"^identity=(?<value>[^\r\n]+)", false),
@@ -110,7 +110,7 @@ public sealed class GameIdentifierTests
         var configuration = kind switch
         {
             "empty-detections" => original with { Detections = [] },
-            "empty-information" => original with { Information = [] },
+            "empty-information" => original with { Results = [] },
             _ => original with { Detections = null! }
         };
         Assert.Equal(CoreErrorCode.GameIdentificationConfigurationInvalid,
@@ -234,20 +234,20 @@ public sealed class GameIdentifierTests
     {
         Write(Sample);
         var config = GameIdentifier.LoadConfiguration();
-        InformationDefinition original = config.Information["version"];
-        config.Information["version"] = original with
+        IdentificationResultDefinition original = config.Results["version"];
+        config.Results["version"] = original with
         {
             Rules = [new(new() { ["ini_channel"] = "unknown" }, TextId: "unmatched"), .. original.Rules]
         };
         Assert.Equal("7.2.0", Assert.Single(GameIdentifier.Identify(root, config,
             TestContext.Current.CancellationToken).Information["version"].Values).RawValue);
-        config.Information["version"] = original with
+        config.Results["version"] = original with
         {
             Rules = [.. original.Rules, new(new() { ["ini_channel"] = "1" }, TextId: "other-version")]
         };
         Assert.Equal(CoreErrorCode.GameDetectionConflict,
             Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken)).Code);
-        config.Information["version"] = config.Information["version"] with { Multiple = true };
+        config.Results["version"] = config.Results["version"] with { Multiple = true };
         Assert.Equal(2, GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken).Information["version"].Values.Count);
     }
 
@@ -256,7 +256,7 @@ public sealed class GameIdentifierTests
     {
         Write(Sample);
         var config = GameIdentifier.LoadConfiguration();
-        config.Information["biz"] = config.Information["biz"] with
+        config.Results["biz"] = config.Results["biz"] with
         { Rules = [new(new() { ["missing"] = "anything" }, TextId: "game")] };
         Assert.Equal(CoreErrorCode.GameIdentificationConfigurationInvalid,
             Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken)).Code);
@@ -285,7 +285,7 @@ public sealed class GameIdentifierTests
         Write("game_version=7.2.0\nuapc={\"hyp\":{},\"" + gameId + "\":{}}");
         var configuration = GameIdentifier.LoadConfiguration();
         // Channel meanings remain game-specific adaptation data, not identity filters.
-        configuration.Information.Remove("channel");
+        configuration.Results.Remove("channel");
         var result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken);
         Assert.Equal(gameId, result.Detections["ini_game_id"]);
         Assert.Equal(gameId, Assert.Single(result.Information["biz"].Values).RawValue);
@@ -382,7 +382,7 @@ public sealed class GameIdentifierTests
     public void CustomConfigurationSurvivesScanningExportAndExplicitRestoration()
     {
         Write("identity=future\nrelease=1.2.0", "future.txt");
-        var config = new GameIdentificationConfiguration(new()
+        var config = new IdentificationConfiguration<GameDetectionDefinition>(new()
         {
             ["future_id"] = new(["future.txt"], @"^identity=(?<value>[^\r\n]+)", false),
             ["future_version"] = new(["future.txt"], @"^release=(?<value>[^\r\n]+)", true)

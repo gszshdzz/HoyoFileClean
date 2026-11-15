@@ -83,7 +83,7 @@ public sealed class ManifestDetailsTests
             opened++;
             Assert.Same(input, actualInput);
             Assert.Same(sample.Snapshot, actualSnapshot);
-            Assert.Contains(source == "network" ? "official-biz" : "原神", information);
+            Assert.Contains(source == "network" ? "official-biz" : "hk4e_cn", information);
             if (source != "network") Assert.Contains("hk4e_cn", information);
             Assert.Contains(source == "network" ? "official-package" : "game", information);
         };
@@ -155,6 +155,28 @@ public sealed class ManifestDetailsTests
         Assert.Equal(before, File.ReadAllBytes(output));
         NativeTestHost.Find<Button>(dialog, "CloseManifestDetails").PerformClick();
         Assert.False(dialog.Visible);
+    });
+
+    [Fact]
+    public void DialogDoesNotPreselectInformationAndContentsCannotRemainSelected() => NativeTestHost.OnSta(() =>
+    {
+        var sample = Sample();
+        using var dialog = new ManifestDetailsForm(sample.Input, sample.Snapshot, "game: hk4e", _ => null)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000)
+        };
+        dialog.Show();
+        Application.DoEvents();
+        var information = NativeTestHost.Find<TextBox>(dialog, "ManifestInformation");
+        Assert.Equal(0, information.SelectionLength);
+        Assert.False(information.Focused);
+        var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
+        Assert.Empty(grid.SelectedCells.Cast<DataGridViewCell>());
+        grid.Rows[0].Cells[0].Selected = true;
+        Assert.Empty(grid.SelectedCells.Cast<DataGridViewCell>());
+        grid.SelectAll();
+        Assert.Empty(grid.SelectedCells.Cast<DataGridViewCell>());
+        Assert.True(grid.Enabled);
     });
 
     [Fact]

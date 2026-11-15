@@ -25,7 +25,7 @@ GUI 现在先扫描游戏，再获取 manifest。点击扫描时先识别，识�
 - `JsonObjectKeys: true` 表示将提取值作为 JSON 对象解析，取实际顶层键名；`IgnoredKeys` 配置忽略键。`uapc` 当前只排除启动器项 `hyp`，没有 `cn/global` 后缀筛选，也没有游戏 ID 白名单；出现多个不同游戏键仍按不可比较字段报冲突。
 - 正则可额外捕获 `item`，用于动态条目，例如 `plugin_(?<item>[^\s=]+)_version`。每个实际插件 ID 独立合并／比较版本，不需要逐插件增加配置。内存和 JSON 用“检测条目 ID:实际条目 ID”记录，如 `ini_plugin_version:futurePlugin`。
 
-第二层 `Information` 定义“哪些提取结果意味着什么”。例如当前官服映射：
+第二层 `Results` 定义“哪些提取结果意味着什么”。例如当前官服映射：
 
 ```csharp
 ["channel"] = new("IdentificationLabelChannel", Required: true, Multiple: false,
@@ -36,13 +36,16 @@ GUI 现在先扫描游戏，再获取 manifest。点击扫描时先识别，识�
 ```
 
 - `When` 中所有“检测条目 ID → 精确值”条件同时满足时，该规则生效；空字典表示不加条件。
-- `TextId` 指向现有语言文件中的实际文字，例如 `IdentificationChannelOfficial` 对应“官服”；或改用 `Source` 引用某个检测条目的原始值，两者只能指定一个。来源值可配置 `DisplayFormatTextId`：`{0}` 为提取值，`{1}` 为动态 `item`，插件统一使用 `{1}（{0}）`，不维护逐插件文案。`LabelTextId` 指定字段标题。
+- `Source` 引用某个检测条目的原始值，`RawValue` 给出固定原始结果，`TextId` 引用现有语言 ID；三者只能指定一个。例如 `IdentificationChannelOfficial` 对应“官服”。来源值可配置 `DisplayFormatTextId`：`{0}` 为提取值，`{1}` 为动态 `item`，插件统一使用 `{1}（{0}）`，不维护逐插件文案。`LabelTextId` 指定字段标题。
+- `AnyDetection` 表示列出的线索任意命中即可；与 `When` 同时配置时仍需满足全部精确值条件。多个同值证据归并，不重复显示值；证据 ID 保留供 manifest 提示和 JSON 使用。
 - 同一信息可配置多条规则，分别引用不同游戏、文件格式的检测条目。没有匹配来源的规则不提供结果，不回退猜测。
 - `Required: true` 而没有结果：中止识别与扫描。`Multiple: false` 却映射出多个不同结果：报冲突；相同结果去重。插件等集合可用 `Multiple: true`。
 - 不设置 `is_gui`，避免重复维护；第二层信息列表和规则中的文本 ID 已经定义显示内容。当前临时结果区统一列出信息。
 - 适配配置维护命中条件、信息来源和文本 ID；实际中文与模板统一放在 `presentation/Languages/zh-CN.json`。核心不读取语言资源，返回原始值或文本 ID，GUI 再呈现；改动后测试校验 ID 存在及模板参数数量。
 
 新增适配时，先增加检测条目，再给现有信息增加对应规则。不要为每个游戏复制扫描流程；修改后运行识别与 GUI 回归测试。
+
+游戏与 manifest 的配置文件均为 `*IdentificationRules.cs`，用 `Create()` 返回 `IdentificationConfiguration<TDetection>`；共用结果定义在 `core/Models/Identification.cs`。两种读取器只负责按格式取得线索，后续都调用 `IdentificationEvaluator`，不各自实现条件映射、去重和结果约束。游戏默认必要信息缺失或单值冲突即失败；manifest 默认 `RetainConflicts: true` 保留冲突，这由同一结果定义表达，不是第二套判定逻辑。
 
 ## 当前证据范围
 

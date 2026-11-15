@@ -38,6 +38,8 @@ internal sealed class ManifestDetailsForm : Form
             args.Value = args.ColumnIndex switch { 0 => file.Path, 1 => file.Size, _ => file.Hash ?? L.Get("UnavailableValue") };
         };
         content.RowCount = files.Length;
+        content.SelectionChanged += (_, _) => content.ClearSelection();
+        content.ClearSelection();
         var header = new TextBox
         {
             Name = "ManifestInformation", Multiline = true, ReadOnly = true, Dock = DockStyle.Fill,
@@ -58,6 +60,8 @@ internal sealed class ManifestDetailsForm : Form
         layout.Controls.Add(status, 0, 2);
         layout.Controls.Add(buttons, 0, 3);
         Controls.Add(layout);
+        ActiveControl = close;
+        Shown += (_, _) => header.Select(0, 0);
         CancelButton = close;
         close.Click += (_, _) => Close();
         export.Click += async (_, _) => await ExportAsync();

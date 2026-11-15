@@ -1,9 +1,10 @@
 namespace HoyoFileClean;
 
-// Data only: extraction targets first, then meaningful information and display text IDs.
+// 开发者维护，修改后重新构建；仅定义数据，不创建引擎或发布旁置文件。
+// Detections 定义格式相关线索，Results 定义共用条件、结果与约束。
 internal static class GameIdentificationRules
 {
-    internal static GameIdentificationConfiguration Create() => new(
+    internal static IdentificationConfiguration<GameDetectionDefinition> Create() => new(
         Detections: new()
         {
             ["ini_version"] = new(["config.ini"],
@@ -18,7 +19,7 @@ internal static class GameIdentificationRules
             ["ini_plugin_version"] = new(["config.ini"],
                 @"^[ \t]*plugin_(?<item>[^\s=]+)_version[ \t]*=[ \t]*(?<value>[^\r\n]*)", CanCompare: true)
         },
-        Information: new()
+        Results: new()
         {
             ["biz"] = new("IdentificationLabelGame", Required: true, Multiple: false,
                 Rules: [new(new(), Source: "ini_game_id")]),

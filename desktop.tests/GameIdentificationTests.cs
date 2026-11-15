@@ -134,7 +134,7 @@ public sealed class GameIdentificationTests
         var metadata = Assert.Single(session.Reference!.Sources).Metadata!;
         Assert.Equal(Assert.Single(identification.Information["biz"].Values).RawValue, metadata["biz"].Value);
         Assert.Equal("game", metadata["package"].Value);
-        Assert.Equal("原神", table.Rows[0].Cells["Game"].Value);
+        Assert.Equal("hk4e_cn", table.Rows[0].Cells["Game"].Value);
         Assert.Same(identification, session.Identification);
         Find<Button>(form, "Next").PerformClick();
         Find<Button>(form, "Execute").PerformClick();

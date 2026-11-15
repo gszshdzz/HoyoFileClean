@@ -11,8 +11,22 @@ public sealed class ManifestIdentifierTests
     private static FileListDocument Document(params string[] paths)
         => new(paths.Length, paths.Length, paths.Select(path => new ManifestFile(path, 1)).ToArray());
 
+    private sealed record ManifestIdentificationRule(string Target, string Match, string Id,
+        IReadOnlyDictionary<string, string> Results, bool Exact = false, bool IgnoreCase = false, bool Prefix = false);
+
     private static ManifestIdentifier Identifier(params ManifestIdentificationRule[] detections)
-        => new(detections);
+    {
+        // Compact fixture notation only; production accepts the common configuration directly.
+        var selectors = detections.GroupBy(rule => rule.Id).ToDictionary(group => group.Key,
+            group => group.Select(rule => new ManifestDetectionDefinition(rule.Target, rule.Match,
+                rule.Exact, rule.IgnoreCase, rule.Prefix)).ToArray());
+        var results = detections.SelectMany(rule => rule.Results.Select(pair => (rule.Id, pair.Key, pair.Value)))
+            .GroupBy(output => output.Key).ToDictionary(group => group.Key,
+                group => new IdentificationResultDefinition(RetainConflicts: true,
+                    Rules: group.Select(output => new IdentificationResultRule(new(),
+                        AnyDetection: [output.Id], RawValue: output.Value)).ToArray()));
+        return new ManifestIdentifier(new IdentificationConfiguration<ManifestDetectionDefinition[]>(selectors, results));
+    }
 
     private static ManifestIdentificationRule Rule(string target, string match, string id, string result,
         bool exact = false, bool ignoreCase = false, string field = "game")
@@ -72,7 +86,7 @@ public sealed class ManifestIdentifierTests
     [Fact]
     public void NestedArraysAndOtherStringFieldsCanBeConfiguredWithoutNewLogic()
     {
-        var identifier = new ManifestIdentifier(
+        var identifier = Identifier(
             [Rule("scan.excludedDirectories", "Cache", "scope", "excluded", field: "scope"), Rule("hashAlgorithm", "MD5", "hash", "md5", field: "algorithm")]);
         var result = identifier.Identify(Document("file") with
         {
@@ -106,7 +120,7 @@ public sealed class ManifestIdentifierTests
     [Fact]
     public void OneDetectionCanProduceDifferentMeaningsAndConflictsStayWithinTheirField()
     {
-        var identifier = new ManifestIdentifier(
+        var identifier = Identifier(
             [new("files.path", "YuanShen.exe", "exe", new Dictionary<string, string>
                 { ["game"] = "hk4e", ["package"] = "game" }),
              Rule("files.path", "Other.exe", "other", "other")]);
@@ -164,6 +178,7 @@ public sealed class ManifestIdentifierTests
         ManifestConverter.Convert(input, output);
         using var json = JsonDocument.Parse(File.ReadAllBytes(output));
         Assert.Equal("hk4e", json.RootElement.GetProperty("metadata").GetProperty("game").GetProperty("value").GetString());
+        Assert.False(json.RootElement.GetProperty("metadata").GetProperty("game").TryGetProperty("multiple", out _));
         Assert.Equal("hk4e_cn", json.RootElement.GetProperty("metadata").GetProperty("biz").GetProperty("value").GetString());
         FileListSnapshot read = ManifestConverter.Read(output, TestContext.Current.CancellationToken);
         Assert.Equal("hk4e", read.Sources[0].Metadata!["game"].Value);

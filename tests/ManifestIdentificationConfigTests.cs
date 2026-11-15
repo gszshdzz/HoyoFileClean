@@ -5,7 +5,7 @@ namespace HoyoFileClean.Tests;
 public sealed class ManifestIdentificationConfigTests
 {
     private static IReadOnlyDictionary<string, ManifestMetadataField> Identify(params string[] paths)
-        => ManifestIdentification.Identifier.Identify(new FileListDocument(paths.Length, paths.Length,
+        => new ManifestIdentifier(ManifestIdentificationRules.Create()).Identify(new FileListDocument(paths.Length, paths.Length,
             paths.Select(path => new ManifestFile(path, 1)).ToArray()), TestContext.Current.CancellationToken);
 
     [Theory]
@@ -106,5 +106,7 @@ public sealed class ManifestIdentificationConfigTests
     [Fact]
     public void ExactAndPrefixCannotBothBeEnabled()
         => Assert.Throws<ArgumentException>(() => new ManifestIdentifier(
-            [new("files.path", "x", "id", new Dictionary<string, string> { ["game"] = "x" }, Exact: true, Prefix: true)]));
+            new IdentificationConfiguration<ManifestDetectionDefinition[]>(
+                new() { ["id"] = [new("files.path", "x", Exact: true, Prefix: true)] },
+                new() { ["game"] = new(Rules: [new(new(), AnyDetection: ["id"], RawValue: "x")]) })));
 }

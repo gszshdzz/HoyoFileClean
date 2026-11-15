@@ -52,7 +52,7 @@ dotnet run --project desktop\HoyoFileClean.Desktop.csproj
 - `core/Models/`：官方 JSON 协议、网络结果及清单／报告／排除规则的数据定义；protobuf 仍在 `Protos/Sophon.proto`。
 - `config/Maintenance.cs`：编译前集中维护默认目录、大小限制、超时、连接节拍、线程数、刷新与缓冲参数，不是用户设置。
 - `config/NetworkServices.cs` 与 `config/GameIdentificationRules.cs`：独立的 C# 适配数据定义，维护者编辑后重新编译，不读取或发布旁置适配 JSON。识别的两层规则、扩展方法和验收见 [docs/game-identification.md](docs/game-identification.md)。
-- `config/ManifestIdentification.cs`：开发者维护离线 manifest 特征、规则 ID 及含义／结果映射，编译进程序，不输出独立配置文件。游戏与官方完整 biz 分开保存，规则和验收见 [docs/manifest-identification.md](docs/manifest-identification.md)。
+- `config/ManifestIdentificationRules.cs` 与 `config/GameIdentificationRules.cs`：统一使用 `Create()` 返回 `IdentificationConfiguration<TDetection>`，`Detections` 定义格式相关线索，`Results` 使用同一组条件／结果类型；两种读取器共用 `IdentificationEvaluator` 做映射、去重、证据归并和结果约束。配置不创建引擎，也不发布独立文件。manifest 游戏列有 `biz` 时显示 `biz`，否则显示 `game`，不替换为自定中文名。规则和验收见 [docs/manifest-identification.md](docs/manifest-identification.md)。
 - `presentation/Languages/zh-CN.json`：CLI／GUI 共用文案，直接按字符串 ID 调用，不维护手工 ID 枚举；默认语言在 `config/PresentationOptions.cs`。按当前界面语言加载已嵌入资源，缺少翻译时回退默认语言。只有中文翻译已提供，无语言切换控件；原始标识和路径不翻译，状态逻辑不比较文案。
 
 完整改动列表和统一验收步骤见 [docs/configuration-maintenance.md](docs/configuration-maintenance.md)。

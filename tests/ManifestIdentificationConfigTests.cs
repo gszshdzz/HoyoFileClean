@@ -20,6 +20,8 @@ public sealed class ManifestIdentificationConfigTests
         Assert.Equal(game, result.GetValueOrDefault("game")?.Value);
         Assert.Equal(biz, result.GetValueOrDefault("biz")?.Value);
         Assert.Equal("game", result["package"].Value);
+        Assert.Equal(path == "YuanShen.exe" ? "exe_hk4e_cn" : path == "GenshinImpact.exe"
+            ? "exe_hk4e_global" : "exe_" + game, Assert.Single(result["package"].Matches).Id);
         Assert.Equal(biz is null ? 2 : 3, result.Count);
         Assert.Empty(Identify("Backup/" + path));
         Assert.Empty(Identify(path + ".bak"));
@@ -105,8 +107,8 @@ public sealed class ManifestIdentificationConfigTests
 
     [Fact]
     public void ExactAndPrefixCannotBothBeEnabled()
-        => Assert.Throws<ArgumentException>(() => new ManifestIdentifier(
+        => Assert.Throws<CoreException>(() => new ManifestIdentifier(
             new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-                new() { ["id"] = [new("files.path", "x", Exact: true, Prefix: true)] },
-                new() { ["game"] = new(Rules: [new(new(), AnyDetection: ["id"], RawValue: "x")]) })));
+                new() { ["id"] = [new("files.path", "x", Exact: true, Prefix: true,
+                    Meanings: new() { ["game"] = new("x") })] })));
 }

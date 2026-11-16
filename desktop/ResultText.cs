@@ -13,11 +13,13 @@ internal static class ResultText
             L.Format("IdentifiedInformation", L.Get(info.LabelTextId), info.Values.Count == 0
                 ? L.Get("IdentificationNotDetected")
                 : string.Join(L.Get("ListSeparator"), info.Values.Select(DescribeValue)));
-        string[] primary = ["biz", "version", "channel"];
+        string identity = identification.Information.ContainsKey("biz") ? "biz" : "game";
+        string[] primary = [identity, "version"];
         string header = string.Join(L.Get("ListSeparator"), primary.Where(identification.Information.ContainsKey)
             .Select(id => Describe(identification.Information[id])));
         return string.Join(Environment.NewLine, new[] { header }.Where(value => value.Length > 0)
-            .Concat(identification.Information.Where(pair => !primary.Contains(pair.Key)).Select(pair => Describe(pair.Value))));
+            .Concat(identification.Information.Where(pair => !primary.Contains(pair.Key)
+                && pair.Key != "game").Select(pair => Describe(pair.Value))));
     }
 
     internal static string DescribeGameStatus(FileListSnapshot snapshot, bool imported)

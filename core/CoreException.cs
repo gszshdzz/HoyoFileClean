@@ -13,7 +13,8 @@ public enum CoreErrorCode
     ManifestNetworkMetadataInvalid, ManifestChannelUnavailable, ManifestDownloadMismatch,
     ManifestNetworkSizeLimit, ManifestNetworkUnsupported, ManifestVersionUnavailable, ManifestPackageUnavailable,
     NetworkConfigurationInvalid, ManifestGameAmbiguous,
-    GameIdentificationConfigurationInvalid, GameIdentificationFailed, GameDetectionInvalid, GameDetectionConflict
+    GameIdentificationConfigurationInvalid, GameIdentificationFailed, GameDetectionInvalid, GameDetectionConflict,
+    IdentificationConfigurationInvalid
 }
 
 // Diagnostic data only. Front ends own wording, localization and recovery advice.

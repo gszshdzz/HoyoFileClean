@@ -19,13 +19,9 @@ public sealed class ManifestIdentifierTests
         // Compact fixture notation only; production accepts the common configuration directly.
         var selectors = detections.GroupBy(rule => rule.Id).ToDictionary(group => group.Key,
             group => group.Select(rule => new ManifestDetectionDefinition(rule.Target, rule.Match,
-                rule.Exact, rule.IgnoreCase, rule.Prefix)).ToArray());
-        var results = detections.SelectMany(rule => rule.Results.Select(pair => (rule.Id, pair.Key, pair.Value)))
-            .GroupBy(output => output.Key).ToDictionary(group => group.Key,
-                group => new IdentificationResultDefinition(RetainConflicts: true,
-                    Rules: group.Select(output => new IdentificationResultRule(new(),
-                        AnyDetection: [output.Id], RawValue: output.Value)).ToArray()));
-        return new ManifestIdentifier(new IdentificationConfiguration<ManifestDetectionDefinition[]>(selectors, results));
+                rule.Exact, rule.IgnoreCase, rule.Prefix, rule.Results.ToDictionary(pair => pair.Key,
+                    pair => new IdentificationMeaning(pair.Value, RetainConflicts: true)))).ToArray());
+        return new ManifestIdentifier(new IdentificationConfiguration<ManifestDetectionDefinition[]>(selectors));
     }
 
     private static ManifestIdentificationRule Rule(string target, string match, string id, string result,
@@ -104,17 +100,22 @@ public sealed class ManifestIdentifierTests
     [InlineData("files..path")]
     [InlineData("")]
     public void InvalidOrNonStringTargetsAreRejected(string target)
-        => Assert.Throws<ArgumentException>(() => Identifier(Rule(target, "match", "id", "result")));
+        => Assert.Equal(CoreErrorCode.IdentificationConfigurationInvalid,
+            Assert.Throws<CoreException>(() => Identifier(Rule(target, "match", "id", "result"))).Code);
 
     [Fact]
     public void InvalidResultsAndInconsistentDefinitionsAreRejected()
     {
         ManifestIdentificationRule rule = Rule("files.path", "one", "id", "result");
-        Assert.Throws<ArgumentException>(() => Identifier(rule with { Results = new Dictionary<string, string>() }));
-        Assert.Throws<ArgumentException>(() => Identifier(rule with { Results = new Dictionary<string, string> { [""] = "value" } }));
-        Assert.Throws<ArgumentException>(() => Identifier(rule with { Results = new Dictionary<string, string> { ["game"] = "" } }));
-        Assert.Throws<ArgumentException>(() => Identifier(rule, rule with { Results = new Dictionary<string, string> { ["game"] = "other" } }));
-        Assert.Throws<ArgumentException>(() => Identifier(rule with { Match = "" }));
+        Assert.Throws<CoreException>(() => Identifier(rule with { Results = new Dictionary<string, string>() }));
+        Assert.Throws<CoreException>(() => Identifier(rule with { Results = new Dictionary<string, string> { [""] = "value" } }));
+        Assert.Throws<CoreException>(() => Identifier(rule with { Results = new Dictionary<string, string> { ["game"] = "" } }));
+        Assert.Throws<CoreException>(() => Identifier(rule, rule with { Results = new Dictionary<string, string> { ["game"] = "other" } }));
+        Assert.Throws<CoreException>(() => Identifier(rule with { Match = "" }));
+        Assert.Throws<CoreException>(() => Identifier(rule, rule with
+        {
+            Results = new Dictionary<string, string> { ["package"] = "game" }
+        }));
     }
 
     [Fact]

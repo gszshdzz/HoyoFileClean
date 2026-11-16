@@ -34,12 +34,12 @@ dotnet run --project desktop\HoyoFileClean.Desktop.csproj
 
 游戏读取完成时，底部简要提示实际模式、排除项数量及跳过链接／重解析点数量（不逐项铺开路径），明确这些范围未扫描；历史 JSON 的提示来自记录，不表示重新扫描。排除规则 JSON 在后台读取与校验，期间锁定输入，整份成功后才合并到两侧列表。排除列表接受多项同类拖入，目录批次中混入文件或文件批次中混入目录时整批拒绝，根目录范围校验失败同样不部分添加。
 
-1. **游戏读取**：顶部单选“扫描游戏／导入 JSON”，两种来源都须明确指定游戏目录。实际扫描先按开发配置识别游戏，失败即中止；成功后继续默认轻扫，可选择 MD5 重扫，结果暂显示在扫描按钮下方。识别与扫描支持“取消扫描”，取消不保留本次结果。排除目录与文件左右分列，单行输入或浏览后添加，在列表中多选移除。规则 JSON 使用 `excludedDirectories`、`excludedFiles` 数组，也可读取历史扫描 JSON 的 `scan` 中的同名字段；导入合并去重，失败不改变列表。路径输入框支持拖入单个相应类型的文件或目录。双进度条仅在扫描过程中显示，结束后隐藏，MD5 数字计数显示在底部。导入历史扫描不重新识别或扫描，仍校验记录根目录与指定目录一致，也不证明当前文件状态未变化。
+1. **游戏读取**：顶部单选“扫描游戏／导入 JSON”，两种来源都须明确指定游戏目录。实际扫描复用文件枚举结果识别游戏，识别失败不发布快照；默认轻扫即可得到识别结果，MD5 重扫只额外校验文件内容，不是识别前提。结果暂显示在扫描按钮下方。识别与扫描支持“取消扫描”，取消不保留本次结果。排除目录与文件左右分列，单行输入或浏览后添加，在列表中多选移除。规则 JSON 使用 `excludedDirectories`、`excludedFiles` 数组，也可读取历史扫描 JSON 的 `scan` 中的同名字段；导入合并去重，失败不改变列表。路径输入框支持拖入单个相应类型的文件或目录。双进度条仅在扫描过程中显示，结束后隐藏，MD5 数字计数显示在底部。导入历史扫描不重新识别或扫描，仍校验记录根目录与指定目录一致，也不证明当前文件状态未变化。
 2. **参考清单**：提供“网络获取／本地获取／手动输入”切换，默认网络获取，启动和切换不自动联网。三种方式使用相同的勾选表格；网络操作见下文。手动“添加清单”统一接受压缩 manifest、未压缩 manifest 和本项目清单 JSON，按内容自动识别；不再提供独立 JSON 跳过按钮。勾选后解析，JSON 同样经过共用安全校验，结果仅保留在内存。切换来源保留文件行与勾选，但清空三张表的解析状态和条目数，并使参考结果、比较和选择确认失效；仅当前来源的勾选项参与解析，不混合不同表。表头复选框显示全选／未选／部分选中，点击全选或清空；空表禁用。行高与表头高度不可拖动调整，列宽仍可调整。
 3. **确认与比较**：A 固定为游戏文件，B 固定为参考清单；核对两侧摘要后比较，结果仅保留在内存。“跳过”导入已有报告，要求两侧输入身份匹配，并用当前已载入清单重新计算、核对全部报告内容；不会根据报告中的路径打开其他输入。报告没有内容指纹，因此不能只核对路径或数量。输入已移动、反转或报告不匹配时，请重新比较。
 4. **差异与选择**：左侧游戏、右侧参考，目录可折叠，按三类差异或未扫描范围筛选；只有已扫描范围内的游戏侧文件可勾选。显示选择数量与总大小，任何选择变化都会取消确认；筛选隐藏的文件会被取消选择。未选文件或未确认时，“删除（演示）”禁用。点击后还需二次确认，结束提示明确没有删除或移动文件，列表保持不变。
 
-识别结果紧凑显示：首行为实际游戏 ID／版本／渠道，不额外显示游戏名称；插件按文件中的实际 ID 动态提取，不维护逐插件清单。扫描快照及带识别结果的核心 JSON 输出保存可选 `scan.gameDetections`；导入时仅用记录恢复识别显示，不访问源游戏文件，旧 JSON 无此字段仍可导入。游戏读取页不新增导出按钮，参考清单的逐条详情可导出 JSON。
+识别结果首行有 `biz` 显示 `biz`，否则显示游戏族 `game`，以及已知版本；插件和“发现的包体”另行显示，包体含本体 `game`、语音等规则确定的集合，不代表完整安装，未知不猜测。`channel`／`sub_channel` 仅记录原值，不映射“官服”或限制身份识别。扫描快照及核心 JSON 输出保存可选 `scan.gameDetections`；导入只用记录恢复显示，不访问源游戏文件，旧 JSON 仍兼容。游戏读取页不新增导出按钮。
 
 两类识别区分游戏族 `game`、完整官方标识 `biz`、资源包 `package` 和插件 `plugins`，不互相猜测或自动选包。扫描、离线解析与网络操作共用页内操作栏，取消位于同行最右侧，底部只保留跨页操作。合并审查与统一验收见 [docs/identification-merge-review.md](docs/identification-merge-review.md)。
 
@@ -51,8 +51,8 @@ dotnet run --project desktop\HoyoFileClean.Desktop.csproj
 
 - `core/Models/`：官方 JSON 协议、网络结果及清单／报告／排除规则的数据定义；protobuf 仍在 `Protos/Sophon.proto`。
 - `config/Maintenance.cs`：编译前集中维护默认目录、大小限制、超时、连接节拍、线程数、刷新与缓冲参数，不是用户设置。
-- `config/NetworkServices.cs` 与 `config/GameIdentificationRules.cs`：独立的 C# 适配数据定义，维护者编辑后重新编译，不读取或发布旁置适配 JSON。识别的两层规则、扩展方法和验收见 [docs/game-identification.md](docs/game-identification.md)。
-- `config/ManifestIdentificationRules.cs` 与 `config/GameIdentificationRules.cs`：统一使用 `Create()` 返回 `IdentificationConfiguration<TDetection>`，`Detections` 定义格式相关线索，`Results` 使用同一组条件／结果类型；两种读取器共用 `IdentificationEvaluator` 做映射、去重、证据归并和结果约束。配置不创建引擎，也不发布独立文件。manifest 游戏列有 `biz` 时显示 `biz`，否则显示 `game`，不替换为自定中文名。规则和验收见 [docs/manifest-identification.md](docs/manifest-identification.md)。
+- `config/NetworkServices.cs` 与 `config/GameIdentificationRules.cs`：独立的编译期 C# 数据定义，维护者编辑后重新编译，不读取或发布旁置适配 JSON。扩展和验收见 [docs/game-identification.md](docs/game-identification.md)。
+- 两份 `*IdentificationRules.cs` 使用 `Create()` 返回 `IdentificationConfiguration<TDetection>`，每条 `Detections` 自带 `Meanings`，没有顶层 `Results`；共用 `IdentificationEvaluator` 去重、归并证据和约束结果。两份配置独立，不按 ID 匹配；游戏参数为未来网络自动获取作准备，本轮不自动选包。manifest 有 `biz` 显示 `biz`，否则显示 `game`。详见 [docs/manifest-identification.md](docs/manifest-identification.md)。
 - `presentation/Languages/zh-CN.json`：CLI／GUI 共用文案，直接按字符串 ID 调用，不维护手工 ID 枚举；默认语言在 `config/PresentationOptions.cs`。按当前界面语言加载已嵌入资源，缺少翻译时回退默认语言。只有中文翻译已提供，无语言切换控件；原始标识和路径不翻译，状态逻辑不比较文案。
 
 完整改动列表和统一验收步骤见 [docs/configuration-maintenance.md](docs/configuration-maintenance.md)。

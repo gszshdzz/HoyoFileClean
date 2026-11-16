@@ -81,9 +81,9 @@ public sealed partial class MainForm
         scanProgressPanel.Visible = true;
         await RunWorkAsync(token =>
         {
-            GameIdentification identification = GameIdentifier.Identify(root, token);
             FileListSnapshot scan = DirectoryScanner.Scan(root, dirs, files, hashes,
-                value => ((IProgress<ScanProgress>)reporter).Report(value), token, identification);
+                value => ((IProgress<ScanProgress>)reporter).Report(value), token, identifyGame: true);
+            GameIdentification identification = GameIdentifier.FromDetections(scan.Sources[0].Scan!.GameDetections!);
             return (scan, identification);
         }, result =>
         {

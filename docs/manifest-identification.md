@@ -10,27 +10,24 @@
 internal static IdentificationConfiguration<ManifestDetectionDefinition[]> Create() => new(
     Detections: new()
     {
-        ["exe"] = [new("files.path", "YuanShen.exe", Exact: true)]
-    },
-    Results: new()
-    {
-        ["game"] = new(RetainConflicts: true,
-            Rules: [new(new(), AnyDetection: ["exe"], RawValue: "hk4e")]),
-        ["biz"] = new(RetainConflicts: true,
-            Rules: [new(new(), AnyDetection: ["exe"], RawValue: "hk4e_cn")]),
-        ["package"] = new(RetainConflicts: true,
-            Rules: [new(new(), AnyDetection: ["exe"], RawValue: "game")])
+        ["exe_hk4e_cn"] = [new("files.path", "YuanShen.exe", Exact: true,
+            Meanings: new()
+            {
+                ["game"] = new("hk4e", RetainConflicts: true),
+                ["biz"] = new("hk4e_cn", RetainConflicts: true),
+                ["package"] = new("game", RetainConflicts: true)
+            })]
     });
 ```
 
-- `Detections` 的键为内部线索 ID，值是字符串选择器数组，每项定义字段位置 `Target` 和特征 `Match`；同一 ID 下任一选择器命中即可。这里不维护业务结果。
-- `Results` 的键是含义，规则通过 `AnyDetection` 引用任一已命中线索、通过 `When` 要求多条线索的精确值条件、通过 `RawValue` 给出结果，或用 `Source` 取得线索原始值。一次命中可供多个含义引用，多个同值线索可合成一条映射；没有第二张重复的 ID／含义对照表。`game` 为游戏族，`biz` 为官方完整标识，未知区服不抹去已知游戏。
-- 共用模型位于 `core/Models/Identification.cs`。与游戏读取一样，格式读取器只提取线索，再交给 `IdentificationEvaluator` 做条件映射、值去重、证据归并、必要项及冲突约束；manifest 默认 `RetainConflicts: true`，游戏默认严格单值约束。提取格式不同不再意味着两套结果判定逻辑。
+- `Detections` 的键为线索 ID，值为选择器数组，每项定义 `Target`、`Match` 和内嵌 `Meanings`。同一 ID 任一选择器命中即可，所有选择器必须具有相同含义。
+- 不再有顶层 `Results`。每条规则用 `Meanings` 直接声明 `game`、`biz`、`package` 等结果，命中后取并集，同值去重。`game` 为游戏族，`biz` 为完整官方标识；未知区服不抹去已知游戏。
+- 两种读取器共用 `IdentificationMeaning` 和 `IdentificationEvaluator` 做去重、证据归并及约束，不建立跨配置 ID 匹配关系。manifest 默认保留冲突，游戏默认严格单值约束。
 - `Target` 使用本项目清单 JSON 的字段名，点号逐层访问，数组自动遍历，如 `files.path`、`files.hash`；不是磁盘路径或任意 JSONPath 表达式。目标必须是现有字符串字段；错误目标在初始化规则时拒绝。
 - 默认按大小写敏感的子串匹配。`Exact: true` 改为整个字段相等，`Prefix: true` 改为字段前缀匹配，两者不能同时启用；`IgnoreCase: true` 可与任一模式组合。正式规则以根执行文件精确匹配或带目录分隔符的前缀匹配，避免备份目录和相似文件名误命中。
-- 空字段、空结果、未知线索引用，以及同一线索对同一字段的矛盾无条件映射都会被拒绝。
-- `Source` 取得实际匹配字段值，不是命中占位符；同一线索有多个不同原值时都参与结果约束。只有引用 `Source` 或检查精确值的 `When` 才收集全部匹配值；纯存在性规则首命中即止，不保存所有命中路径。
-- manifest 元数据持久化原始字符串，结果仅使用 `RawValue` 或 `Source`；游戏结果使用的 `TextId`／`DisplayFormatTextId` 不是原始数据，在 manifest 初始化时明确拒绝，不能写出空元数据或混入翻译文字。
+- 空字段、空含义、同 ID 不一致含义或同字段不一致策略都会被拒绝，不支持跨检测项条件引用。
+- `FromDetection: true` 取得实际匹配字段值，收集全部不同原值；固定 `RawValue` 规则首命中即止，不保存全部路径。
+- manifest 元数据仅使用 `RawValue` 或 `FromDetection`；展示用 `TextId`／`DisplayFormatTextId` 在初始化时拒绝。
 
 正式配置保留此前两服官方样本交叉验证的 20 条检测：五种根执行文件，星铁／绝区零／崩坏 3 的三个专属目录，以及原神两种布局和星铁的四种语音目录。`game` 分别为 `hk4e/hkrpg/nap/bh3`；`biz` 独立对齐完整官方标识，原神可输出 `hk4e_cn/hk4e_global`，其他游戏区服未知时省略 `biz`。根执行文件输出 `package = game`，确定的原神／星铁语音包输出官方包名 `zh-cn/en-us/ja-jp/ko-kr`。保留 exe 与完整音频目录的证据，不恢复两条原神通用 Data 目录规则。多条同值证据不算冲突。
 
@@ -43,17 +40,17 @@ internal static IdentificationConfiguration<ManifestDetectionDefinition[]> Creat
 ```json
 "metadata": {
   "game": {
-    "matches": [{ "id": "game_hk4e", "value": "hk4e" }],
+    "matches": [{ "id": "exe_hk4e_cn", "value": "hk4e" }],
     "conflict": false,
     "value": "hk4e"
   },
   "biz": {
-    "matches": [{ "id": "game_hk4e", "value": "hk4e_cn" }],
+    "matches": [{ "id": "exe_hk4e_cn", "value": "hk4e_cn" }],
     "conflict": false,
     "value": "hk4e_cn"
   },
   "package": {
-    "matches": [{ "id": "game_hk4e", "value": "game" }],
+    "matches": [{ "id": "exe_hk4e_cn", "value": "game" }],
     "conflict": false,
     "value": "game"
   }

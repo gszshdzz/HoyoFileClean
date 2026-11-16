@@ -322,7 +322,7 @@ internal sealed class ManifestTable : DataGridView
         foreach (var (column, field) in new[] { ("Game", "game"), ("Version", "version"), ("Package", "package") })
         {
             ManifestMetadataField? result = field == "game"
-                ? metadata?.GetValueOrDefault("biz") ?? metadata?.GetValueOrDefault("game")
+                ? metadata?.GetValueOrDefault(ResultText.IdentityField(metadata))
                 : metadata?.GetValueOrDefault(field);
             bool attempted = Data(row).State is ReferenceState.Parsed or ReferenceState.Failed or ReferenceState.Cancelled;
             string? display = result?.Value;

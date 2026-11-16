@@ -259,13 +259,15 @@ public sealed class GameIdentifierTests
     }
 
     [Fact]
-    public void CandidateFileLinksAreRejectedWithoutReadingTheTarget()
+    public void CandidateFileLinksAreSkippedWithoutReadingTheTarget()
     {
         string outside = Write(Sample, "outside.ini");
         File.CreateSymbolicLink(Path.Combine(root, "config.ini"), outside);
+        Write("game", "YuanShen.exe");
         using var locked = new FileStream(outside, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        Assert.Equal(CoreErrorCode.ScanFileTypeChanged,
-            Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, TestContext.Current.CancellationToken)).Code);
+        var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+        Assert.False(result.Detections.ContainsKey("ini_game_id"));
     }
 
     [Theory]
@@ -512,6 +514,50 @@ public sealed class GameIdentifierTests
             result.Information["package"].Values.Select(value => value.RawValue).Order());
         var restored = GameIdentifier.FromDetections(result.Detections, configuration);
         Assert.Equal(result.Information["package"].Values, restored.Information["package"].Values);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExcludedIniDoesNotContributeIdentityOrVersionInEitherScanMode(bool hashes)
+    {
+        Write("uapc={\"other_game\":{}}\ngame_version=invalid");
+        Write("game", "YuanShen.exe");
+        var scan = DirectoryScanner.Scan(root, excludedFiles: ["config.ini"], computeHashes: hashes,
+            cancellationToken: TestContext.Current.CancellationToken, identifyGame: true);
+        var result = GameIdentifier.FromDetections(scan.Sources[0].Scan!.GameDetections!);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+        Assert.False(result.Information.ContainsKey("version"));
+        Assert.False(result.Detections.ContainsKey("ini_game_id"));
+        Assert.Single(scan.Files);
+    }
+
+    [Fact]
+    public void TextCandidatesInExcludedSubdirectoriesAreNotOpened()
+    {
+        Write("game", "YuanShen.exe");
+        Directory.CreateDirectory(Path.Combine(root, "Excluded"));
+        string candidate = Write("game_version=invalid", "Excluded/config.ini");
+        var configuration = GameIdentifier.LoadConfiguration();
+        configuration.Detections["ini_version"] = configuration.Detections["ini_version"] with { Paths = ["Excluded/config.ini"] };
+        var scan = DirectoryScanner.Scan(root, excludedDirectories: ["Excluded"], cancellationToken: TestContext.Current.CancellationToken);
+        using var locked = new FileStream(candidate, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken, scan.Files.Keys);
+        Assert.False(result.Information.ContainsKey("version"));
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+    }
+
+    [Fact]
+    public void TextCandidatesUnderSkippedDirectoryLinksDoNotContributeEvidence()
+    {
+        Write("game", "YuanShen.exe");
+        Directory.CreateSymbolicLink(Path.Combine(root, "Linked"), root);
+        var configuration = GameIdentifier.LoadConfiguration();
+        configuration.Detections["ini_version"] = configuration.Detections["ini_version"] with { Paths = ["Linked/config.ini"] };
+        var scan = DirectoryScanner.Scan(root, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Contains("Linked", scan.Sources[0].Scan!.SkippedLinks);
+        Assert.False(GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken,
+            scan.Files.Keys).Information.ContainsKey("version"));
     }
 
     [Fact]

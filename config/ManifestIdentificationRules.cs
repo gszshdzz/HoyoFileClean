@@ -35,7 +35,7 @@ internal static class ManifestIdentificationRules
     {
         var meanings = new Dictionary<string, IdentificationMeaning> { ["game"] = new(game, RetainConflicts: true) };
         if (biz is not null) meanings["biz"] = new(biz, RetainConflicts: true);
-        if (package is not null) meanings["package"] = new(package, RetainConflicts: true);
+        if (package is not null) meanings["package"] = new(package, Multiple: true);
         return meanings;
     }
 }

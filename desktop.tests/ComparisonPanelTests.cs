@@ -132,6 +132,90 @@ public sealed class ComparisonPanelTests
         return session;
     }
 
+    [Fact]
+    public void GameOnlyIdentityUsesTheSameFallbackAsFirstStep() => OnSta(() =>
+    {
+        var session = Session(false);
+        var identification = GameIdentifier.FromDetections(new Dictionary<string, string> { ["exe_hkrpg"] = "StarRail.exe" });
+        session.AcceptGame(session.Game!, directory, identification);
+        using var panel = new ComparisonPanel();
+        panel.Render(session);
+        Assert.Equal("hkrpg", Find<Label>(panel, "ComparisonGameGame").Text);
+        Assert.Contains("hkrpg", ResultText.DescribeIdentification(identification));
+    });
+
+    [Fact]
+    public void PackagesInOneManifestRemainALegalSet() => OnSta(() =>
+    {
+        var session = Session(false);
+        session.AcceptReference(Write("combined-packages", [new("YuanShen.exe", 3),
+            new("YuanShen_Data/StreamingAssets/AudioAssets/Chinese/voice", 1)], false));
+        using var panel = new ComparisonPanel();
+        panel.Render(session);
+        Assert.Equal("game; zh-cn", Find<Label>(panel, "ComparisonReferenceLocation").Text);
+    });
+
+    [Fact]
+    public void ManifestTableDisplaysTheSameLegalPackageSetAsComparison() => OnSta(() =>
+    {
+        var snapshot = Write("table-packages", [new("YuanShen.exe", 3),
+            new("YuanShen_Data/StreamingAssets/AudioAssets/Chinese/voice", 1)], false);
+        string path = Path.Combine(directory, "table-packages.json");
+        using var table = new ManifestTable("test");
+        table.AddFiles([new LocalManifestFile(path, "table-packages.json", 1, default)], check: true);
+        var inputs = table.CheckedInputs;
+        Assert.Single(inputs);
+        table.ShowResults(inputs.Select(input => (input, ReferenceState.Parsed, (int?)2)));
+        table.ShowMetadata(inputs.Select(input => (input, snapshot.Sources[0].Metadata)));
+        string text = Assert.IsType<string>(table.Rows[0].Cells["Package"].Value);
+        Assert.Contains("game", text);
+        Assert.Contains("zh-cn", text);
+        Assert.DoesNotContain("冲突", text);
+        Assert.Equal("hk4e_cn", table.Rows[0].Cells["Game"].Value);
+    });
+
+    [Fact]
+    public void DifferentSourceIdentitiesAreSummarizedWithoutInventingConflicts() => OnSta(() =>
+    {
+        var session = Session(false);
+        session.AcceptReference(FileComparer.Combine([
+            Write("cn", [new("YuanShen.exe", 1)], false),
+            Write("global", [new("GenshinImpact.exe", 1)], false)]));
+        using var panel = new ComparisonPanel();
+        panel.Render(session);
+        Assert.Equal("hk4e_cn; hk4e_global", Find<Label>(panel, "ComparisonReferenceGame").Text);
+    });
+
+    [Fact]
+    public void ActualIdentityConflictInOneSourceIsNotHiddenByGameFallback() => OnSta(() =>
+    {
+        var session = Session(false);
+        session.AcceptReference(Write("conflicting-identity", [new("YuanShen.exe", 1), new("GenshinImpact.exe", 1)], false));
+        using var panel = new ComparisonPanel();
+        panel.Render(session);
+        Assert.Contains("冲突", Find<Label>(panel, "ComparisonReferenceGame").Text);
+        Assert.Contains("hk4e_cn", Find<Label>(panel, "ComparisonReferenceGame").Text);
+        Assert.Contains("hk4e_global", Find<Label>(panel, "ComparisonReferenceGame").Text);
+    });
+
+    [Fact]
+    public void SameSnapshotsRefreshChangedMetadataAndIdentificationAndKeepLiteralAmpersands() => OnSta(() =>
+    {
+        var session = Session(false);
+        using var panel = new ComparisonPanel();
+        var metadata = new Dictionary<string, ManifestMetadataField> { ["biz"] = new([new("network", "first&game")]) };
+        panel.Render(session, [metadata]);
+        Assert.Equal("first&game", Find<Label>(panel, "ComparisonReferenceGame").Text);
+        metadata["biz"] = new([new("network", "second&game")]);
+        session.AcceptGame(session.Game!, directory, GameIdentifier.FromDetections(
+            new Dictionary<string, string> { ["exe_hkrpg"] = "StarRail.exe" }));
+        panel.Render(session, [metadata]);
+        Assert.Equal("second&game", Find<Label>(panel, "ComparisonReferenceGame").Text);
+        Assert.Equal("hkrpg", Find<Label>(panel, "ComparisonGameGame").Text);
+        foreach (string name in new[] { "ComparisonReferenceGame", "ComparisonGameLocation", "ComparisonGameExcludedDirectories" })
+            Assert.False(Find<Label>(panel, name).UseMnemonic);
+    });
+
     private FileListSnapshot Write(string name, ManifestFile[] files, bool scan)
     {
         Directory.CreateDirectory(directory);

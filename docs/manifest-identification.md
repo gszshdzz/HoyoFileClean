@@ -15,7 +15,7 @@ internal static IdentificationConfiguration<ManifestDetectionDefinition[]> Creat
             {
                 ["game"] = new("hk4e", RetainConflicts: true),
                 ["biz"] = new("hk4e_cn", RetainConflicts: true),
-                ["package"] = new("game", RetainConflicts: true)
+                ["package"] = new("game", Multiple: true)
             })]
     });
 ```
@@ -51,6 +51,7 @@ internal static IdentificationConfiguration<ManifestDetectionDefinition[]> Creat
   },
   "package": {
     "matches": [{ "id": "exe_hk4e_cn", "value": "game" }],
+    "multiple": true,
     "conflict": false,
     "value": "game"
   }
@@ -59,7 +60,7 @@ internal static IdentificationConfiguration<ManifestDetectionDefinition[]> Creat
 
 一个字段命中不同结果值时，`conflict` 为 `true`，保留全部 `matches` 并省略单值 `value`。多个 ID 得出同一值表示证据相互印证，不算冲突；同一 ID 在多个文件或多条规则中重复命中只记一次。候选按 ID 稳定排序，不按顺序选择冲突结果。冲突作为识别结果保留，不使已经校验有效的文件清单失效；原有同侧文件内容矛盾仍阻止合并。
 
-正式 manifest 规则按单值加冲突保留处理。开发者显式配置 `Multiple: true` 时，多值是合法集合而非冲突，输出元数据记录 `multiple: true`，保留全部证据、没有伪造的单值 `value`；未启用时不增加该字段。冲突判断复用共用策略，不在 manifest 层重新改判。
+正式 manifest 的身份字段按单值加冲突保留处理，`package` 与游戏识别统一为 `Multiple: true` 合法集合，本体与语音同时存在不算冲突。多值输出元数据记录 `multiple: true`，保留全部证据、没有伪造的单值 `value`；未启用时不增加该字段。冲突判断复用共用策略，不在 manifest 层重新改判；比较摘要汇总不同来源的值，不把跨来源差异重新判为冲突。
 
 压缩、未压缩 manifest 与本项目清单 JSON 使用同一识别流程。导入 JSON 时从有效条目重新计算，不信任其已保存的 `metadata`；不同来源的识别结果各自保留，不把多份清单的游戏字段混在一起判断冲突。识别不打开清单列出的游戏文件，不保留完整 JSON 副本。
 

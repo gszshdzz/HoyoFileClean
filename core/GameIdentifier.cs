@@ -25,6 +25,7 @@ public static class GameIdentifier
         string root = DirectoryScanner.NormalizeRootPath(rootPath);
         DirectoryScanner.ValidateDirectoryPath(root);
         string[] paths = (scannedPaths ?? DirectoryScanner.Scan(root, cancellationToken: cancellationToken).Files.Keys).ToArray();
+        var availablePaths = new HashSet<string>(paths, StringComparer.Ordinal);
         var texts = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var detections = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string id, GameDetectionDefinition definition) in configuration.Detections)
@@ -49,7 +50,9 @@ public static class GameIdentifier
             foreach (string relative in definition.Paths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string path = Path.Combine(root, NormalizeCandidatePath(relative));
+                string candidate = NormalizeCandidatePath(relative);
+                if (!availablePaths.Contains(candidate)) continue;
+                string path = Path.Combine(root, candidate);
                 if (!texts.TryGetValue(path, out string? text))
                 {
                     text = ReadText(path, cancellationToken);

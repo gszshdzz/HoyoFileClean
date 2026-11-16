@@ -75,7 +75,9 @@ public sealed class ManifestIdentificationConfigTests
         Assert.Equal("game", mixed["package"].Value);
         var mixedPackages = Identify("YuanShen.exe", "YuanShen_Data/StreamingAssets/AudioAssets/Chinese/file.pck");
         Assert.False(mixedPackages["game"].Conflict);
-        Assert.True(mixedPackages["package"].Conflict);
+        Assert.False(mixedPackages["package"].Conflict);
+        Assert.True(mixedPackages["package"].Multiple);
+        Assert.Equal(new[] { "game", "zh-cn" }, mixedPackages["package"].Matches.Select(match => match.Value).Order());
         Assert.Null(mixedPackages["package"].Value);
     }
 

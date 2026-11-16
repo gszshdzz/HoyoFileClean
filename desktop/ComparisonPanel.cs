@@ -4,10 +4,6 @@ internal sealed class ComparisonPanel : UserControl
 {
     private readonly Dictionary<string, Label> values = [];
     private readonly ToolTip tips = new();
-    private FileListSnapshot? displayedGame;
-    private FileListSnapshot? displayedReference;
-    private ComparisonResult? displayedComparison;
-    private bool rendered;
 
     internal ComparisonPanel()
     {
@@ -30,7 +26,7 @@ internal sealed class ComparisonPanel : UserControl
             scope.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             scope.Controls.Add(new Label { Text = text, AutoSize = true, Dock = DockStyle.Top,
                 Margin = new Padding(3, 6, 3, 3) }, 0, scope.RowCount++);
-            var value = new Label { Name = "ComparisonGame" + field, AutoSize = true, Dock = DockStyle.Top,
+            var value = new Label { Name = "ComparisonGame" + field, AutoSize = true, Dock = DockStyle.Top, UseMnemonic = false,
                 Margin = new Padding(3, 3, 9, 3) };
             scope.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             scope.Controls.Add(value, 0, scope.RowCount++);
@@ -81,22 +77,15 @@ internal sealed class ComparisonPanel : UserControl
 
     internal void Render(WizardSession session, IReadOnlyList<IReadOnlyDictionary<string, ManifestMetadataField>>? referenceMetadata = null)
     {
-        if (rendered && ReferenceEquals(displayedGame, session.Game)
-            && ReferenceEquals(displayedReference, session.Reference)
-            && ReferenceEquals(displayedComparison, session.Comparison)) return;
-        rendered = true;
-        displayedGame = session.Game;
-        displayedReference = session.Reference;
-        displayedComparison = session.Comparison;
         ShowInput("Game", session.Game);
         ShowInput("Reference", session.Reference);
-        Set("GameGame", Identification(session.Identification, "biz"));
+        Set("GameGame", Identification(session.Identification, ResultText.IdentityField(session.Identification?.Information)));
         Set("GameVersion", Identification(session.Identification, "version"));
         var metadata = referenceMetadata is { Count: > 0 } && session.Reference is not null ? referenceMetadata
             : session.Reference?.Sources.Select(source => source.Metadata).OfType<IReadOnlyDictionary<string, ManifestMetadataField>>().ToArray() ?? [];
-        Set("ReferenceGame", Metadata(metadata, "biz", "game"));
+        Set("ReferenceGame", Metadata(metadata, "game"));
         Set("ReferenceVersion", Metadata(metadata, "version"));
-        Set("ReferenceLocation", Metadata(metadata, "package", multiple: true));
+        Set("ReferenceLocation", Metadata(metadata, "package"));
         ScanScope? scan = session.Game?.Sources[0].Scan;
         Set("GameLocation", scan?.Root ?? L.Get("UnavailableValue"));
         Set("GameExcludedDirectories", Paths(scan?.ExcludedDirectories));
@@ -136,7 +125,7 @@ internal sealed class ComparisonPanel : UserControl
 
     private static Label Value(string name)
     {
-        var label = new Label { Name = name, Dock = DockStyle.Fill, AutoEllipsis = true,
+        var label = new Label { Name = name, Dock = DockStyle.Fill, AutoEllipsis = true, UseMnemonic = false,
             TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(3, 3, 9, 3) };
         void UpdateHeight()
         {
@@ -167,13 +156,13 @@ internal sealed class ComparisonPanel : UserControl
         => Join(identification?.Information.GetValueOrDefault(field)?.Values.Select(value => value.RawValue)
             .OfType<string>() ?? []);
 
-    private static string Metadata(IEnumerable<IReadOnlyDictionary<string, ManifestMetadataField>> metadata, string field, string? fallback = null, bool multiple = false)
+    private static string Metadata(IEnumerable<IReadOnlyDictionary<string, ManifestMetadataField>> metadata, string field)
     {
-        ManifestMetadataField[] fields = metadata.Select(source => source.GetValueOrDefault(field)
-            ?? (fallback is null ? null : source.GetValueOrDefault(fallback))).OfType<ManifestMetadataField>().ToArray();
+        ManifestMetadataField[] fields = metadata.Select(source => source.GetValueOrDefault(
+            field == "game" ? ResultText.IdentityField(source) : field)).OfType<ManifestMetadataField>().ToArray();
         string[] candidates = fields.SelectMany(item => item.Matches).Select(item => item.Value).Distinct(StringComparer.Ordinal).ToArray();
         string text = Join(candidates);
-        return fields.Any(item => item.Conflict) || !multiple && candidates.Length > 1
+        return fields.Any(item => item.Conflict)
             ? L.Format("ComparisonMetadataConflict", text) : text;
     }
 

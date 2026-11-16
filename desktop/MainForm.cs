@@ -7,7 +7,6 @@ public sealed partial class MainForm : Form
     private readonly Label[] steps = new Label[4];
     private readonly Panel[] pages;
     private readonly Button back = MakeButton(L.Get("Button_Back"), "Back");
-    private readonly Button skip = MakeButton(L.Get("Button_Import"), "Import");
     private readonly Button execute = MakeButton(L.Get("Button_Execute"), "Execute");
     private readonly Button next = MakeButton(L.Get("Button_Next"), "Next");
     private readonly Button close = MakeButton(L.Get("Button_CloseWizard"), "CloseWizard");
@@ -31,10 +30,8 @@ public sealed partial class MainForm : Form
     private Panel manualReferencePage = null!;
     private readonly TextBox gameRoot = new() { Name = "GameRoot", Width = 570 };
     private readonly CheckBox heavy = new() { Text = L.Get("HeavyScanHint"), AutoSize = true, Name = "HeavyScan" };
-    private readonly TextBox comparisonResult = OutputBox("ComparisonResult");
+    private readonly ComparisonPanel comparisonResult = new();
     private readonly DifferencePanel differences;
-    private string scanOrigin = "";
-    private string reportOrigin = "";
 
     public MainForm() : this(new WizardSession()) { }
 
@@ -76,7 +73,7 @@ public sealed partial class MainForm : Form
         }
         foreach (Panel page in pages) content.Controls.Add(page);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
-        buttons.Controls.AddRange([back, skip, execute, next, close]);
+        buttons.Controls.AddRange([back, next, close]);
         layout.Controls.Add(flow, 0, 0);
         layout.Controls.Add(content, 0, 1);
         layout.Controls.Add(status, 0, 2);
@@ -84,7 +81,6 @@ public sealed partial class MainForm : Form
         Controls.Add(layout);
         back.Click += (_, _) => { session.Back(); RefreshView(); };
         next.Click += (_, _) => { session.Next(); RefreshView(); if (session.Step == 3) differences.Render(); };
-        skip.Click += async (_, _) => await ImportReportAsync();
         execute.Click += async (_, _) => await ExecuteAsync();
         close.Click += (_, _) => Close();
         cancelParsing.Click += (_, _) =>
@@ -169,7 +165,7 @@ public sealed partial class MainForm : Form
     {
         var input = Vertical();
         input.Controls.Add(Note(L.Get("ComparisonInputHint")));
-        input.Controls.Add(Note(L.Get("ImportReportHint")));
+        input.Controls.Add(Buttons(execute));
         return WithPageProgress(Page(input, comparisonResult), comparisonProgress);
     }
 
@@ -194,7 +190,6 @@ public sealed partial class MainForm : Form
     private void ReferenceChanged()
     {
         session.InvalidateReference();
-        reportOrigin = "";
         if (session.Step == 1) status.Text = networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
         differences.Render();
         RefreshView();
@@ -203,7 +198,6 @@ public sealed partial class MainForm : Form
     private void GameChanged()
     {
         session.InvalidateGame();
-        scanOrigin = reportOrigin = "";
         ResetScanProgress();
         if (session.Step == 0) status.Text = L.Get("GameInputChanged");
         differences.Render();
@@ -231,10 +225,7 @@ public sealed partial class MainForm : Form
             steps[i].Text = (i == session.Step ? L.Get("CurrentStepPrefix") : "") + StepTitles()[i];
         }
         back.Enabled = !session.IsBusy && session.Step > 0;
-        skip.Visible = session.Step == 2;
-        execute.Visible = session.Step == 2;
         next.Visible = session.Step < 3;
-        skip.Enabled = execute.Enabled = !session.IsBusy;
         ShowReferencePage(networkSource.Checked ? networkReferencePage : localSource.Checked ? localReferencePage : manualReferencePage);
         queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
         getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedItem is not null;
@@ -242,7 +233,7 @@ public sealed partial class MainForm : Form
         networkVersion.Enabled = !session.IsBusy && customNetworkVersion.Checked;
         parseManualReference.Enabled = !session.IsBusy && manualSource.Checked && manifests.CheckedInputs.Length > 0;
         parseLocalReference.Enabled = !session.IsBusy && localSource.Checked && localManifests.CheckedInputs.Length > 0;
-        if (session.Step == 2) skip.Enabled = execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
+        execute.Enabled = !session.IsBusy && session.Game is not null && session.Reference is not null;
         next.Enabled = session.CanAdvance;
         close.Enabled = !session.IsBusy || session.Operation == DesktopOperation.Network;
         TableLayoutPanel parsingActions = localSource.Checked ? localReferenceActions : manualReferenceActions;
@@ -262,9 +253,7 @@ public sealed partial class MainForm : Form
             : L.Get("IdentificationMissing");
         referenceResult.Text = session.Reference is { } reference
             ? L.Format("ReferenceSummary", reference.FileCount, reference.TotalSize) : L.Get("ReferenceResultMissing");
-        comparisonResult.Text = L.Get("GameSideHeading") + scanOrigin + ResultText.Describe(session.Game, L.Get("GameScanTitle"))
-            + L.Get("ReferenceSideHeading") + ResultText.Describe(session.Reference, L.Get("ReferenceListTitle"))
-            + L.Get("ComparisonResultHeading") + reportOrigin + ResultText.Describe(session.Comparison);
+        comparisonResult.Render(session, networkSource.Checked ? networkManifests.CheckedNetworkMetadata : null);
     }
 
     private void ShowReferencePage(Panel target)
@@ -296,7 +285,6 @@ public sealed partial class MainForm : Form
         L.Get("StepComparison"), L.Get("StepDifferences")];
     private static Label Note(string text)
         => new() { Text = text, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 5) };
-    private static TextBox OutputBox(string name) => new() { Name = name, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     private static TableLayoutPanel Vertical()
     {
         var panel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,

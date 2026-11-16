@@ -72,7 +72,6 @@ public sealed partial class MainForm
         string directory = localManifestDirectory.Text.Trim();
         localManifests.Rows.Clear();
         session.InvalidateReference();
-        reportOrigin = "";
         await RunWorkAsync(() =>
         {
             if (!Path.IsPathFullyQualified(directory)) throw new ArgumentException(L.Get("ManifestDirectoryRequired"));

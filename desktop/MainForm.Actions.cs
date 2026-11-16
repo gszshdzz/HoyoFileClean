@@ -25,7 +25,6 @@ public sealed partial class MainForm
         ReferenceInput[] inputs = table.CheckedInputs;
         if (inputs.Length == 0) { status.Text = L.Get("SelectFilesToParse"); return; }
         session.InvalidateReference();
-        reportOrigin = "";
         differences.Render();
         RefreshView();
         table.ShowResults(inputs.Select(input => (input, ReferenceState.Pending, (int?)null)));
@@ -75,7 +74,6 @@ public sealed partial class MainForm
         });
         session.InvalidateGame();
         RefreshView();
-        scanOrigin = reportOrigin = "";
         ResetScanProgress();
         scanFileProgress.Style = scanByteProgress.Style = ProgressBarStyle.Marquee;
         scanProgressPanel.Visible = true;
@@ -89,7 +87,6 @@ public sealed partial class MainForm
         {
             session.AcceptGame(result.scan, root, result.identification);
             ShowScanProgress(new ScanProgress(result.scan.FileCount, result.scan.FileCount, result.scan.TotalSize, result.scan.TotalSize));
-            scanOrigin = L.Get("ActualScanOrigin");
         }, L.Get("IdentifyingBeforeScan"), DesktopOperation.Scan, onFinished: () =>
         {
             scanGeneration++;
@@ -113,7 +110,6 @@ public sealed partial class MainForm
         if (!Path.IsPathFullyQualified(root)) { status.Text = L.Get("HistoricalRootRequired"); return; }
         if (path.Length == 0) { status.Text = L.Get("HistoricalJsonRequired"); return; }
         session.InvalidateGame();
-        scanOrigin = reportOrigin = "";
         ResetScanProgress();
         await RunWorkAsync(() =>
         {
@@ -123,7 +119,6 @@ public sealed partial class MainForm
         }, result =>
         {
             session.AcceptGame(result, root);
-            scanOrigin = L.Get("HistoricalScanOrigin");
         }, L.Get("HistoricalScanValidating"));
     }
 
@@ -131,32 +126,10 @@ public sealed partial class MainForm
     {
         if (session.Game is not { } game || session.Reference is not { } reference) return;
         session.InvalidateComparison();
-        reportOrigin = "";
         await RunWorkAsync(() => FileComparer.Compare(game, reference), result =>
         {
             session.AcceptComparison(result);
-            reportOrigin = L.Get("MemoryComparisonOrigin");
         }, L.Get("ComparisonRunning"));
-    }
-
-    private async Task ImportReportAsync()
-    {
-        if (session.IsBusy || session.Step != 2 || session.Game is not { } game || session.Reference is not { } reference) return;
-        using var dialog = new OpenFileDialog
-        {
-            Title = L.Get("ImportReportDialogTitle"),
-            Filter = L.Get("JsonFileFilter"),
-            Multiselect = false
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        string path = dialog.FileName;
-        session.InvalidateComparison();
-        reportOrigin = "";
-        await RunWorkAsync(() => FileComparer.ImportReport(path, game, reference), result =>
-        {
-            session.AcceptComparison(result);
-            reportOrigin = L.Get("ImportedReportOrigin") + path + "\r\n";
-        }, L.Get("ReportValidating"));
     }
 
     private Task RunWorkAsync<T>(Func<T> work, Action<T> apply, string message,

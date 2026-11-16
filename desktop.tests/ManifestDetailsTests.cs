@@ -8,6 +8,41 @@ namespace HoyoFileClean.Desktop.Tests;
 public sealed class ManifestDetailsTests
 {
     [Theory]
+    [InlineData(1000)]
+    [InlineData(100000)]
+    public void LargeDetailsResizeKeepsPaintingAndLayoutWorkBounded(int count) => NativeTestHost.OnSta(() =>
+    {
+        var sample = Sample();
+        string path = Path.Combine(sample.Directory, "large.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            fileCount = count, totalSize = count,
+            files = Enumerable.Range(0, count).Select(index => new { path = $"file-{index:D6}", size = 1 }).ToArray()
+        }));
+        var snapshot = ManifestConverter.Read(path, TestContext.Current.CancellationToken);
+        using var dialog = new ManifestDetailsForm(sample.Input, snapshot, "游戏: hk4e_cn      版本: 7.2.0      包体: game      包类型: 发行版")
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        dialog.Show();
+        var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
+        int layouts = 0, values = 0;
+        grid.Layout += (_, _) => layouts++;
+        grid.CellValueNeeded += (_, _) => values++;
+        using var bitmap = new Bitmap(1100, 800);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 30; i++)
+        {
+            dialog.ClientSize = new Size(900 + i % 2 * 20, 640 + i % 2 * 20);
+            grid.DrawToBitmap(bitmap, grid.ClientRectangle);
+        }
+        string measurement = $"details rows={count}; resize: {watch.ElapsedMilliseconds}ms, layouts={layouts}, values={values}";
+        Console.WriteLine(measurement);
+        Assert.True(layouts <= 30 * 10, measurement);
+        Assert.InRange(values, 1, 30 * grid.Columns.Count * (grid.Height / grid.RowTemplate.Height + 2) * 4);
+        Assert.True((bool)typeof(Control).GetProperty("DoubleBuffered",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(grid)!, measurement);
+    });
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void ParsingCancelLivesAtRightOfCurrentPageActionsNotBottomNavigation(bool local) => NativeTestHost.OnSta(() =>

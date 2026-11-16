@@ -23,6 +23,7 @@ public sealed class RemoteGameVersion
 public sealed record RemoteManifest(string MatchingField, string Category, Uri Url,
     long DownloadSize, long DecodedSize, string Md5, bool Compressed)
 {
+    public string? Branch { get; init; }
     private Uri? officialUrl;
     internal bool HasOfficialSource => officialUrl == Url;
     internal RemoteManifest FromOfficialResponse() => this with { officialUrl = Url };

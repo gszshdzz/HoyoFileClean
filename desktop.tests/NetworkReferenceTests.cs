@@ -519,9 +519,9 @@ public sealed class NetworkReferenceTests
         foreach (string name in new[] { "NetworkManifests", "LocalManifests", "Manifests" })
         {
             var columns = Find<ManifestTable>(form, name).Columns;
-            Assert.Equal(new[] { "Checked", "Name", "Modified", "Size", "State", "Game", "Version", "Package", "Entries" },
+            Assert.Equal(new[] { "Checked", "Name", "Modified", "Size", "State", "Game", "Version", "Package", "Entries", "Branch" },
                 columns.Cast<DataGridViewColumn>().Select(column => column.Name));
-            Assert.Equal(new float[] { 8, 7, 3, 3, 3, 2, 4, 3 },
+            Assert.Equal(new float[] { 8, 7, 3, 3, 3, 2, 4, 3, 3 },
                 columns.Cast<DataGridViewColumn>().Skip(1).Select(column => column.FillWeight));
         }
     });

@@ -325,6 +325,7 @@ public sealed class NetworkManifestTests
         Assert.Equal("1.0.0", catalog.Version);
         Assert.Equal("build", catalog.BuildId);
         Assert.Equal(new[] { "game", "zh-cn" }, catalog.Manifests.Select(m => m.MatchingField));
+        Assert.All(catalog.Manifests, manifest => Assert.Equal("main", manifest.Branch));
         Assert.Equal(2, requests);
     }
 
@@ -333,6 +334,19 @@ public sealed class NetworkManifestTests
         {"matching_field":"game","category_name":"本体","manifest":{"id":"manifest","checksum":"900150983cd24fb0d6963f7d28e17f72","compressed_size":"10","uncompressed_size":"20"},"manifest_download":{"url_prefix":"https://autopatchcn.yuanshen.com/test","url_suffix":"","compression":1,"encryption":0}},
         {"matching_field":"zh-cn","category_name":"中文","manifest":{"id":"voice","checksum":"900150983cd24fb0d6963f7d28e17f72","compressed_size":10,"uncompressed_size":20},"manifest_download":{"url_prefix":"https://autopatchcn.yuanshen.com/test","url_suffix":"","compression":1,"encryption":0}}]}}
         """;
+
+    [Theory]
+    [InlineData("main")]
+    [InlineData("predownload")]
+    public async Task CatalogUsesBranchFromOfficialBuildResponse(string branch)
+    {
+        using HttpClient http = Client(request => request.RequestUri!.AbsolutePath.EndsWith("getGameBranches")
+            ? Json("""{"retcode":0,"data":{"game_branches":[{"game":{"biz":"hk4e_cn"},"main":{"branch":"main","password":"p","package_id":"pkg","tag":"1.0.0"}}]}}""")
+            : Json(CatalogJson().Replace("\"build_id\":\"build\"", "\"build_id\":\"build\",\"branch\":\"" + branch + "\"")));
+        var service = NetworkManifestClient.Services.Single(item => item.Id == "china");
+        var catalog = await new NetworkManifestClient(http).GetCatalogAsync(service, "hk4e_cn", TestContext.Current.CancellationToken);
+        Assert.All(catalog.Manifests, manifest => Assert.Equal(branch, manifest.Branch));
+    }
 
     [Fact]
     public async Task DiscoverVersionsThenBuildUsesOnlyOneRequestPerStage()

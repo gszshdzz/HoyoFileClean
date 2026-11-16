@@ -6,6 +6,35 @@ namespace HoyoFileClean.Desktop.Tests;
 [Collection("Windows Forms")]
 public sealed class ManifestTableTests
 {
+    [Theory]
+    [InlineData("main", "发行版")]
+    [InlineData("predownload", "预下载")]
+    [InlineData("future", "—")]
+    public void NetworkBranchIsVisibleBeforeParsingAndSurvivesReset(string branch, string expected) => NativeTestHost.OnSta(() =>
+    {
+        using var table = new ManifestTable("network");
+        var remote = new RemoteManifest("game", "本体", new Uri("https://example.com/manifest"), 1, 1,
+            "900150983cd24fb0d6963f7d28e17f72", false) { Branch = branch };
+        var input = new ReferenceInput(new LocalManifestFile("manifest", @"C:\manifest", 1, default), remote);
+        table.AddNetworkFiles([input], "hk4e_cn", "1.0.0");
+        Assert.Equal(table.Columns.Count - 1, table.Columns["Branch"]!.Index);
+        Assert.Equal(table.Columns["Game"]!.FillWeight, table.Columns["Branch"]!.FillWeight);
+        Assert.Equal(table.Columns["Entries"]!.FillWeight, table.Columns["Branch"]!.FillWeight);
+        var row = Assert.Single(table.Rows.Cast<DataGridViewRow>());
+        Assert.Equal(expected, row.Cells["Branch"].Value);
+        Assert.Equal(false, row.Cells[0].Value);
+        table.ShowResults([(input, ReferenceState.Pending, null)]);
+        FileListSnapshot snapshot = NativeTestHost.ReferenceSession().Game!;
+        table.ShowParsedResults([input], [new ReferenceParseItem(snapshot.FileCount, null, snapshot)]);
+        Assert.Equal(expected, row.Cells["Branch"].Value);
+        string? details = null;
+        table.DetailsRequested += (_, _, information) => details = information;
+        table.OpenDetails(row.Index, table.Columns["Branch"]!.Index);
+        Assert.Contains("包类型: " + expected, details);
+        table.ResetResults();
+        Assert.Equal(ManifestTable.BranchText(branch), row.Cells["Branch"].Value);
+    });
+
     [Fact]
     public void BatchAddAndRemoveNotifyOnceAndNoChangesDoNotNotify() => NativeTestHost.OnSta(() =>
     {

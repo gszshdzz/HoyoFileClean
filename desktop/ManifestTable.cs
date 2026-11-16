@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using HoyoFileClean.Presentation;
 
 namespace HoyoFileClean.Desktop;
 
@@ -40,6 +41,7 @@ internal sealed class ManifestTable : DataGridView
         AddColumn("Version", L.Get("ManifestColumnVersion"), typeof(string), 2);
         AddColumn("Package", L.Get("ManifestColumnPackage"), typeof(string), 4);
         AddColumn("Entries", L.Get("ManifestColumnEntryCount"), typeof(int), 3);
+        AddColumn("Branch", L.Get("ManifestColumnBranch"), typeof(string), 3);
         Controls.Add(selectAll);
         selectAll.Click += (_, _) => ToggleAll();
         Layout += (_, _) => PositionSelectAll();
@@ -243,7 +245,8 @@ internal sealed class ManifestTable : DataGridView
                     ["package"] = new([new("network", input.Remote!.MatchingField)])
                 } } };
             row.CreateCells(this, false, input.Remote!.Category, L.Get("UnavailableValue"),
-                input.Remote.DownloadSize, StateText(ReferenceState.Unfetched), game, version, input.Remote.MatchingField, null!);
+                input.Remote.DownloadSize, StateText(ReferenceState.Unfetched), game, version, input.Remote.MatchingField, null!,
+                BranchText(input.Remote.Branch));
             return row;
         }).ToArray();
         ChangeRows(() =>
@@ -261,7 +264,11 @@ internal sealed class ManifestTable : DataGridView
             SetState(row, data.Input.Remote is null ? ReferenceState.Unparsed : ReferenceState.Unfetched);
             row.Cells["Entries"].Value = null;
             data.Snapshot = null;
-            if (data.Input.Remote is null) SetMetadata(row, null);
+            if (data.Input.Remote is null)
+            {
+                SetMetadata(row, null);
+                row.Cells["Branch"].Value = null;
+            }
         }
     }
 
@@ -277,7 +284,11 @@ internal sealed class ManifestTable : DataGridView
                 SetState(row, result.State);
                 row.Cells["Entries"].Value = result.Entries;
                 Data(row).Snapshot = null;
-                if (result.Input.Remote is null) SetMetadata(row, null);
+                if (result.Input.Remote is null)
+                {
+                    SetMetadata(row, null);
+                    row.Cells["Branch"].Value = null;
+                }
             }
         }
         finally { ResumeLayout(); }
@@ -296,7 +307,14 @@ internal sealed class ManifestTable : DataGridView
         ShowMetadata(inputs.Select((input, index) => (input, items[index].Metadata)));
         var rows = Rows.Cast<DataGridViewRow>().ToDictionary(row => Data(row).Input);
         for (int index = 0; index < inputs.Length; index++)
-            if (items[index].Error is null) Data(rows[inputs[index]]).Snapshot = items[index].Snapshot;
+            if (items[index].Error is null)
+            {
+                DataGridViewRow row = rows[inputs[index]];
+                Data(row).Snapshot = items[index].Snapshot;
+                if (inputs[index].Remote is null && items[index].Snapshot is { } snapshot)
+                    row.Cells["Branch"].Value = BranchText(snapshot.Sources[0].ManifestKind == FileValues.SophonPatch
+                        ? "predownload" : "main");
+            }
     }
 
     internal void OpenDetails(int rowIndex, int columnIndex)
@@ -305,7 +323,7 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow row = Rows[rowIndex];
         ManifestRow data = Data(row);
         if (data.State is not ReferenceState.Parsed || data.Snapshot is not { } snapshot) return;
-        string information = string.Join("      ", new[] { "Game", "Version", "Package" }.Select(column =>
+        string information = string.Join("      ", new[] { "Game", "Version", "Package", "Branch" }.Select(column =>
             Columns[column]!.HeaderText + ": " + row.Cells[column].Value));
         DetailsRequested?.Invoke(data.Input, snapshot, information);
     }
@@ -353,6 +371,10 @@ internal sealed class ManifestTable : DataGridView
     }
 
     private static ManifestRow Data(DataGridViewRow row) => (ManifestRow)row.Tag!;
+
+    internal static string BranchText(string? branch) => L.Get(branch is not null
+        && PresentationOptions.ManifestBranchTextIds.TryGetValue(branch, out string? textId)
+            ? textId : "UnavailableValue");
 
     private sealed class ManifestRow(ReferenceInput input)
     {

@@ -244,6 +244,26 @@ public sealed class GameIdentificationTests
     });
 
     [Fact]
+    public void ScanReusesPrereadIdentificationWithoutReadingChangedConfig() => OnSta(() =>
+    {
+        string root = CreateRoot();
+        WriteGameConfig(root);
+        File.AppendAllText(Path.Combine(root, "config.ini"), "\nplugin_original_version=3.0.0");
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        ReadGamePresetAndWait(form, session);
+        File.WriteAllText(Path.Combine(root, "config.ini"), "changed after identification");
+        string beforeScan = Find<Label>(form, "IdentificationResult").Text;
+        Find<Button>(form, "ReadGame").PerformClick();
+        Assert.Equal("正在扫描游戏文件…", Find<Label>(form, "Status").Text);
+        Assert.Equal(beforeScan, Find<Label>(form, "IdentificationResult").Text);
+        WaitUntil(() => !session.IsBusy);
+        Assert.NotNull(session.Game);
+        var identification = Assert.IsType<GameIdentification>(session.Identification);
+        Assert.Equal("original", Assert.Single(identification.Information["plugins"].Values).Item);
+    });
+
+    [Fact]
     public void ImportRestoresRecordedIdentificationWithoutReopeningMissingRoot() => OnSta(() =>
     {
         string root = CreateRoot();

@@ -23,7 +23,7 @@ internal sealed class ManifestDetailsForm : Form
         MinimumSize = new Size(640, 440);
         ClientSize = new Size(900, 640);
         ManifestFile[] files = snapshot.Files.Values.ToArray();
-        var content = new DataGridView
+        var content = new ContentsTable
         {
             Name = "ManifestContents", Dock = DockStyle.Fill, ReadOnly = true, VirtualMode = true,
             AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false,
@@ -65,6 +65,11 @@ internal sealed class ManifestDetailsForm : Form
         close.Click += (_, _) => Close();
         export.Click += async (_, _) => await ExportAsync();
         FormClosing += (_, args) => args.Cancel = exporting;
+    }
+
+    private sealed class ContentsTable : DataGridView
+    {
+        internal ContentsTable() => DoubleBuffered = true;
     }
 
     private string? ChooseOutput(IWin32Window owner)

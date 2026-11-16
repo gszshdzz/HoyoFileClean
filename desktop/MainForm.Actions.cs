@@ -61,7 +61,7 @@ public sealed partial class MainForm
     private async Task ScanAsync()
     {
         if (loadedIdentification is not { } identification) return;
-        previewIdentification = null;
+        previewIdentification = identification;
         string root = gameRoot.Text.Trim();
         if (!Path.IsPathFullyQualified(root)) { status.Text = L.Get("GameRootRequired"); return; }
         bool hashes = heavy.Checked;
@@ -88,7 +88,7 @@ public sealed partial class MainForm
         {
             session.AcceptGame(result.scan, root, result.identification);
             ShowScanProgress(new ScanProgress(result.scan.FileCount, result.scan.FileCount, result.scan.TotalSize, result.scan.TotalSize));
-        }, L.Get("IdentifyingBeforeScan"), DesktopOperation.Scan, onFinished: () =>
+        }, L.Get("GameScanRunning"), DesktopOperation.Scan, onFinished: () =>
         {
             scanGeneration++;
             StopScanProgress();

@@ -140,7 +140,8 @@ public sealed class NetworkManifestClient(HttpClient client)
                 long downloadSize = compressed ? file.CompressedSize ?? throw new FormatException() : decodedSize;
                 ValidateSizes(downloadSize, decodedSize, compressed);
                 manifests.Add(new RemoteManifest(field, Text(item.CategoryName), url,
-                    downloadSize, decodedSize, md5, compressed).FromOfficialResponse());
+                    downloadSize, decodedSize, md5, compressed)
+                    { Branch = data.Branch ?? main.Branch }.FromOfficialResponse());
             }
             if (manifests.Count == 0) throw new FormatException();
             return new RemoteManifestCatalog(service, requestedVersion, Text(data.BuildId), manifests.AsReadOnly());

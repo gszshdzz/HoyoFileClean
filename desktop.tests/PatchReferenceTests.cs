@@ -28,6 +28,15 @@ public sealed class PatchReferenceTests
         selected.Cells[0].Value = true;
         Find<Button>(form, "ParseManualReference").PerformClick();
         WaitUntil(() => session.Reference is not null && !session.IsBusy);
+        Assert.Equal("预下载", selected.Cells["Branch"].Value);
+        Assert.Null(table.Rows.Cast<DataGridViewRow>().Single(row => row.Cells["Name"].Value is "unselected").Cells["Branch"].Value);
+        using var detailsTable = new ManifestTable("details");
+        detailsTable.AddFiles([new LocalManifestFile("selected", patch.Sources[0].Path, 1, default)], check: true);
+        detailsTable.ShowParsedResults(detailsTable.CheckedInputs, [new ReferenceParseItem(patch.FileCount, null, patch)]);
+        string? details = null;
+        detailsTable.DetailsRequested += (_, _, information) => details = information;
+        detailsTable.OpenDetails(0, detailsTable.Columns["Branch"]!.Index);
+        Assert.Contains("包类型: 预下载", details);
         Find<Button>(form, "Next").PerformClick();
         Assert.Equal(1, prompts);
         Assert.Contains("selected-patch.json", message);
@@ -48,6 +57,7 @@ public sealed class PatchReferenceTests
         table.AddFiles([new LocalManifestFile("normal", normal.Sources[0].Path, 1, default)], check: true);
         Find<Button>(form, "ParseManualReference").PerformClick();
         WaitUntil(() => session.Reference is not null && !session.IsBusy);
+        Assert.Equal("发行版", table.Rows.Cast<DataGridViewRow>().Single(row => row.Cells["Name"].Value is "normal").Cells["Branch"].Value);
         Find<Button>(form, "Next").PerformClick();
         Assert.Equal(2, prompts);
         Assert.Equal(2, session.Step);

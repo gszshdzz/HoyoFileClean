@@ -28,7 +28,8 @@ internal sealed record OfficialBuildRequest(
 internal sealed record OfficialBuild(
     [property: JsonPropertyName("tag")] string Tag,
     [property: JsonPropertyName("build_id")] string BuildId,
-    [property: JsonPropertyName("manifests")] IReadOnlyList<OfficialManifest> Manifests);
+    [property: JsonPropertyName("manifests")] IReadOnlyList<OfficialManifest> Manifests,
+    [property: JsonPropertyName("branch")] string? Branch = null);
 
 internal sealed record OfficialManifest(
     [property: JsonPropertyName("matching_field")] string MatchingField,

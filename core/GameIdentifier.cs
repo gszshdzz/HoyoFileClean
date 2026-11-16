@@ -24,7 +24,7 @@ public static class GameIdentifier
         Validate(configuration);
         string root = DirectoryScanner.NormalizeRootPath(rootPath);
         DirectoryScanner.ValidateDirectoryPath(root);
-        string[] paths = (scannedPaths ?? DirectoryScanner.Scan(root, cancellationToken: cancellationToken).Files.Keys).ToArray();
+        string[] paths = (scannedPaths ?? ReadCandidatePaths(root, configuration, cancellationToken)).ToArray();
         var availablePaths = new HashSet<string>(paths, StringComparer.Ordinal);
         var texts = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var detections = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -97,6 +97,76 @@ public static class GameIdentifier
                 if (values.Count > 0) detections.Add(key, Resolve(values, definition.CanCompare, id));
         }
         return Interpret(detections, configuration, cancellationToken);
+    }
+
+    // Only configured candidates are inspected; no hashes or complete installation inventory.
+    private static IEnumerable<string> ReadCandidatePaths(string root,
+        IdentificationConfiguration<GameDetectionDefinition> configuration, CancellationToken token)
+    {
+        var visited = new HashSet<(string Path, bool Prefix)>();
+        foreach (GameDetectionDefinition detection in configuration.Detections.Values)
+        foreach (string candidate in detection.Paths)
+        {
+            token.ThrowIfCancellationRequested();
+            string relative = NormalizeCandidatePath(candidate.TrimEnd('/', '\\'));
+            if (!visited.Add((relative, detection.Prefix))) continue;
+            string path = Path.Combine(root, relative);
+            if (detection.Prefix)
+            {
+                string? first = FirstFile(path, token);
+                if (first is not null) yield return Path.GetRelativePath(root, first).Replace('\\', '/');
+            }
+            else
+            {
+                try
+                {
+                    DirectoryScanner.ValidateDirectoryPath(Path.GetDirectoryName(path)!);
+                    FileAttributes attributes = File.GetAttributes(path);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                        continue;
+                    if ((attributes & FileAttributes.Directory) != 0) continue;
+                }
+                catch (FileNotFoundException) { continue; }
+                catch (DirectoryNotFoundException) { continue; }
+                catch (CoreException error) when (error.Code == CoreErrorCode.DirectoryIsLink) { continue; }
+                yield return relative;
+            }
+        }
+    }
+
+    private static string? FirstFile(string directory, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { DirectoryScanner.ValidateDirectoryPath(directory); }
+        catch (DirectoryNotFoundException) { return null; }
+        catch (FileNotFoundException) { return null; }
+        catch (CoreException error) when (error.Code == CoreErrorCode.DirectoryIsLink) { return null; }
+        foreach (string path in Directory.EnumerateFileSystemEntries(directory))
+        {
+            token.ThrowIfCancellationRequested();
+            FileAttributes attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+            if ((attributes & FileAttributes.Directory) == 0) return path;
+            string? first = FirstFile(path, token);
+            if (first is not null) return first;
+        }
+        return null;
+    }
+
+    public static GameExclusionPreset? GetExclusionPreset(GameIdentification identification)
+    {
+        if (identification.Information.TryGetValue("biz", out IdentifiedInformation? biz))
+            foreach (IdentifiedValue value in biz.Values)
+                if (value.RawValue is { } key)
+                {
+                    if (GameIdentificationRules.PresetGames.TryGetValue(key, out string? gameKey)) key = gameKey;
+                    if (GameIdentificationRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset)) return preset;
+                }
+        if (identification.Information.TryGetValue("game", out IdentifiedInformation? game))
+            foreach (IdentifiedValue value in game.Values)
+                if (value.RawValue is { } key && GameIdentificationRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset))
+                    return preset;
+        return null;
     }
 
     // Reconstruct recorded identification without opening any game file.

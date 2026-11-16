@@ -8,3 +8,6 @@ public sealed record IdentifiedInformation(string LabelTextId, IReadOnlyList<Ide
 
 public sealed record GameIdentification(IReadOnlyDictionary<string, string> Detections,
     IReadOnlyDictionary<string, IdentifiedInformation> Information);
+
+public sealed record GameExclusionPreset(IReadOnlyList<string> ScanDirectories,
+    IReadOnlyList<string> ScanFiles);

@@ -10,6 +10,11 @@ public sealed partial class MainForm
     private readonly TextBox exclusionJson = new() { Name = "ExclusionJson" };
     private readonly TextBox excludedDirectoryInput = new() { Name = "ExcludedDirectoryInput" };
     private readonly TextBox excludedFileInput = new() { Name = "ExcludedFileInput" };
+    private readonly Button loadGamePreset = MakeButton(L.Get("LoadGamePresetAction"), "LoadGamePreset");
+    private GameIdentification? previewIdentification;
+    private GameIdentification? loadedIdentification;
+    private readonly HashSet<string> presetDirectories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> presetFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ListBox excludedDirectories = new() { Name = "ExcludedDirectories", Dock = DockStyle.Fill, SelectionMode = SelectionMode.MultiExtended, HorizontalScrollbar = true, IntegralHeight = false };
     private readonly ListBox excludedFiles = new() { Name = "ExcludedFiles", Dock = DockStyle.Fill, SelectionMode = SelectionMode.MultiExtended, HorizontalScrollbar = true, IntegralHeight = false };
     private readonly ProgressBar scanFileProgress = new() { Name = "ScanFileProgress", Dock = DockStyle.Fill };
@@ -38,13 +43,14 @@ public sealed partial class MainForm
         EnablePathDrop(gameJson, directory: false);
         gameJson.TextChanged += (_, _) => GameChanged();
         readGame.Click += async (_, _) => await ExecuteAsync();
+        loadGamePreset.Click += async (_, _) => await LoadGamePresetAsync();
         cancelScan.Click += (_, _) =>
         {
             session.CancelOperation();
             RefreshView();
             status.Text = L.Get("CancellingScan");
         };
-        input.Controls.Add(OperationActions("ScanActions", cancelScan, readGame, heavy));
+        input.Controls.Add(OperationActions("ScanActions", cancelScan, loadGamePreset, readGame, heavy));
         input.Controls.Add(identificationResult);
 
         var options = CompactGameInputs();
@@ -265,6 +271,43 @@ public sealed partial class MainForm
             or CoreException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         { status.Text = L.Get("ExclusionRulesImportFailed"); }
         finally { RefreshView(); }
+    }
+
+    private async Task LoadGamePresetAsync()
+    {
+        if (session.IsBusy) return;
+        string root = gameRoot.Text.Trim();
+        if (!Path.IsPathFullyQualified(root)) { status.Text = L.Get("GameRootRequired"); return; }
+        previewIdentification = null;
+        loadedIdentification = null;
+        ClearPreset();
+        session.InvalidateGame();
+        bool hasPreset = false;
+        await RunWorkAsync(token => GameIdentifier.Identify(root, token), identification =>
+        {
+            GameExclusionPreset? preset = GameIdentifier.GetExclusionPreset(identification);
+            hasPreset = preset is not null;
+            ReplacePreset(excludedDirectories, presetDirectories, preset?.ScanDirectories ?? []);
+            ReplacePreset(excludedFiles, presetFiles, preset?.ScanFiles ?? []);
+            previewIdentification = identification;
+            loadedIdentification = identification;
+        }, L.Get("IdentifyingBeforeScan"), DesktopOperation.Scan,
+            completedMessage: () => L.Get(hasPreset ? "GamePresetLoaded" : "GamePresetUnavailable"));
+    }
+
+    private static void ReplacePreset(ListBox list, HashSet<string> previous, IEnumerable<string> paths)
+    {
+        foreach (string item in list.Items.Cast<string>().Where(previous.Contains).ToArray()) list.Items.Remove(item);
+        previous.Clear();
+        var known = list.Items.Cast<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in paths)
+            if (known.Add(path)) { list.Items.Add(path); previous.Add(path); }
+    }
+
+    private void ClearPreset()
+    {
+        ReplacePreset(excludedDirectories, presetDirectories, []);
+        ReplacePreset(excludedFiles, presetFiles, []);
     }
 
     private void ResetScanProgress()

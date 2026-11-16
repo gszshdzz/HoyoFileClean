@@ -8,6 +8,100 @@ namespace HoyoFileClean.Desktop.Tests;
 public sealed class GameIdentificationTests
 {
     [Fact]
+    public void GenshinLoadsFileExclusionsAndScanKeepsPrereadIdentification() => OnSta(() =>
+    {
+        string root = CreateRoot();
+        WriteGameConfig(root);
+        File.WriteAllText(Path.Combine(root, "beyond_pkg_version"), "beyond");
+        File.WriteAllText(Path.Combine(root, "pkg_version"), "body");
+        File.WriteAllText(Path.Combine(root, "Audio_Chinese_pkg_version"), "voice");
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        ReadGamePresetAndWait(form, session);
+        Assert.Equal(["config.ini", "beyond_pkg_version"],
+            Find<ListBox>(form, "ExcludedFiles").Items.Cast<string>().ToArray());
+        using var lockedConfig = new FileStream(Path.Combine(root, "config.ini"), FileMode.Open,
+            FileAccess.ReadWrite, FileShare.None);
+        ScanAndWait(form, session);
+        Assert.NotNull(session.Game);
+        Assert.DoesNotContain("config.ini", session.Game.Files.Keys);
+        Assert.DoesNotContain("beyond_pkg_version", session.Game.Files.Keys);
+        Assert.Contains("pkg_version", session.Game.Files.Keys);
+        Assert.Contains("Audio_Chinese_pkg_version", session.Game.Files.Keys);
+        Assert.Equal("hk4e_cn", Assert.Single(session.Identification!.Information["biz"].Values).RawValue);
+        Assert.Equal("7.2.0", Assert.Single(session.Identification.Information["version"].Values).RawValue);
+    });
+
+    [Fact]
+    public void PresetReadIsNotScanAndChangingRootClearsOnlyAutomaticRules() => OnSta(() =>
+    {
+        string root = CreateRoot();
+        WriteGameConfig(root);
+        File.WriteAllText(Path.Combine(root, "pkg_version"), "body");
+        File.WriteAllText(Path.Combine(root, "Audio_Chinese_pkg_version"), "voice");
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        ListBox dirs = Find<ListBox>(form, "ExcludedDirectories");
+        dirs.Items.Add("manual");
+        Button load = Find<Button>(form, "LoadGamePreset");
+        Button scan = Find<Button>(form, "ReadGame");
+        Assert.False(scan.Enabled);
+        scan.PerformClick();
+        Assert.False(session.IsBusy);
+        Assert.Null(session.Game);
+        Assert.Equal("读取游戏并加载预置排除", load.Text);
+        load.PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Assert.Null(session.Game);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+        Assert.Contains("hk4e_cn", Find<Label>(form, "IdentificationResult").Text);
+        Assert.Contains("ldiff", dirs.Items.Cast<string>());
+        Assert.True(scan.Enabled);
+        Assert.Empty(form.Controls.Find("ComparisonExcludedFiles", true));
+        Assert.Equal(["config.ini", "beyond_pkg_version"],
+            Find<ListBox>(form, "ExcludedFiles").Items.Cast<string>().ToArray());
+        int count = dirs.Items.Count;
+        load.PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Assert.Equal(count, dirs.Items.Count);
+        ScanAndWait(form, session);
+        Assert.Contains("pkg_version", session.Game!.Files.Keys);
+        Assert.Contains("Audio_Chinese_pkg_version", session.Game.Files.Keys);
+        string second = CreateRoot();
+        Find<TextBox>(form, "GameRoot").Text = second;
+        Assert.Equal(["manual"], dirs.Items.Cast<string>().ToArray());
+        Assert.False(scan.Enabled);
+        load.PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Assert.Null(session.Game);
+        Assert.DoesNotContain("hk4e_cn", Find<Label>(form, "IdentificationResult").Text);
+        Assert.False(scan.Enabled);
+    });
+
+    [Fact]
+    public void CancelledPresetReadDoesNotPublishAndCanRetry() => OnSta(() =>
+    {
+        string root = CreateRoot();
+        WriteGameConfig(root);
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        Button load = Find<Button>(form, "LoadGamePreset");
+        load.PerformClick();
+        Assert.True(session.IsBusy);
+        Find<Button>(form, "CancelScan").PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Assert.Null(session.Game);
+        Assert.Empty(Find<ListBox>(form, "ExcludedDirectories").Items.Cast<string>());
+        Assert.DoesNotContain("hk4e_cn", Find<Label>(form, "IdentificationResult").Text);
+        Assert.False(Find<Button>(form, "ReadGame").Enabled);
+        load.PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Assert.Contains("hk4e_cn", Find<Label>(form, "IdentificationResult").Text);
+        Assert.Null(session.Game);
+        Assert.True(Find<Button>(form, "ReadGame").Enabled);
+    });
+
+    [Fact]
     public void ScanIdentifiesBeforeEnumerationAndFailureClearsResultsThenAllowsRetry() => OnSta(() =>
     {
         string root = CreateRoot();
@@ -46,7 +140,7 @@ public sealed class GameIdentificationTests
         Assert.Contains("hk4e_cn", Find<Label>(form, "IdentificationResult").Text);
 
         File.AppendAllText(path, "\nchannel=2");
-        ScanAndWait(form, session);
+        ReadGamePresetAndWait(form, session);
         Assert.Null(session.Game);
         Assert.Null(session.Identification);
         Assert.False(Find<Button>(form, "Next").Enabled);
@@ -82,6 +176,7 @@ public sealed class GameIdentificationTests
         using var form = CreateForm(out WizardSession session);
         Find<TextBox>(form, "GameRoot").Text = root;
         Find<CheckBox>(form, "HeavyScan").Checked = hashes;
+        ReadGamePresetAndWait(form, session);
         Button scan = Find<Button>(form, "ReadGame"), cancel = Find<Button>(form, "CancelScan");
         Assert.False(cancel.Visible);
         scan.PerformClick();
@@ -183,11 +278,12 @@ public sealed class GameIdentificationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void IdentificationUsesScanExclusionsInBothHashModes(bool hashes) => OnSta(() =>
+    public void PrereadIdentificationSurvivesScanExclusionsInBothHashModes(bool hashes) => OnSta(() =>
     {
         string root = CreateRoot();
         WriteGameConfig(root);
         string relative = "YuanShen_Data/StreamingAssets/AudioAssets/Chinese";
+        File.WriteAllText(Path.Combine(root, "pkg_version"), "body");
         Directory.CreateDirectory(Path.Combine(root, relative));
         File.WriteAllText(Path.Combine(root, relative, "voice.pck"), "resource");
         using var form = CreateForm(out WizardSession session);
@@ -197,7 +293,7 @@ public sealed class GameIdentificationTests
         ScanAndWait(form, session);
         Assert.NotNull(session.Game);
         Assert.NotNull(session.Identification);
-        Assert.False(session.Identification.Information.ContainsKey("package"));
+        Assert.Contains(session.Identification.Information["package"].Values, value => value.RawValue == "zh-cn");
         Assert.DoesNotContain(session.Game.Files.Keys, path => path.StartsWith(relative + "/", StringComparison.Ordinal));
         Assert.Equal(hashes, session.Game.HashedFileCount > 0);
     });
@@ -247,6 +343,7 @@ public sealed class GameIdentificationTests
 
     private static void ScanAndWait(MainForm form, WizardSession session)
     {
+        if (!Find<Button>(form, "ReadGame").Enabled) ReadGamePresetAndWait(form, session);
         Find<Button>(form, "ReadGame").PerformClick();
         WaitUntil(() => !session.IsBusy);
         Application.DoEvents();

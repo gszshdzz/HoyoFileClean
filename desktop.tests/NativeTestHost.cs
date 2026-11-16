@@ -73,6 +73,13 @@ internal static class NativeTestHost
         Assert.True(condition(), $"等待 {timeoutSeconds} 秒后条件仍未满足：{conditionText}");
     }
 
+    internal static void ReadGamePresetAndWait(MainForm form, WizardSession session)
+    {
+        Find<Button>(form, "LoadGamePreset").PerformClick();
+        WaitUntil(() => !session.IsBusy);
+        Application.DoEvents();
+    }
+
     internal static T Find<T>(Control parent, string name) where T : Control
         => Assert.IsAssignableFrom<T>(Assert.Single(parent.Controls.Find(name, true)));
 }

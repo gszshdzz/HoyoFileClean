@@ -60,6 +60,8 @@ public sealed partial class MainForm
 
     private async Task ScanAsync()
     {
+        if (loadedIdentification is not { } identification) return;
+        previewIdentification = null;
         string root = gameRoot.Text.Trim();
         if (!Path.IsPathFullyQualified(root)) { status.Text = L.Get("GameRootRequired"); return; }
         bool hashes = heavy.Checked;
@@ -80,8 +82,7 @@ public sealed partial class MainForm
         await RunWorkAsync(token =>
         {
             FileListSnapshot scan = DirectoryScanner.Scan(root, dirs, files, hashes,
-                value => ((IProgress<ScanProgress>)reporter).Report(value), token, identifyGame: true);
-            GameIdentification identification = GameIdentifier.FromDetections(scan.Sources[0].Scan!.GameDetections!);
+                value => ((IProgress<ScanProgress>)reporter).Report(value), token, identification: identification);
             return (scan, identification);
         }, result =>
         {

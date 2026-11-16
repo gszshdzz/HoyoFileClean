@@ -69,6 +69,35 @@ public sealed class GameExclusionPresetTests
     }
 
     [Fact]
+    public void HiddenSystemVoiceFilesRemainIdentificationCandidates()
+    {
+        string root = Root();
+        string voice = Path.Combine(root, "YuanShen_Data", "StreamingAssets", "AudioAssets", "Chinese");
+        Directory.CreateDirectory(voice);
+        string resource = Path.Combine(voice, "voice.pck");
+        File.WriteAllText(resource, "resource");
+        File.SetAttributes(voice, FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System);
+        File.SetAttributes(resource, FileAttributes.Hidden | FileAttributes.System);
+        GameIdentification result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal("zh-cn", Assert.Single(result.Information["package"].Values).RawValue);
+    }
+
+    [Theory]
+    [InlineData("YuanShen_Data/StreamingAssets/AudioAssets/Chinese")]
+    [InlineData("YuanShen_Data")]
+    public void FileAtCandidateDirectoryDoesNotInvalidateOtherIdentification(string relative)
+    {
+        string root = Root();
+        File.WriteAllText(Path.Combine(root, "config.ini"), "uapc={\"hk4e_cn\":{}}");
+        string candidate = Path.Combine(root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(candidate)!);
+        File.WriteAllText(candidate, "not a directory");
+        GameIdentification result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+        Assert.False(result.Information.ContainsKey("package"));
+    }
+
+    [Fact]
     public void IdentificationDoesNotReadOrHashExecutableVoiceOrPackageFiles()
     {
         string root = Root();
@@ -84,6 +113,22 @@ public sealed class GameExclusionPresetTests
         Assert.Contains(result.Information["package"].Values, value => value.RawValue == "zh-cn");
         Assert.Contains(result.Information["package"].Values, value => value.RawValue == "game");
         Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+    }
+
+    [Fact]
+    public void FileAtExactCandidateParentDoesNotInvalidateOtherIdentification()
+    {
+        string root = Root();
+        File.WriteAllText(Path.Combine(root, "config.ini"), "uapc={\"hk4e_cn\":{}}");
+        File.WriteAllText(Path.Combine(root, "metadata"), "not a directory");
+        var configuration = GameIdentifier.LoadConfiguration();
+        configuration.Detections["ini_version"] = configuration.Detections["ini_version"] with
+        {
+            Paths = ["metadata/config.ini"]
+        };
+        GameIdentification result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+        Assert.False(result.Information.ContainsKey("version"));
     }
 
     [Fact]

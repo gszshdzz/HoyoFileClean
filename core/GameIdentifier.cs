@@ -128,7 +128,7 @@ public static class GameIdentifier
                 }
                 catch (FileNotFoundException) { continue; }
                 catch (DirectoryNotFoundException) { continue; }
-                catch (CoreException error) when (error.Code == CoreErrorCode.DirectoryIsLink) { continue; }
+                catch (CoreException error) when (error.Code is CoreErrorCode.DirectoryIsLink or CoreErrorCode.DirectoryMissing) { continue; }
                 yield return relative;
             }
         }
@@ -140,7 +140,7 @@ public static class GameIdentifier
         try { DirectoryScanner.ValidateDirectoryPath(directory); }
         catch (DirectoryNotFoundException) { return null; }
         catch (FileNotFoundException) { return null; }
-        catch (CoreException error) when (error.Code == CoreErrorCode.DirectoryIsLink) { return null; }
+        catch (CoreException error) when (error.Code is CoreErrorCode.DirectoryIsLink or CoreErrorCode.DirectoryMissing) { return null; }
         foreach (string path in Directory.EnumerateFileSystemEntries(directory))
         {
             token.ThrowIfCancellationRequested();

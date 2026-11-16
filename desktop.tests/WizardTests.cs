@@ -929,6 +929,7 @@ public sealed class WizardTests
             Assert.False(session.IsBusy);
             Assert.DoesNotContain("处理失败", Find<Label>(form, "Status").Text);
         }
+        ReadGamePresetAndWait(form, session);
         Find<Button>(form, "ReadGame").PerformClick();
         Wait();
         Assert.NotNull(session.Game);
@@ -1616,6 +1617,7 @@ public sealed class WizardTests
         form.Show();
         Find<TextBox>(form, "GameRoot").Text = directory;
         Find<CheckBox>(form, "HeavyScan").Checked = hashes;
+        ReadGamePresetAndWait(form, session);
         ProgressBar file = Find<ProgressBar>(form, "ScanFileProgress"), bytes = Find<ProgressBar>(form, "ScanByteProgress");
         Button scan = Find<Button>(form, "ReadGame");
         int busyChecks = 0;
@@ -1669,6 +1671,7 @@ public sealed class WizardTests
         form.Show();
         Find<TextBox>(form, "GameRoot").Text = root;
         Button scan = Find<Button>(form, "ReadGame");
+        ReadGamePresetAndWait(form, session);
         scan.PerformClick();
         WaitForPageWork(form, session, "ReadGame");
         Assert.Equal(100, Find<ProgressBar>(form, "ScanFileProgress").Value);

@@ -1,4 +1,7 @@
 {
+  "LoadGamePresetAction": "读取游戏并加载预置排除",
+  "GamePresetLoaded": "已读取游戏信息；已加载可用预置，尚未正式扫描。",
+  "GamePresetUnavailable": "已读取游戏信息，但没有对应预置；保留手动规则，尚未正式扫描。",
   "CoreErrorCode_IdentificationConfigurationInvalid": "识别开发配置无效，请维护者检查检测规则及含义并重新构建程序。",
   "IdentificationLabelPackages": "发现的包体",
   "ManifestOfficialBizLabel": "官方标识（biz）",

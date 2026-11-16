@@ -89,7 +89,7 @@ public sealed partial class MainForm : Form
             cancelParsing.Enabled = false;
             status.Text = L.Get("CancellingParsing");
         };
-        gameRoot.TextChanged += (_, _) => GameChanged();
+        gameRoot.TextChanged += (_, _) => { loadedIdentification = null; ClearPreset(); GameChanged(); };
         heavy.CheckedChanged += (_, _) => GameChanged();
         FormClosing += (_, args) =>
         {
@@ -197,6 +197,7 @@ public sealed partial class MainForm : Form
 
     private void GameChanged()
     {
+        if (loadedIdentification is null) previewIdentification = null;
         session.InvalidateGame();
         ResetScanProgress();
         if (session.Step == 0) status.Text = L.Get("GameInputChanged");
@@ -247,8 +248,10 @@ public sealed partial class MainForm : Form
         scanOptions.Visible = scanGameSource.Checked;
         gameJsonRow.Visible = importGameSource.Checked;
         heavy.Visible = scanGameSource.Checked;
+        loadGamePreset.Visible = scanGameSource.Checked;
+        readGame.Enabled = !session.IsBusy && (importGameSource.Checked || loadedIdentification is not null);
         readGame.Text = importGameSource.Checked ? L.Get("ImportAction") : L.Get("ScanAction");
-        identificationResult.Text = session.Identification is { } identification
+        identificationResult.Text = (session.Identification ?? previewIdentification) is { } identification
             ? ResultText.DescribeIdentification(identification)
             : L.Get("IdentificationMissing");
         referenceResult.Text = session.Reference is { } reference

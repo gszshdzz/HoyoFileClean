@@ -199,6 +199,10 @@ internal sealed class ManifestTable : DataGridView
     internal ReferenceInput[] CheckedInputs => Rows.Cast<DataGridViewRow>()
         .Where(row => row.Cells[0].Value is true).Select(row => Data(row).Input).ToArray();
 
+    internal IReadOnlyList<IReadOnlyDictionary<string, ManifestMetadataField>> CheckedNetworkMetadata => Rows.Cast<DataGridViewRow>()
+        .Where(row => row.Cells[0].Value is true && Data(row).State == ReferenceState.Parsed)
+        .Select(row => Data(row).NetworkMetadata).OfType<IReadOnlyDictionary<string, ManifestMetadataField>>().ToArray();
+
     internal void RemoveCheckedFiles()
     {
         if (ReadOnly) return;
@@ -229,7 +233,13 @@ internal sealed class ManifestTable : DataGridView
     {
         DataGridViewRow[] rows = inputs.Select(input =>
         {
-            var row = new DataGridViewRow { Tag = new ManifestRow(input) { State = ReferenceState.Unfetched } };
+            var row = new DataGridViewRow { Tag = new ManifestRow(input) { State = ReferenceState.Unfetched,
+                NetworkMetadata = new Dictionary<string, ManifestMetadataField>
+                {
+                    ["biz"] = new([new("network", game)]),
+                    ["version"] = new([new("network", version)]),
+                    ["package"] = new([new("network", input.Remote!.MatchingField)])
+                } } };
             row.CreateCells(this, false, input.Remote!.Category, L.Get("UnavailableValue"),
                 input.Remote.DownloadSize, StateText(ReferenceState.Unfetched), game, version, input.Remote.MatchingField, null!);
             return row;
@@ -348,6 +358,7 @@ internal sealed class ManifestTable : DataGridView
         internal ReferenceInput Input { get; } = input;
         internal ReferenceState State { get; set; }
         internal FileListSnapshot? Snapshot { get; set; }
+        internal IReadOnlyDictionary<string, ManifestMetadataField>? NetworkMetadata { get; init; }
     }
 
     internal static string StateText(ReferenceState state) => L.Get(state switch

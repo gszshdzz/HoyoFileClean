@@ -42,7 +42,7 @@ public sealed class WizardTests
         Find<RadioButton>(form, "ImportGameSource").Checked = true;
         Assert.Equal("导入", Find<Button>(form, "ReadGame").Text);
         Assert.False(Find<Button>(form, "Execute").Visible);
-        Assert.False(Find<Button>(form, "Import").Visible);
+        Assert.Empty(form.Controls.Find("Import", true));
         Assert.NotNull(Find<ProgressBar>(form, "ScanFileProgress"));
         Assert.NotNull(Find<ProgressBar>(form, "ScanByteProgress"));
         Assert.Empty(form.Controls.Find("ScanResult", true));
@@ -423,7 +423,7 @@ public sealed class WizardTests
         Assert.False(Find<Button>(form, "Next").Enabled);
         Assert.False(Find<Button>(form, "Back").Enabled);
         Assert.False(Find<Button>(form, "Execute").Visible);
-        Assert.False(Find<Button>(form, "Import").Visible);
+        Assert.Empty(form.Controls.Find("Import", true));
         Assert.True(Find<RadioButton>(form, "NetworkSource").Checked);
         Assert.False(Find<CheckBox>(form, "HeavyScan").Checked);
         Assert.True(Find<DataGridView>(form, "Manifests").Columns["Name"]!.ReadOnly);
@@ -525,7 +525,7 @@ public sealed class WizardTests
             Assert.True(form.RectangleToScreen(form.ClientRectangle).Contains(path.RectangleToScreen(path.ClientRectangle)));
         }
         Assert.False(Find<Button>(form, "Execute").Visible);
-        Assert.False(Find<Button>(form, "Import").Visible);
+        Assert.Empty(form.Controls.Find("Import", true));
         Assert.Equal(manual, Find<Button>(form, "ParseManualReference").Visible);
         Assert.Empty(form.Controls.Find("ImportManualReference", true));
         Assert.False(Find<Button>(form, "Next").Enabled);
@@ -732,7 +732,8 @@ public sealed class WizardTests
         Assert.Equal(1, session.Reference.FileCount);
         Assert.Equal(source, Assert.Single(session.Reference.Sources).Path);
         Find<Button>(form, "Next").PerformClick();
-        Assert.Equal(1, Find<TextBox>(form, "ComparisonResult").Text.Split(source, StringSplitOptions.None).Length - 1);
+        Assert.Equal("1", Find<Label>(form, "ComparisonReferenceFiles").Text);
+        Assert.Empty(Find<ComparisonPanel>(form, "ComparisonResult").Controls.OfType<TextBox>());
         Find<Button>(form, "Back").PerformClick();
         Assert.Equal(new[] { source }, Directory.GetFiles(directory, "*", SearchOption.AllDirectories));
         Assert.False(Directory.Exists(Path.Combine(directory, ".temp")));
@@ -937,7 +938,7 @@ public sealed class WizardTests
         Find<Button>(form, "Execute").PerformClick();
         Wait();
         Assert.Equal(1, session.Comparison!.Summary.MatchedSizeOnly);
-        Assert.Contains("仅保留在内存", Find<TextBox>(form, "ComparisonResult").Text);
+        Assert.Equal("仅大小相同数：1", Find<Label>(form, "ComparisonMatched").Text);
         Assert.Equal(new[] { file, reference, config }.Order(),
             Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order());
         Assert.Equal(root, Assert.Single(session.Game.Sources).Path);
@@ -1195,7 +1196,7 @@ public sealed class WizardTests
             }
         }
         Watch(form);
-        Find<TextBox>(form, "ComparisonResult").TextChanged += (_, _) => hiddenUpdates++;
+        Find<Label>(form, "ComparisonReferenceFiles").TextChanged += (_, _) => hiddenUpdates++;
         Find<Button>(form, "GetLocalManifests").PerformClick();
         PumpUntilLocalGetFinishes(form, session);
         Assert.Equal(0, containerChanges);

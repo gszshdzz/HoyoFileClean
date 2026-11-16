@@ -8,7 +8,8 @@ public sealed record ManifestFile(string Path, long Size,
 public sealed record FileListDocument(int FileCount, long TotalSize, IReadOnlyList<ManifestFile> Files,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HashAlgorithm = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ScanScope? Scan = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, ManifestMetadataField>? Metadata = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, ManifestMetadataField>? Metadata = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestKind = null);
 
 public sealed record ScanScope(string Root, IReadOnlyList<string> ExcludedDirectories,
     IReadOnlyList<string> ExcludedFiles, IReadOnlyList<string> SkippedLinks, string Mode,
@@ -16,7 +17,7 @@ public sealed record ScanScope(string Root, IReadOnlyList<string> ExcludedDirect
 
 public sealed record FileListSource(string Path, int FileCount, long TotalSize,
     string? HashAlgorithm, ScanScope? Scan,
-    IReadOnlyDictionary<string, ManifestMetadataField>? Metadata = null);
+    IReadOnlyDictionary<string, ManifestMetadataField>? Metadata = null, string? ManifestKind = null);
 
 public sealed record ComparisonSummary(
     int OnlyA, int OnlyB, int Different, int MatchedWithHash, int MatchedSizeOnly, int OutsideScope);
@@ -39,6 +40,7 @@ public sealed record ExclusionRuleInput(IReadOnlyList<string> ExcludedDirectorie
 public static class FileValues
 {
     public const string Md5 = "MD5";
+    public const string SophonPatch = "sophon-patch";
     public const string LightScan = "light";
     public const string HeavyScan = "heavy";
     public const string SideA = "a";

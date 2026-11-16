@@ -127,8 +127,10 @@ public static class FileComparer
         }, cancellationToken);
 
     internal static FileListSnapshot FromFiles(string source, IReadOnlyList<ManifestFile> files,
-        long totalSize, string? hashAlgorithm, ScanScope? scan = null, CancellationToken cancellationToken = default)
-        => ReadLists([source], _ => new FileListDocument(files.Count, totalSize, files, hashAlgorithm, scan), cancellationToken,
+        long totalSize, string? hashAlgorithm, ScanScope? scan = null, CancellationToken cancellationToken = default,
+        string? manifestKind = null)
+        => ReadLists([source], _ => new FileListDocument(files.Count, totalSize, files, hashAlgorithm, scan,
+            ManifestKind: manifestKind), cancellationToken,
             preserveSource: true);
 
     public static FileListSnapshot Combine(IEnumerable<FileListSnapshot> snapshots, CancellationToken cancellationToken = default)
@@ -195,6 +197,8 @@ public static class FileComparer
         {
             cancellationToken.ThrowIfCancellationRequested();
             FileListDocument list = read(input);
+            if (list.ManifestKind is not null && list.ManifestKind != FileValues.SophonPatch)
+                throw new CoreException(CoreErrorCode.ListJsonInvalid, input);
             bool hasHashes = list.HashAlgorithm == FileValues.Md5;
             if ((list.HashAlgorithm is not null && !hasHashes)
                 || (list.Scan is not null && list.Scan.Mode != (hasHashes ? FileValues.HeavyScan : FileValues.LightScan)))
@@ -237,7 +241,7 @@ public static class FileComparer
             // Never trust metadata saved in an input JSON: derive it again from validated contents.
             var metadata = manifestIdentifier.Identify(
                 new FileListDocument(normalized.Count, totalSize, normalized, list.HashAlgorithm, scope), cancellationToken);
-            sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope, metadata));
+            sources.Add(new FileListSource(input, normalized.Count, totalSize, list.HashAlgorithm, scope, metadata, list.ManifestKind));
             MergeFiles(files, normalized, input, cancellationToken);
         }
         FilePathRules.ValidatePaths(files.Keys);

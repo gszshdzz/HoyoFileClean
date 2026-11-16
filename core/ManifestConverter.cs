@@ -37,7 +37,7 @@ public static class ManifestConverter
         FileListSource source = snapshot.Sources[0];
         JsonFileOutput.WriteNew(outputPath, new FileListDocument(snapshot.FileCount, snapshot.TotalSize,
             snapshot.Files.Values.ToArray(), source.HashAlgorithm, source.Scan,
-            source.Metadata is { Count: > 0 } ? source.Metadata : null));
+            source.Metadata is { Count: > 0 } ? source.Metadata : null, source.ManifestKind));
     }
 
     internal static FileListSnapshot Read(Stream input, string inputPath,
@@ -62,7 +62,7 @@ public static class ManifestConverter
             {
                 input.Position = 0;
                 return new PrefixReadStream(Stream.Null, input);
-            }, decodedSize, decodedMd5, allowJson: expectedCompression is null);
+            }, decodedSize, decodedMd5, allowLocalFormats: expectedCompression is null);
         }
         try
         {
@@ -71,7 +71,7 @@ public static class ManifestConverter
             {
                 input.Position = 0;
                 return new DecompressionStream(input);
-            }, decodedSize, decodedMd5, allowJson: expectedCompression is null);
+            }, decodedSize, decodedMd5, allowLocalFormats: expectedCompression is null);
         }
         catch (Exception error) when (error is ZstdException or EndOfStreamException)
         {
@@ -81,10 +81,10 @@ public static class ManifestConverter
 
     private static FileListSnapshot ReadDecoded(Stream decoded, string inputPath,
         CancellationToken cancellationToken, Func<Stream> replayDecoded,
-        long? decodedSize = null, string? decodedMd5 = null, bool allowJson = true)
+        long? decodedSize = null, string? decodedMd5 = null, bool allowLocalFormats = true)
     {
         using var limited = new ManifestReadStream(decoded, Maintenance.DecodedLimit, cancellationToken, decodedSize, decodedMd5);
-        try { return ReadContent(limited, inputPath, cancellationToken, replayDecoded, allowJson); }
+        try { return ReadContent(limited, inputPath, cancellationToken, replayDecoded, allowLocalFormats); }
         finally
         {
             // Preserve the original decode-limit/invalid-compression precedence even if parsing
@@ -95,7 +95,7 @@ public static class ManifestConverter
     }
 
     private static FileListSnapshot ReadContent(Stream limited, string inputPath,
-        CancellationToken cancellationToken, Func<Stream> replayDecoded, bool allowJson)
+        CancellationToken cancellationToken, Func<Stream> replayDecoded, bool allowLocalFormats)
     {
         // Probe only format-leading bytes. Replay them for protobuf; strip only a JSON BOM.
         using var prefix = new MemoryStream();
@@ -128,7 +128,7 @@ public static class ManifestConverter
             .SequenceEqual(new byte[] { 0xef, 0xbb, 0xbf }) ? 3 : 0;
         if (first == (byte)'{')
         {
-            if (!allowJson) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported, inputPath);
+            if (!allowLocalFormats) throw new CoreException(CoreErrorCode.ManifestNetworkUnsupported, inputPath);
             // JSON does not need its leading whitespace replayed.
             if (prefixOverflow)
             {
@@ -148,30 +148,57 @@ public static class ManifestConverter
             limited.CopyTo(Stream.Null);
             using var decodedAgain = replayDecoded();
             using var boundedAgain = new ManifestReadStream(decodedAgain, Maintenance.DecodedLimit, cancellationToken);
-            try { return ReadProtobuf(boundedAgain, inputPath, cancellationToken); }
+            try { return ReadProtobuf(boundedAgain, inputPath, cancellationToken, replayDecoded, allowLocalFormats); }
             finally { boundedAgain.CopyTo(Stream.Null); }
         }
         prefix.Position = 0;
         using var replay = new PrefixReadStream(prefix, limited);
-        return ReadProtobuf(replay, inputPath, cancellationToken);
+        return ReadProtobuf(replay, inputPath, cancellationToken, replayDecoded, allowLocalFormats);
     }
 
-    private static FileListSnapshot ReadProtobuf(Stream replay, string inputPath, CancellationToken cancellationToken)
+    private static FileListSnapshot ReadProtobuf(Stream replay, string inputPath, CancellationToken cancellationToken,
+        Func<Stream> replayDecoded, bool allowPatch)
     {
         SophonFileManifest manifest;
+        SophonPatchFileManifest? patch = null;
         try
         {
             manifest = SophonFileManifest.Parser.WithDiscardUnknownFields(true).ParseFrom(replay);
+            if (manifest.Assets.Count == 0) throw new CoreException(CoreErrorCode.ManifestEmpty, inputPath);
+            if (allowPatch)
+            {
+                // Only unknown local inputs need both projections. Official network input
+                // already has a build-format contract; never re-decode it as a patch.
+                using var decodedAgain = replayDecoded();
+                using var boundedAgain = new ManifestReadStream(decodedAgain, Maintenance.DecodedLimit, cancellationToken);
+                patch = SophonPatchFileManifest.Parser.WithDiscardUnknownFields(true).ParseFrom(boundedAgain);
+            }
         }
         catch (InvalidProtocolBufferException error)
         {
             throw new CoreException(CoreErrorCode.ManifestEncodingInvalid, inputPath, innerException: error);
         }
         var files = new List<ManifestFile>();
-        foreach (SophonFileAsset asset in manifest.Assets)
+        bool? patchFormat = null;
+        if (patch is not null && manifest.Assets.Count != patch.Assets.Count)
+            throw new CoreException(CoreErrorCode.ManifestEncodingInvalid, inputPath);
+        for (int index = 0; index < manifest.Assets.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (asset.AssetType == OfficialProtocol.FileAsset) files.Add(ReadFile(asset));
+            SophonFileAsset asset = manifest.Assets[index];
+            SophonPatchFileAsset? patchAsset = patch?.Assets[index];
+            bool buildFields = asset.HasAssetType || asset.HasAssetSize || asset.HasAssetHashMd5;
+            bool patchFields = patchAsset is not null && (patchAsset.HasAssetSize || patchAsset.HasAssetHashMd5);
+            if (buildFields && patchFields || patchFormat is not null && patchFormat != patchFields)
+                throw new CoreException(CoreErrorCode.ManifestEncodingInvalid, inputPath);
+            if (!buildFields && !patchFields)
+                throw new CoreException(allowPatch ? CoreErrorCode.FileMetadataInvalid : CoreErrorCode.ManifestNetworkUnsupported, inputPath);
+            patchFormat = patchFields;
+            if (patchFields)
+            {
+                files.Add(ReadFile(patchAsset!.AssetName, patchAsset.AssetSize, patchAsset.AssetHashMd5));
+            }
+            else if (asset.AssetType == OfficialProtocol.FileAsset) files.Add(ReadFile(asset));
         }
         if (files.Count == 0)
         {
@@ -187,10 +214,13 @@ public static class ManifestConverter
         {
             throw new CoreException(CoreErrorCode.TotalSizeOverflow, inputPath, innerException: error);
         }
-        return FileComparer.FromFiles(inputPath, files, totalSize, FileValues.Md5, cancellationToken: cancellationToken);
+        return FileComparer.FromFiles(inputPath, files, totalSize, FileValues.Md5, cancellationToken: cancellationToken,
+            manifestKind: patchFormat == true ? FileValues.SophonPatch : null);
     }
 
     private static ManifestFile ReadFile(SophonFileAsset asset)
-        => FileEntryRules.Normalize(new ManifestFile(asset.AssetName, asset.AssetSize, asset.AssetHashMd5),
-            hasHashes: true, metadataPath: asset.AssetName);
+        => ReadFile(asset.AssetName, asset.AssetSize, asset.AssetHashMd5);
+
+    private static ManifestFile ReadFile(string path, long size, string md5)
+        => FileEntryRules.Normalize(new ManifestFile(path, size, md5), hasHashes: true, metadataPath: path);
 }

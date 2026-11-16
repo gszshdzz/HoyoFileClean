@@ -2,7 +2,11 @@
 
 `Protos/Sophon.proto` adapts the build-manifest schema from
 [CollapseLauncher/Hi3Helper.Sophon](https://github.com/CollapseLauncher/Hi3Helper.Sophon/blob/4c6001e8585ffa2fda78805db0ab960e3245c049/Protos/SophonManifestProto.proto).
-Only the namespace, field names and formatting have changed.
+The full build schema changes only the namespace, field names and formatting.
+Read-only projections omit unused fields and track scalar presence for format
+identification. The patch projection uses fields 1–3 from
+[SophonPatchProto.proto](https://github.com/CollapseLauncher/Hi3Helper.Sophon/blob/4c6001e8585ffa2fda78805db0ab960e3245c049/Protos/SophonPatchProto.proto)
+at the same commit, under the same license below.
 
 ## Hi3Helper.Sophon — MIT License
 

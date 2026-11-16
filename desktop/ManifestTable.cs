@@ -154,14 +154,16 @@ internal sealed class ManifestTable : DataGridView
         RefreshSelectAll();
     }
 
-    internal static string FormatSize(long bytes)
+    internal static string FormatSize(long bytes, bool detailedGigabytes = false)
     {
         decimal value = bytes / 1024m;
         string[] units = [L.Get("UnitKB"), L.Get("UnitMB"), L.Get("UnitGB"),
             L.Get("UnitTB"), L.Get("UnitPB"), L.Get("UnitEB")];
         int unitIndex = 0;
-        while (value >= 999.5m && unitIndex < units.Length - 1) { value /= 1024m; unitIndex++; }
-        int decimals = value >= 99.95m ? 0 : value >= 9.995m ? 1 : 2;
+        while (value >= (detailedGigabytes && unitIndex == 2 ? 999.95m : 999.5m)
+            && unitIndex < units.Length - 1) { value /= 1024m; unitIndex++; }
+        int decimals = detailedGigabytes && unitIndex == 2 && value >= 99.95m ? 1
+            : value >= 99.95m ? 0 : value >= 9.995m ? 1 : 2;
         return Math.Round(value, decimals, MidpointRounding.AwayFromZero)
             .ToString(decimals switch { 0 => "0", 1 => "0.#", _ => "0.##" }, System.Globalization.CultureInfo.InvariantCulture) + units[unitIndex];
     }
@@ -293,9 +295,8 @@ internal sealed class ManifestTable : DataGridView
         DataGridViewRow row = Rows[rowIndex];
         ManifestRow data = Data(row);
         if (data.State is not ReferenceState.Parsed || data.Snapshot is not { } snapshot) return;
-        string information = string.Join(Environment.NewLine, new[] { "Game", "Version", "Package" }.Select(column =>
-            Columns[column]!.HeaderText + ": " + row.Cells[column].Value
-            + (string.IsNullOrEmpty(row.Cells[column].ToolTipText) ? "" : " (" + row.Cells[column].ToolTipText + ")")));
+        string information = string.Join("      ", new[] { "Game", "Version", "Package" }.Select(column =>
+            Columns[column]!.HeaderText + ": " + row.Cells[column].Value));
         DetailsRequested?.Invoke(data.Input, snapshot, information);
     }
 

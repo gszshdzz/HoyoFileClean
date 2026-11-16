@@ -83,6 +83,8 @@ public sealed class ManifestDetailsTests
             opened++;
             Assert.Same(input, actualInput);
             Assert.Same(sample.Snapshot, actualSnapshot);
+            Assert.DoesNotContain("\n", information);
+            Assert.DoesNotContain("\r", information);
             Assert.Contains(source == "network" ? "official-biz" : "hk4e_cn", information);
             if (source != "network") Assert.Contains("hk4e_cn", information);
             Assert.Contains(source == "network" ? "official-package" : "game", information);
@@ -125,7 +127,7 @@ public sealed class ManifestDetailsTests
         var sample = Sample();
         string output = Path.Combine(sample.Directory, "export.json");
         int selections = 0;
-        using var dialog = new ManifestDetailsForm(sample.Input, sample.Snapshot, "game: hk4e\r\npackage: game", _ =>
+        using var dialog = new ManifestDetailsForm(sample.Input, sample.Snapshot, "游戏: hk4e_cn      版本: 7.2.0      包体: game", _ =>
         {
             selections++;
             return output;
@@ -133,9 +135,10 @@ public sealed class ManifestDetailsTests
         dialog.StartPosition = FormStartPosition.Manual;
         dialog.Location = new Point(-20000, -20000);
         dialog.Show();
-        var information = NativeTestHost.Find<TextBox>(dialog, "ManifestInformation");
-        Assert.Contains("hk4e", information.Text);
-        Assert.Contains(sample.Input.File.FullPath, information.Text);
+        var information = NativeTestHost.Find<Label>(dialog, "ManifestInformation");
+        Assert.Equal("游戏: hk4e_cn      版本: 7.2.0      包体: game      文件数: 1 个      覆盖大小: 0KB      MD5: 0/1", information.Text);
+        Assert.DoesNotContain(sample.Input.File.FullPath, information.Text);
+        Assert.Equal(BorderStyle.None, information.BorderStyle);
         var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
         Assert.True(grid.ReadOnly);
         Assert.True(grid.VirtualMode);
@@ -171,8 +174,7 @@ public sealed class ManifestDetailsTests
         };
         dialog.Show();
         Application.DoEvents();
-        var information = NativeTestHost.Find<TextBox>(dialog, "ManifestInformation");
-        Assert.Equal(0, information.SelectionLength);
+        var information = NativeTestHost.Find<Label>(dialog, "ManifestInformation");
         Assert.False(information.Focused);
         var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
         Assert.Empty(grid.SelectedCells.Cast<DataGridViewCell>());
@@ -182,6 +184,37 @@ public sealed class ManifestDetailsTests
         Assert.Empty(grid.SelectedCells.Cast<DataGridViewCell>());
         Assert.True(grid.Enabled);
     });
+
+    [Fact]
+    public void SummaryWrapsAtMinimumWidthAndLeavesSpaceForContents() => NativeTestHost.OnSta(() =>
+    {
+        var sample = Sample();
+        using var dialog = new ManifestDetailsForm(sample.Input, sample.Snapshot,
+            "游戏: hk4e_cn      版本: 7.2.0      包体: game", _ => null)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000)
+        };
+        dialog.Show();
+        var header = NativeTestHost.Find<Label>(dialog, "ManifestInformation");
+        int wideHeight = header.Height;
+        dialog.Size = dialog.MinimumSize;
+        Application.DoEvents();
+        var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
+        Assert.True(header.Height > wideHeight);
+        Assert.True(header.Height >= header.GetPreferredSize(new Size(header.Width, 0)).Height);
+        Assert.True(header.Bottom <= grid.Top);
+        Assert.True(grid.Height > dialog.ClientSize.Height / 2);
+    });
+
+    [Theory]
+    [InlineData(0L, "0KB")]
+    [InlineData(1861222L, "1.77MB")]
+    [InlineData(1073741824L, "1GB")]
+    [InlineData(132499741081L, "123.4GB")]
+    [InlineData(1073634449817L, "999.9GB")]
+    [InlineData(1099511627776L, "1TB")]
+    public void DetailSizesUseThreeSignificantDigitsOrFourForLargeGigabytes(long bytes, string expected)
+        => Assert.Equal(expected, ManifestTable.FormatSize(bytes, detailedGigabytes: true));
 
     [Fact]
     public void CancellingFileSelectionDoesNotExport() => NativeTestHost.OnSta(() =>

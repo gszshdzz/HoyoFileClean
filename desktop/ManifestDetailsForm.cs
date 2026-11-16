@@ -40,19 +40,19 @@ internal sealed class ManifestDetailsForm : Form
         content.RowCount = files.Length;
         content.SelectionChanged += (_, _) => content.ClearSelection();
         content.ClearSelection();
-        var header = new TextBox
+        var header = new Label
         {
-            Name = "ManifestInformation", Multiline = true, ReadOnly = true, Dock = DockStyle.Fill,
-            ScrollBars = ScrollBars.Vertical,
-            Text = input.File.Name + Environment.NewLine + information + Environment.NewLine
-                + ResultText.Describe(snapshot, L.Get("ManifestDetailsTitle"))
+            Name = "ManifestInformation", AutoSize = true, Dock = DockStyle.Fill,
+            UseMnemonic = false, Margin = new Padding(3, 3, 3, 12),
+            Text = information + "      " + L.Format("ManifestDetailsSummary", snapshot.FileCount,
+                ManifestTable.FormatSize(snapshot.TotalSize, detailedGigabytes: true), snapshot.HashedFileCount)
         };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         buttons.Controls.AddRange([close, export]);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 1, RowCount = 4 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 30));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 70));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(header, 0, 0);
@@ -61,7 +61,6 @@ internal sealed class ManifestDetailsForm : Form
         layout.Controls.Add(buttons, 0, 3);
         Controls.Add(layout);
         ActiveControl = close;
-        Shown += (_, _) => header.Select(0, 0);
         CancelButton = close;
         close.Click += (_, _) => Close();
         export.Click += async (_, _) => await ExportAsync();

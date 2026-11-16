@@ -23,10 +23,10 @@ public sealed class GameIdentificationTests
         string firstLine = result.Split(Environment.NewLine)[0];
         Assert.Contains("hk4e_cn", firstLine);
         Assert.Contains("7.2.0", firstLine);
-        Assert.Contains("官服", firstLine);
+        Assert.DoesNotContain("官服", firstLine);
         Assert.Contains("7.2.0", result);
-        Assert.Contains("官服", result);
-        Assert.Contains("未检测到", result);
+        Assert.DoesNotContain("官服", result);
+        Assert.DoesNotContain("未检测到", result);
         Label information = Find<Label>(form, "IdentificationResult");
         ListBox exclusions = Find<ListBox>(form, "ExcludedDirectories");
         Assert.True(information.RectangleToScreen(information.ClientRectangle).Bottom <=
@@ -123,7 +123,8 @@ public sealed class GameIdentificationTests
         ScanAndWait(form, session);
         GameIdentification identification = Assert.IsType<GameIdentification>(session.Identification);
         Assert.Equal("newPlugin", Assert.Single(identification.Information["plugins"].Values).Item);
-        Assert.False(identification.Information.ContainsKey("package"));
+        Assert.Equal("game", Assert.Single(identification.Information["package"].Values).RawValue);
+        Assert.Contains("发现的包体", Find<Label>(form, "IdentificationResult").Text);
         Find<Button>(form, "Next").PerformClick();
         Find<RadioButton>(form, "ManualSource").Checked = true;
         var file = new FileInfo(reference);
@@ -178,6 +179,57 @@ public sealed class GameIdentificationTests
         Directory.CreateDirectory(path);
         return path;
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IdentificationUsesScanExclusionsInBothHashModes(bool hashes) => OnSta(() =>
+    {
+        string root = CreateRoot();
+        WriteGameConfig(root);
+        string relative = "YuanShen_Data/StreamingAssets/AudioAssets/Chinese";
+        Directory.CreateDirectory(Path.Combine(root, relative));
+        File.WriteAllText(Path.Combine(root, relative, "voice.pck"), "resource");
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        Find<CheckBox>(form, "HeavyScan").Checked = hashes;
+        Find<ListBox>(form, "ExcludedDirectories").Items.Add(relative);
+        ScanAndWait(form, session);
+        Assert.NotNull(session.Game);
+        Assert.NotNull(session.Identification);
+        Assert.False(session.Identification.Information.ContainsKey("package"));
+        Assert.DoesNotContain(session.Game.Files.Keys, path => path.StartsWith(relative + "/", StringComparison.Ordinal));
+        Assert.Equal(hashes, session.Game.HashedFileCount > 0);
+    });
+
+    [Theory]
+    [InlineData("YuanShen_Data/StreamingAssets/AudioAssets/", "Chinese", "hk4e_cn")]
+    [InlineData("StarRail_Data/Persistent/Audio/AudioPackage/Windows/", "Chinese(PRC)", "hkrpg")]
+    public void PathOnlyIdentificationDisplaysBizOrGameAndEveryDetectedLanguage(string prefix, string chinese, string identity) => OnSta(() =>
+    {
+        string root = CreateRoot();
+        foreach (string language in new[] { chinese, "Japanese" })
+        {
+            string folder = Path.Combine(root, prefix, language);
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "voice.pck"), "resource");
+        }
+        using var form = CreateForm(out WizardSession session);
+        Find<TextBox>(form, "GameRoot").Text = root;
+        ScanAndWait(form, session);
+        Assert.NotNull(session.Game);
+        Assert.NotNull(session.Identification);
+        string result = Find<Label>(form, "IdentificationResult").Text;
+        Assert.Contains(identity, result.Split(Environment.NewLine)[0]);
+        Assert.Contains("zh-cn", result);
+        Assert.Contains("ja-jp", result);
+        Assert.Contains("发现的包体", result);
+        Assert.DoesNotContain("未检测到", result);
+        Assert.DoesNotContain("官服", result);
+        Assert.False(session.Identification.Information.ContainsKey("version"));
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        Assert.Empty(Find<ManifestTable>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
+    });
 
     private static MainForm CreateForm(out WizardSession session)
     {

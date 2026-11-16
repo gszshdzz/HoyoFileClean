@@ -55,7 +55,8 @@ public static class DirectoryScanner
         bool computeHashes = false,
         Action<ScanProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        GameIdentification? identification = null)
+        GameIdentification? identification = null,
+        bool identifyGame = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         string root = NormalizeRootPath(rootPath);
@@ -67,6 +68,9 @@ public static class DirectoryScanner
         files.Sort((left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
         skippedLinks.Sort(StringComparer.Ordinal);
         FilePathRules.ValidatePaths(files.Select(file => file.Path));
+        if (identifyGame)
+            identification = GameIdentifier.Identify(root, GameIdentifier.LoadConfiguration(), cancellationToken,
+                files.Select(file => file.Path));
         long totalSize;
         try
         {

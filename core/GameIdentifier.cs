@@ -18,17 +18,32 @@ public static class GameIdentifier
         => Identify(rootPath, LoadConfiguration(), cancellationToken);
 
     public static GameIdentification Identify(string rootPath, IdentificationConfiguration<GameDetectionDefinition> configuration,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IEnumerable<string>? scannedPaths = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Validate(configuration);
         string root = DirectoryScanner.NormalizeRootPath(rootPath);
         DirectoryScanner.ValidateDirectoryPath(root);
+        string[] paths = (scannedPaths ?? DirectoryScanner.Scan(root, cancellationToken: cancellationToken).Files.Keys).ToArray();
         var texts = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var detections = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string id, GameDetectionDefinition definition) in configuration.Detections)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (definition.Pattern is null)
+            {
+                string[] candidates = definition.Paths.Select(candidate =>
+                    NormalizeCandidatePath(definition.Prefix ? candidate.TrimEnd('/', '\\') : candidate)
+                    + (definition.Prefix ? "/" : "")).ToArray();
+                string? matched = paths.FirstOrDefault(path =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return candidates.Any(candidate => definition.Prefix
+                        ? path.StartsWith(candidate, StringComparison.Ordinal) : path == candidate);
+                });
+                if (matched is not null) detections.Add(id, matched);
+                continue;
+            }
             var matches = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             Regex pattern = CreatePattern(definition.Pattern);
             foreach (string relative in definition.Paths)
@@ -95,9 +110,18 @@ public static class GameIdentifier
             string id = key.Split(':')[0];
             if (!configuration.Detections.TryGetValue(id, out GameDetectionDefinition? definition)
                 || string.IsNullOrWhiteSpace(value) || key.EndsWith(':') || key.Count(character => character == ':') > 1
-                || key.Contains(':') != CreatePattern(definition.Pattern).GetGroupNames().Contains("item"))
+                || key.Contains(':') != (definition.Pattern is not null
+                    && CreatePattern(definition.Pattern).GetGroupNames().Contains("item")))
                 throw new CoreException(CoreErrorCode.GameDetectionInvalid, input: key);
-            Resolve([value], definition.CanCompare, key);
+            if (definition.Pattern is null)
+            {
+                if (!definition.Paths.Any(path => definition.Prefix
+                    ? value.StartsWith(NormalizeCandidatePath(path.TrimEnd('/', '\\')) + "/", StringComparison.Ordinal)
+                    : value == NormalizeCandidatePath(path)))
+                    throw new CoreException(CoreErrorCode.GameDetectionInvalid, input: key);
+                FilePathRules.NormalizeRelative(value);
+            }
+            else Resolve([value], definition.CanCompare, key);
         }
         return Interpret(new Dictionary<string, string>(detections, StringComparer.Ordinal), configuration, default);
     }
@@ -127,9 +151,13 @@ public static class GameIdentifier
             return separator < 0 ? new IdentificationClue(pair.Key, pair.Value)
                 : new IdentificationClue(pair.Key[..separator], pair.Value, pair.Key[(separator + 1)..]);
         }).ToArray();
-        var information = IdentificationEvaluator.Evaluate(clues, configuration.Results, cancellationToken)
+        var meanings = IdentificationEvaluator.Compile(configuration.Detections.Select(pair => (pair.Key, pair.Value.Meanings)));
+        var information = IdentificationEvaluator.Evaluate(clues, meanings, cancellationToken)
+            .Where(pair => pair.Value.Values.Count > 0)
             .ToDictionary(pair => pair.Key, pair => new IdentifiedInformation(
-                configuration.Results[pair.Key].LabelTextId!, pair.Value.Values), StringComparer.Ordinal);
+                meanings[pair.Key].Policy.LabelTextId!, pair.Value.Values), StringComparer.Ordinal);
+        if (!information.ContainsKey("game") && !information.ContainsKey("biz"))
+            throw new CoreException(CoreErrorCode.GameIdentificationFailed, input: "game");
         return new GameIdentification(new ReadOnlyDictionary<string, string>(detections),
             new ReadOnlyDictionary<string, IdentifiedInformation>(information));
     }
@@ -196,17 +224,19 @@ public static class GameIdentifier
     {
         try
         {
-            if (configuration.Detections.Count == 0 || !configuration.Results.Values.Any(info => info.Required))
+            if (configuration.Detections.Count == 0)
                 throw ConfigurationError();
             foreach ((string id, GameDetectionDefinition detection) in configuration.Detections)
             {
                 if (!IsValidItem(id) || detection is null || detection.Paths.Length == 0
-                    || string.IsNullOrWhiteSpace(detection.Pattern)
-                    || !CreatePattern(detection.Pattern).GetGroupNames().Contains("value")) throw ConfigurationError();
-                foreach (string path in detection.Paths) NormalizeCandidatePath(path);
+                    || detection.Pattern is not null && (string.IsNullOrWhiteSpace(detection.Pattern)
+                        || !CreatePattern(detection.Pattern).GetGroupNames().Contains("value"))
+                    || detection.Pattern is null && (detection.CanCompare || detection.JsonObjectKeys)
+                    || detection.Pattern is not null && detection.Prefix) throw ConfigurationError();
+                foreach (string path in detection.Paths) NormalizeCandidatePath(detection.Prefix ? path.TrimEnd('/', '\\') : path);
             }
-            IdentificationEvaluator.Validate(configuration.Detections.Keys, configuration.Results);
-            if (configuration.Results.Values.Any(info => string.IsNullOrWhiteSpace(info.LabelTextId)))
+            var meanings = IdentificationEvaluator.Compile(configuration.Detections.Select(pair => (pair.Key, pair.Value.Meanings)));
+            if (meanings.Values.Any(field => string.IsNullOrWhiteSpace(field.Policy.LabelTextId)))
                 throw ConfigurationError();
         }
         catch (Exception error) when (error is ArgumentException or FormatException or NullReferenceException

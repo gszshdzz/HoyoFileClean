@@ -15,35 +15,40 @@ public sealed class ManifestIdentifier
     };
     private readonly (string Id, Func<object?, Func<string, bool>, CancellationToken, bool>[] Read,
         bool CollectAll)[] rules;
-    private readonly IReadOnlyDictionary<string, IdentificationResultDefinition> results;
+    private readonly IReadOnlyDictionary<string, IdentificationEvaluator.Definition> meanings;
 
     public ManifestIdentifier(IdentificationConfiguration<ManifestDetectionDefinition[]> configuration)
     {
-        IdentificationEvaluator.Validate(configuration.Detections.Keys, configuration.Results);
-        if (configuration.Results.Values.SelectMany(result => result.Rules)
-            .Any(rule => rule.TextId is not null || rule.DisplayFormatTextId is not null))
-            throw new ArgumentException("Manifest metadata requires raw values, not presentation text IDs.", nameof(configuration));
-        results = configuration.Results.ToDictionary(pair => pair.Key,
-            pair => pair.Value with { Rules = pair.Value.Rules.Select(rule => rule with
-            {
-                When = new Dictionary<string, string>(rule.When, StringComparer.Ordinal),
-                AnyDetection = rule.AnyDetection?.ToArray()
-            }).ToArray() }, StringComparer.Ordinal);
+        if (configuration?.Detections is null)
+            throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid);
+        foreach (var (id, selectors) in configuration.Detections)
+        {
+            if (string.IsNullOrWhiteSpace(id) || selectors is not { Length: > 0 }
+                || selectors.Any(selector => selector is null || selector.Meanings is not { Count: > 0 }))
+                throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: id);
+            var first = selectors[0].Meanings!;
+            if (selectors.Any(selector => selector.Meanings!.Count != first.Count
+                || first.Any(pair => !selector.Meanings.TryGetValue(pair.Key, out var meaning) || meaning != pair.Value)))
+                throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: id);
+        }
+        meanings = IdentificationEvaluator.Compile(configuration.Detections.SelectMany(pair =>
+            pair.Value.Select(selector => (pair.Key, selector.Meanings))));
+        if (meanings.Values.SelectMany(field => field.Mappings)
+            .Any(mapping => mapping.Meaning.TextId is not null || mapping.Meaning.DisplayFormatTextId is not null))
+            throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid);
         rules = configuration.Detections.Select(pair =>
         {
-            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is not { Length: > 0 })
-                throw new ArgumentException("Each detection requires an ID and selectors.", nameof(configuration));
             return (pair.Key, pair.Value.Select(rule =>
             {
                 if (rule is null || string.IsNullOrWhiteSpace(rule.Target) || string.IsNullOrEmpty(rule.Match)
                     || (rule.Exact && rule.Prefix))
-                    throw new ArgumentException("Each selector requires a target and match.", nameof(configuration));
+                    throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: pair.Key);
                 StringComparison comparison = rule.IgnoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
                 bool Match(string value) => rule.Exact ? value.Equals(rule.Match, comparison)
                     : rule.Prefix ? value.StartsWith(rule.Match, comparison) : value.Contains(rule.Match, comparison);
                 return CompileRead(typeof(FileListDocument), rule.Target.Split('.'), 0, Match);
-            }).ToArray(), configuration.Results.Values.SelectMany(result => result.Rules)
-                .Any(result => result.Source == pair.Key || result.When.ContainsKey(pair.Key)));
+            }).ToArray(), meanings.Values.SelectMany(field => field.Mappings)
+                .Any(mapping => mapping.Id == pair.Key && mapping.Meaning.FromDetection));
         }).ToArray();
     }
 
@@ -60,7 +65,7 @@ public sealed class ManifestIdentifier
                 if (read(document, Collect, cancellationToken)) break;
             foreach (string value in values) detections.Add(new(id, value));
         }
-        var identified = IdentificationEvaluator.Evaluate(detections, results, cancellationToken);
+        var identified = IdentificationEvaluator.Evaluate(detections, meanings, cancellationToken);
         return new ReadOnlyDictionary<string, ManifestMetadataField>(identified.Where(pair => pair.Value.Matches.Count > 0)
             .OrderBy(pair => pair.Key, StringComparer.Ordinal).ToDictionary(pair => pair.Key,
                 pair => new ManifestMetadataField(Array.AsReadOnly(pair.Value.Matches.Select(match =>
@@ -91,7 +96,7 @@ public sealed class ManifestIdentifier
         JsonPropertyInfo? property = index < path.Length
             ? Contract.GetTypeInfo(type).Properties.FirstOrDefault(item => item.Name == path[index]) : null;
         if (property?.Get is not { } get)
-            throw new ArgumentException($"Target '{string.Join('.', path)}' must select an existing string field.", nameof(path));
+            throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: string.Join('.', path));
         var next = CompileRead(property.PropertyType, path, index + 1, match);
         return (value, collect, token) => value is not null && next(get(value), collect, token);
     }

@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace HoyoFileClean;
 
 public sealed record ManifestDetectionDefinition(string Target, string Match,
-    bool Exact = false, bool IgnoreCase = false, bool Prefix = false);
+    bool Exact = false, bool IgnoreCase = false, bool Prefix = false,
+    Dictionary<string, IdentificationMeaning>? Meanings = null);
 
 public sealed record ManifestMetadataMatch(string Id, string Value);
 

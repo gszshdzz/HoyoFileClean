@@ -35,7 +35,8 @@ public sealed class GameIdentifierTests
         Assert.Equal("7.2.0", result.Detections["ini_version"]);
         Assert.False(result.Information.ContainsKey("game"));
         Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
-        Assert.Equal("IdentificationChannelOfficial", Assert.Single(result.Information["channel"].Values).TextId);
+        Assert.Equal("1", result.Detections["ini_channel"]);
+        Assert.False(result.Information.ContainsKey("channel"));
         Assert.Equal("1.0.0", Assert.Single(result.Information["plugins"].Values).RawValue);
         Assert.Equal("COa9vWaYX9", Assert.Single(result.Information["plugins"].Values).Item);
         Assert.Equal("IdentificationPluginVersion", Assert.Single(result.Information["plugins"].Values).DisplayFormatTextId);
@@ -70,7 +71,6 @@ public sealed class GameIdentifierTests
     [Theory]
     [InlineData("")]
     [InlineData("game_version=7.2.0")]
-    [InlineData("game_version=7.2.0\nchannel=9\nsub_channel=1\nuapc={\"hk4e_cn\":{}}")]
     public void MissingIdentityOrUnknownMappingFails(string text)
     {
         Write(text);
@@ -85,15 +85,11 @@ public sealed class GameIdentifierTests
         Write("identity=future\nchannel=42", "identity.txt");
         var configuration = new IdentificationConfiguration<GameDetectionDefinition>(new()
         {
-            ["release"] = new(["./missing.ini", "./future.txt"], @"^release=(?<value>[^\r\n]+)", true),
-            ["id"] = new(["identity.txt"], @"^identity=(?<value>[^\r\n]+)", false),
+            ["release"] = new(["./missing.ini", "./future.txt"], @"^release=(?<value>[^\r\n]+)", true,
+                Meanings: new() { ["version"] = new(FromDetection: true, LabelTextId: "VersionLabel", Required: true) }),
+            ["id"] = new(["identity.txt"], @"^identity=(?<value>[^\r\n]+)", false,
+                Meanings: new() { ["game"] = new(TextId: "FutureGame", LabelTextId: "GameLabel", Required: true) }),
             ["channel"] = new(["identity.txt"], @"^channel=(?<value>[^\r\n]+)", false)
-        }, new()
-        {
-            ["game"] = new("GameLabel", true, false,
-                [new(new() { ["id"] = "future", ["channel"] = "42" }, TextId: "FutureGame")]),
-            ["version"] = new("VersionLabel", true, false,
-                [new(new() { ["id"] = "future" }, Source: "release")])
         });
         GameIdentification result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken);
         Assert.Equal("FutureGame", Assert.Single(result.Information["game"].Values).TextId);
@@ -110,7 +106,8 @@ public sealed class GameIdentifierTests
         var configuration = kind switch
         {
             "empty-detections" => original with { Detections = [] },
-            "empty-information" => original with { Results = [] },
+            "empty-information" => original with { Detections = original.Detections.ToDictionary(pair => pair.Key,
+                pair => pair.Value with { Meanings = null }) },
             _ => original with { Detections = null! }
         };
         Assert.Equal(CoreErrorCode.GameIdentificationConfigurationInvalid,
@@ -177,7 +174,7 @@ public sealed class GameIdentifierTests
         var result = GameIdentifier.Identify(Path.GetDirectoryName(path)!, TestContext.Current.CancellationToken);
         Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
         Assert.Equal("7.2.0", Assert.Single(result.Information["version"].Values).RawValue);
-        Assert.Equal("IdentificationChannelOfficial", Assert.Single(result.Information["channel"].Values).TextId);
+        Assert.False(result.Information.ContainsKey("channel"));
         Assert.Equal("1.0.0", Assert.Single(result.Information["plugins"].Values).RawValue);
         Assert.Equal(before, File.ReadAllBytes(path));
         string acceptance = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -234,20 +231,15 @@ public sealed class GameIdentifierTests
     {
         Write(Sample);
         var config = GameIdentifier.LoadConfiguration();
-        IdentificationResultDefinition original = config.Results["version"];
-        config.Results["version"] = original with
-        {
-            Rules = [new(new() { ["ini_channel"] = "unknown" }, TextId: "unmatched"), .. original.Rules]
-        };
+        config.Detections["alternative_version"] = new(["missing.ini"], @"^version=(?<value>.+)",
+            Meanings: new() { ["version"] = new("other-version", LabelTextId: "IdentificationLabelVersion") });
         Assert.Equal("7.2.0", Assert.Single(GameIdentifier.Identify(root, config,
             TestContext.Current.CancellationToken).Information["version"].Values).RawValue);
-        config.Results["version"] = original with
-        {
-            Rules = [.. original.Rules, new(new() { ["ini_channel"] = "1" }, TextId: "other-version")]
-        };
+        config.Detections["alternative_version"] = config.Detections["alternative_version"] with { Paths = ["config.ini"], Pattern = @"^channel=(?<value>.+)" };
         Assert.Equal(CoreErrorCode.GameDetectionConflict,
             Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken)).Code);
-        config.Results["version"] = config.Results["version"] with { Multiple = true };
+        foreach (string id in new[] { "ini_version", "alternative_version" })
+            config.Detections[id].Meanings!["version"] = config.Detections[id].Meanings!["version"] with { Multiple = true };
         Assert.Equal(2, GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken).Information["version"].Values.Count);
     }
 
@@ -256,8 +248,8 @@ public sealed class GameIdentifierTests
     {
         Write(Sample);
         var config = GameIdentifier.LoadConfiguration();
-        config.Results["biz"] = config.Results["biz"] with
-        { Rules = [new(new() { ["missing"] = "anything" }, TextId: "game")] };
+        config.Detections["ini_game_id"].Meanings!["biz"] = new(RawValue: "game", FromDetection: true,
+            LabelTextId: "IdentificationLabelGame");
         Assert.Equal(CoreErrorCode.GameIdentificationConfigurationInvalid,
             Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken)).Code);
         config = GameIdentifier.LoadConfiguration();
@@ -284,8 +276,6 @@ public sealed class GameIdentifierTests
     {
         Write("game_version=7.2.0\nuapc={\"hyp\":{},\"" + gameId + "\":{}}");
         var configuration = GameIdentifier.LoadConfiguration();
-        // Channel meanings remain game-specific adaptation data, not identity filters.
-        configuration.Results.Remove("channel");
         var result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken);
         Assert.Equal(gameId, result.Detections["ini_game_id"]);
         Assert.Equal(gameId, Assert.Single(result.Information["biz"].Values).RawValue);
@@ -346,7 +336,7 @@ public sealed class GameIdentifierTests
             imported.Sources[0].Metadata!["biz"].Value);
         Assert.Equal("hk4e", imported.Sources[0].Metadata!["game"].Value);
         Assert.Equal("game", imported.Sources[0].Metadata!["package"].Value);
-        Assert.False(restored.Information.ContainsKey("package"));
+        Assert.Equal("game", Assert.Single(restored.Information["package"].Values).RawValue);
         Assert.Equal(identification.Detections, restored.Detections);
         Assert.Equal(identification.Information["plugins"].Values, restored.Information["plugins"].Values);
         string converted = output + ".converted.json";
@@ -384,12 +374,10 @@ public sealed class GameIdentifierTests
         Write("identity=future\nrelease=1.2.0", "future.txt");
         var config = new IdentificationConfiguration<GameDetectionDefinition>(new()
         {
-            ["future_id"] = new(["future.txt"], @"^identity=(?<value>[^\r\n]+)", false),
-            ["future_version"] = new(["future.txt"], @"^release=(?<value>[^\r\n]+)", true)
-        }, new()
-        {
-            ["biz"] = new("IdentificationLabelGame", true, false, [new(new(), Source: "future_id")]),
-            ["version"] = new("IdentificationLabelVersion", true, false, [new(new(), Source: "future_version")])
+            ["future_id"] = new(["future.txt"], @"^identity=(?<value>[^\r\n]+)", false,
+                Meanings: new() { ["biz"] = new(FromDetection: true, LabelTextId: "IdentificationLabelGame", Required: true) }),
+            ["future_version"] = new(["future.txt"], @"^release=(?<value>[^\r\n]+)", true,
+                Meanings: new() { ["version"] = new(FromDetection: true, LabelTextId: "IdentificationLabelVersion", Required: true) })
         });
         var identification = GameIdentifier.Identify(root, config, TestContext.Current.CancellationToken);
         var snapshot = DirectoryScanner.Scan(root, cancellationToken: TestContext.Current.CancellationToken,
@@ -414,6 +402,141 @@ public sealed class GameIdentifierTests
         config.Detections.Add(id, new(["missing.ini"], @"(?<value>.+)", false));
         Assert.Equal(CoreErrorCode.GameIdentificationConfigurationInvalid,
             Assert.Throws<CoreException>(() => GameIdentifier.Identify(root, config,
-                TestContext.Current.CancellationToken)).Code);
+                 TestContext.Current.CancellationToken)).Code);
+    }
+
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("1", "1")]
+    [InlineData("1", "2")]
+    [InlineData("2", "1")]
+    [InlineData("9", "42")]
+    public void ChannelSwitchesDoNotGateIdentityOrInventManifestDifferences(string channel, string subChannel)
+    {
+        Write("uapc={\"hk4e_cn\":{}}\nchannel=" + channel + "\nsub_channel=" + subChannel);
+        // Absent fields are unknown; empty matched values remain invalid input.
+        if (channel.Length == 0) Write("uapc={\"hk4e_cn\":{}}");
+        var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
+        Assert.False(result.Information.ContainsKey("channel"));
+        Assert.False(result.Information.ContainsKey("version"));
+        Assert.False(result.Information.ContainsKey("plugins"));
+        Assert.Equal(channel.Length == 0 ? null : channel, result.Detections.GetValueOrDefault("ini_channel"));
+        Assert.Equal(subChannel.Length == 0 ? null : subChannel, result.Detections.GetValueOrDefault("ini_sub_channel"));
+    }
+
+    [Theory]
+    [InlineData("YuanShen.exe", "hk4e", "hk4e_cn")]
+    [InlineData("GenshinImpact.exe", "hk4e", "hk4e_global")]
+    [InlineData("StarRail.exe", "hkrpg", null)]
+    [InlineData("ZenlessZoneZero.exe", "nap", null)]
+    [InlineData("BH3.exe", "bh3", null)]
+    public void RootExecutableIdentifiesOnlyWhatItsOwnRuleProves(string executable, string game, string? biz)
+    {
+        string path = Write("not text", executable);
+        using var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal(game, Assert.Single(result.Information["game"].Values).RawValue);
+        Assert.Equal(biz, result.Information.GetValueOrDefault("biz")?.Values.Single().RawValue);
+        Assert.False(result.Information.ContainsKey("version"));
+        Assert.Equal("game", Assert.Single(result.Information["package"].Values).RawValue);
+    }
+
+    [Theory]
+    [InlineData("YuanShen_Data/StreamingAssets/AudioAssets/", "Chinese", "English(US)", "Japanese", "Korean", "hk4e", "hk4e_cn")]
+    [InlineData("GenshinImpact_Data/StreamingAssets/AudioAssets/", "Chinese", "English(US)", "Japanese", "Korean", "hk4e", "hk4e_global")]
+    [InlineData("StarRail_Data/Persistent/Audio/AudioPackage/Windows/", "Chinese(PRC)", "English", "Japanese", "Korean", "hkrpg", null)]
+    public void VoicePathsIdentifyMultipleLanguagesAndRestoreWithoutReadingResourceBodies(string prefix,
+        string zh, string en, string ja, string ko, string game, string? biz)
+    {
+        foreach (string directory in new[] { zh, en, ja, ko })
+        {
+            string folder = Path.Combine(root, prefix, directory, "nested");
+            Directory.CreateDirectory(folder);
+            File.WriteAllBytes(Path.Combine(folder, "voice.pck"), [0xff, 0xfe, 0x00]);
+        }
+        var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal(game, Assert.Single(result.Information["game"].Values).RawValue);
+        Assert.Equal(biz, result.Information.GetValueOrDefault("biz")?.Values.Single().RawValue);
+        Assert.Equal(new[] { "en-us", "ja-jp", "ko-kr", "zh-cn" },
+            result.Information["package"].Values.Select(value => value.RawValue).Order());
+        Directory.Move(root, root + "-moved");
+        var restored = GameIdentifier.FromDetections(result.Detections);
+        Assert.Equal(result.Information["package"].Values, restored.Information["package"].Values);
+        Assert.Equal(result.Detections, restored.Detections);
+    }
+
+    [Fact]
+    public void EmptyDirectoriesBackupsAndSimilarPathNamesDoNotProveResources()
+    {
+        Write(Sample);
+        Directory.CreateDirectory(Path.Combine(root, "YuanShen_Data/StreamingAssets/AudioAssets/Chinese"));
+        string[] paths = ["Backup/YuanShen.exe", "YuanShen.exe.bak",
+            "Backup/YuanShen_Data/StreamingAssets/AudioAssets/Japanese/voice.pck",
+            "YuanShen_Data/StreamingAssets/AudioAssets/ChineseOther/voice.pck"];
+        foreach (string path in paths)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(root, path))!);
+            File.WriteAllText(Path.Combine(root, path), "resource");
+        }
+        var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.False(result.Information.ContainsKey("package"));
+        Assert.False(result.Information.ContainsKey("game"));
+    }
+
+    [Fact]
+    public void ResourceIdentificationUsesExistingLightScanInsteadOfReadingDirectoriesAgain()
+    {
+        Write(Sample);
+        string folder = Path.Combine(root, "YuanShen_Data/StreamingAssets/AudioAssets/Chinese");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "voice.pck"), "resource");
+        var scan = DirectoryScanner.Scan(root, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(0, scan.HashedFileCount);
+        Directory.Move(folder, folder + "-moved");
+        var result = GameIdentifier.Identify(root, GameIdentifier.LoadConfiguration(),
+            TestContext.Current.CancellationToken, scan.Files.Keys);
+        Assert.Equal("zh-cn", Assert.Single(result.Information["package"].Values).RawValue);
+    }
+
+    [Fact]
+    public void DiscoveredPackagesIncludeMainVoiceAndConfiguredNonVoicePackages()
+    {
+        Write(Sample);
+        var configuration = GameIdentifier.LoadConfiguration();
+        configuration.Detections["extra_package"] = new(["Extra/"], Prefix: true,
+            Meanings: new() { ["package"] = new("extra", LabelTextId: "IdentificationLabelPackages", Multiple: true) });
+        string[] paths = ["YuanShen.exe", "YuanShen_Data/StreamingAssets/AudioAssets/Chinese/voice.pck", "Extra/file.bin"];
+        var result = GameIdentifier.Identify(root, configuration, TestContext.Current.CancellationToken, paths);
+        Assert.Equal(new[] { "extra", "game", "zh-cn" },
+            result.Information["package"].Values.Select(value => value.RawValue).Order());
+        var restored = GameIdentifier.FromDetections(result.Detections, configuration);
+        Assert.Equal(result.Information["package"].Values, restored.Information["package"].Values);
+    }
+
+    [Fact]
+    public void FilePathIdentityConflictsWithDifferentRecordedBizRatherThanOverridingIt()
+    {
+        Write(Sample);
+        Write("game", "GenshinImpact.exe");
+        Assert.Equal(CoreErrorCode.GameDetectionConflict, Assert.Throws<CoreException>(() =>
+            GameIdentifier.Identify(root, TestContext.Current.CancellationToken)).Code);
+    }
+
+    [Fact]
+    public void PathEvidenceDoesNotFollowResourceLinksAndRejectsUnsafeRecordedPaths()
+    {
+        Write(Sample);
+        string voice = Path.Combine(root, "YuanShen_Data/StreamingAssets/AudioAssets/Chinese");
+        Directory.CreateDirectory(voice);
+        string target = Write("outside", "target.pck");
+        File.CreateSymbolicLink(Path.Combine(voice, "linked.pck"), target);
+        var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.False(result.Information.ContainsKey("package"));
+        var detections = new Dictionary<string, string>(result.Detections)
+        {
+            ["voice_hk4e_cn_zh"] = "YuanShen_Data/StreamingAssets/AudioAssets/Chinese/../outside.pck"
+        };
+        Assert.Throws<CoreException>(() => GameIdentifier.FromDetections(detections));
     }
 }

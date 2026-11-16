@@ -1,14 +1,10 @@
 namespace HoyoFileClean;
 
-public sealed record IdentificationResultRule(Dictionary<string, string> When, string? Source = null,
-    string? TextId = null, string? DisplayFormatTextId = null, string? RawValue = null,
-    string[]? AnyDetection = null);
+public sealed record IdentificationMeaning(string? RawValue = null, bool FromDetection = false,
+    string? LabelTextId = null, bool Required = false, bool Multiple = false,
+    bool RetainConflicts = false, string? TextId = null, string? DisplayFormatTextId = null);
 
-public sealed record IdentificationResultDefinition(string? LabelTextId = null, bool Required = false,
-    bool Multiple = false, IdentificationResultRule[] Rules = null!, bool RetainConflicts = false);
-
-public sealed record IdentificationConfiguration<TDetection>(Dictionary<string, TDetection> Detections,
-    Dictionary<string, IdentificationResultDefinition> Results);
+public sealed record IdentificationConfiguration<TDetection>(Dictionary<string, TDetection> Detections);
 
 public sealed record IdentifiedValue(string? RawValue, string? TextId, string? DisplayFormatTextId,
     string? Item = null);

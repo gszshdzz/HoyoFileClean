@@ -1,7 +1,8 @@
 namespace HoyoFileClean;
 
-public sealed record GameDetectionDefinition(string[] Paths, string Pattern, bool CanCompare,
-    bool JsonObjectKeys = false, string[]? IgnoredKeys = null);
+public sealed record GameDetectionDefinition(string[] Paths, string? Pattern = null, bool CanCompare = false,
+    bool JsonObjectKeys = false, string[]? IgnoredKeys = null,
+    Dictionary<string, IdentificationMeaning>? Meanings = null, bool Prefix = false);
 
 public sealed record IdentifiedInformation(string LabelTextId, IReadOnlyList<IdentifiedValue> Values);
 

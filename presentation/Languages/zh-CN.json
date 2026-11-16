@@ -1,4 +1,6 @@
 {
+  "CoreErrorCode_IdentificationConfigurationInvalid": "识别开发配置无效，请维护者检查检测规则及含义并重新构建程序。",
+  "IdentificationLabelPackages": "发现的包体",
   "ManifestOfficialBizLabel": "官方标识（biz）",
   "ManifestDetailsTitle": "Manifest 详情",
   "ExportManifestJson": "导出 JSON",
@@ -321,7 +323,7 @@
   "Button_CancelScan": "取消扫描",
   "CancellingScan": "正在取消识别／扫描…",
   "ScanCancelled": "识别／扫描已取消，未保留本次结果，可重新扫描。",
-  "IdentifyingBeforeScan": "正在识别游戏；识别成功后继续扫描…",
+  "IdentifyingBeforeScan": "正在扫描并识别游戏…",
   "IdentificationMissing": "游戏识别：尚无记录（旧扫描 JSON 可能未包含识别信息）。",
   "IdentificationNotDetected": "未检测到（不代表未安装）",
   "IdentifiedInformation": "{0}：{1}",

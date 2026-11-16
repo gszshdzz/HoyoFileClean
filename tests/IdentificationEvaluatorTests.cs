@@ -4,19 +4,23 @@ namespace HoyoFileClean.Tests;
 
 public sealed class IdentificationEvaluatorTests
 {
-    private static Dictionary<string, IdentificationResultDefinition> Results(bool retainConflicts = false,
+    private static Dictionary<string, Dictionary<string, IdentificationMeaning>> Meanings(bool retainConflicts = false,
         bool multiple = false) => new()
     {
-        ["biz"] = new("IdentificationLabelGame", Required: true, Multiple: multiple,
-            RetainConflicts: retainConflicts, Rules:
-            [
-                new(new(), AnyDetection: ["first", "corroboration"], RawValue: "hk4e_cn"),
-                new(new() { ["other"] = "other" }, RawValue: "hk4e_global")
-            ])
+        ["first"] = new() { ["biz"] = new("hk4e_cn", LabelTextId: "IdentificationLabelGame", Required: true,
+            Multiple: multiple, RetainConflicts: retainConflicts) },
+        ["corroboration"] = new() { ["biz"] = new("hk4e_cn", LabelTextId: "IdentificationLabelGame", Required: true,
+            Multiple: multiple, RetainConflicts: retainConflicts) },
+        ["other"] = new() { ["biz"] = new("hk4e_global", LabelTextId: "IdentificationLabelGame", Required: true,
+            Multiple: multiple, RetainConflicts: retainConflicts) }
     };
 
+    private static IReadOnlyDictionary<string, IdentificationEvaluator.Definition> Compile(
+        Dictionary<string, Dictionary<string, IdentificationMeaning>> meanings)
+        => IdentificationEvaluator.Compile(meanings.Select(pair => (pair.Key, (Dictionary<string, IdentificationMeaning>?)pair.Value)));
+
     private static (GameIdentification Game, IReadOnlyDictionary<string, ManifestMetadataField> Manifest) Identify(
-        string[] clues, Dictionary<string, IdentificationResultDefinition> results)
+        string[] clues, Dictionary<string, Dictionary<string, IdentificationMeaning>> meanings)
     {
         string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Temp", "opencode", "shared-identification-" + Guid.NewGuid().ToString("N"));
@@ -24,9 +28,9 @@ public sealed class IdentificationEvaluatorTests
         File.WriteAllLines(Path.Combine(root, "clues.txt"), clues.Select(id => id + "=" + id));
         string[] ids = ["first", "corroboration", "other"];
         var game = new IdentificationConfiguration<GameDetectionDefinition>(ids.ToDictionary(id => id,
-            id => new GameDetectionDefinition(["clues.txt"], "^" + id + "=(?<value>[^\\r\\n]+)", false)), results);
+            id => new GameDetectionDefinition(["clues.txt"], "^" + id + "=(?<value>[^\\r\\n]+)", false, Meanings: meanings[id])));
         var manifest = new IdentificationConfiguration<ManifestDetectionDefinition[]>(ids.ToDictionary(id => id,
-            id => new[] { new ManifestDetectionDefinition("files.path", id, Exact: true) }), results);
+            id => new[] { new ManifestDetectionDefinition("files.path", id, Exact: true, Meanings: meanings[id]) }));
         var token = TestContext.Current.CancellationToken;
         return (GameIdentifier.Identify(root, game, token), new ManifestIdentifier(manifest).Identify(
             new FileListDocument(clues.Length, clues.Length, clues.Select(id => new ManifestFile(id, 1)).ToArray()), token));
@@ -35,7 +39,7 @@ public sealed class IdentificationEvaluatorTests
     [Fact]
     public void DifferentReadersUseTheSameMappingsAndDeduplicateTheSameValue()
     {
-        var result = Identify(["first", "corroboration"], Results());
+        var result = Identify(["first", "corroboration"], Meanings());
         Assert.Equal("hk4e_cn", Assert.Single(result.Game.Information["biz"].Values).RawValue);
         Assert.Equal("hk4e_cn", result.Manifest["biz"].Value);
         Assert.False(result.Manifest["biz"].Conflict);
@@ -45,7 +49,7 @@ public sealed class IdentificationEvaluatorTests
     [Fact]
     public void BothReadersRetainConflictingCandidatesWhenConfigured()
     {
-        var result = Identify(["first", "other"], Results(retainConflicts: true));
+        var result = Identify(["first", "other"], Meanings(retainConflicts: true));
         Assert.Equal(new[] { "hk4e_cn", "hk4e_global" }, result.Game.Information["biz"].Values.Select(value => value.RawValue));
         Assert.True(result.Manifest["biz"].Conflict);
         Assert.Equal(result.Game.Information["biz"].Values.Select(value => value.RawValue).Order(),
@@ -61,12 +65,12 @@ public sealed class IdentificationEvaluatorTests
         if (!manifest)
         {
             Assert.Equal(CoreErrorCode.GameDetectionConflict, Assert.Throws<CoreException>(() =>
-                IdentificationEvaluator.Evaluate(clues, Results(), TestContext.Current.CancellationToken)).Code);
+                IdentificationEvaluator.Evaluate(clues, Compile(Meanings()), TestContext.Current.CancellationToken)).Code);
             return;
         }
         var configuration = new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-            new() { ["first"] = [new("files.path", "other")], ["corroboration"] = [new("files.path", "unused")],
-                ["other"] = [new("files.path", "other")] }, Results());
+            new() { ["first"] = [new("files.path", "other", Meanings: Meanings()["first"])],
+                ["other"] = [new("files.path", "other", Meanings: Meanings()["other"])] });
         Assert.Equal(CoreErrorCode.GameDetectionConflict, Assert.Throws<CoreException>(() =>
             new ManifestIdentifier(configuration).Identify(new(1, 1, [new("other", 1)]), TestContext.Current.CancellationToken)).Code);
     }
@@ -75,25 +79,23 @@ public sealed class IdentificationEvaluatorTests
     public void MissingRequiredResultAndCancellationAreShared()
     {
         Assert.Equal(CoreErrorCode.GameIdentificationFailed, Assert.Throws<CoreException>(() =>
-            IdentificationEvaluator.Evaluate([], Results(), TestContext.Current.CancellationToken)).Code);
+            IdentificationEvaluator.Evaluate([], Compile(Meanings()), TestContext.Current.CancellationToken)).Code);
         using var source = new CancellationTokenSource();
         source.Cancel();
         Assert.Throws<OperationCanceledException>(() => IdentificationEvaluator.Evaluate(
-            [], Results(), source.Token));
+            [], Compile(Meanings()), source.Token));
     }
 
     [Fact]
     public void DynamicCluesUseTheSamePresenceAndSourceSelectionRules()
     {
-        var definitions = new Dictionary<string, IdentificationResultDefinition>
+        var definitions = new Dictionary<string, Dictionary<string, IdentificationMeaning>>
         {
-            ["plugins"] = new(Multiple: true, Rules:
-                [new(new(), AnyDetection: ["plugin"], Source: "plugin")])
+            ["plugin"] = new() { ["plugins"] = new(Multiple: true, FromDetection: true) }
         };
-        IdentificationEvaluator.Validate(["plugin"], definitions);
         var result = IdentificationEvaluator.Evaluate(
             [new("plugin", "1.0.0", "first"), new("plugin", "2.0.0", "second")],
-            definitions, TestContext.Current.CancellationToken)["plugins"];
+            Compile(definitions), TestContext.Current.CancellationToken)["plugins"];
         Assert.Equal(new[] { "first", "second" }, result.Values.Select(value => value.Item));
         Assert.Equal(new[] { "plugin:first", "plugin:second" }, result.Matches.Select(match => match.Id));
     }
@@ -101,7 +103,7 @@ public sealed class IdentificationEvaluatorTests
     [Fact]
     public void BothReadersAcceptConfiguredMultipleValuesWithoutCallingThemConflicts()
     {
-        var result = Identify(["first", "other"], Results(multiple: true));
+        var result = Identify(["first", "other"], Meanings(multiple: true));
         Assert.Equal(2, result.Game.Information["biz"].Values.Count);
         Assert.True(result.Manifest["biz"].Multiple);
         Assert.False(result.Manifest["biz"].Conflict);
@@ -120,8 +122,8 @@ public sealed class IdentificationEvaluatorTests
     public void ManifestSourceReturnsActualMatchedFieldsAndPreservesEveryDistinctValue()
     {
         var configuration = new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-            new() { ["paths"] = [new("files.path", "Data/", Prefix: true)] },
-            new() { ["paths"] = new(Multiple: true, Rules: [new(new(), Source: "paths")]) });
+            new() { ["paths"] = [new("files.path", "Data/", Prefix: true,
+                Meanings: new() { ["paths"] = new(Multiple: true, FromDetection: true) })] });
         var result = new ManifestIdentifier(configuration).Identify(new(3, 3,
             [new("Data/a", 1), new("Other", 1), new("Data/b", 1)]), TestContext.Current.CancellationToken)["paths"];
         Assert.False(result.Conflict);
@@ -131,11 +133,11 @@ public sealed class IdentificationEvaluatorTests
     }
 
     [Fact]
-    public void FieldValueConditionsInspectEveryMatchingFieldNotOnlyTheFirst()
+    public void EachDetectionOwnsItsMeaningsWithoutCrossDetectionConditions()
     {
         var configuration = new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-            new() { ["paths"] = [new("files.path", "Data/", Prefix: true)] },
-            new() { ["game"] = new(Rules: [new(new() { ["paths"] = "Data/b" }, RawValue: "game")]) });
+            new() { ["paths"] = [new("files.path", "Data/b", Exact: true,
+                Meanings: new() { ["game"] = new("game") })] });
         var result = new ManifestIdentifier(configuration).Identify(new(2, 2,
             [new("Data/a", 1), new("Data/b", 1)]), TestContext.Current.CancellationToken);
         Assert.Equal("game", result["game"].Value);
@@ -145,8 +147,8 @@ public sealed class IdentificationEvaluatorTests
     public void PresenceOnlyManifestRuleDoesNotRetainEveryMatchingPath()
     {
         var configuration = new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-            new() { ["paths"] = [new("files.path", "Data/", Prefix: true)] },
-            new() { ["game"] = new(Rules: [new(new(), AnyDetection: ["paths"], RawValue: "game")]) });
+            new() { ["paths"] = [new("files.path", "Data/", Prefix: true,
+                Meanings: new() { ["game"] = new("game") })] });
         var identifier = new ManifestIdentifier(configuration);
         ManifestFile[] files = Enumerable.Range(0, 100000).Select(index => new ManifestFile($"Data/{index}", 1)).ToArray();
         var document = new FileListDocument(files.Length, files.Length, files);
@@ -163,40 +165,35 @@ public sealed class IdentificationEvaluatorTests
     public void ManifestRejectsPresentationOnlyValuesInsteadOfSerializingNullMetadata()
     {
         var configuration = new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-            new() { ["id"] = [new("files.path", "a")] },
-            new() { ["game"] = new(Rules: [new(new(), AnyDetection: ["id"], TextId: "GameLabel")]) });
-        Assert.Throws<ArgumentException>(() => new ManifestIdentifier(configuration));
+            new() { ["id"] = [new("files.path", "a",
+                Meanings: new() { ["game"] = new(TextId: "GameLabel") })] });
+        Assert.Equal(CoreErrorCode.IdentificationConfigurationInvalid,
+            Assert.Throws<CoreException>(() => new ManifestIdentifier(configuration)).Code);
     }
 
     [Fact]
     public void CompiledManifestRulesDoNotRetainMutableConfigurationArrays()
     {
-        string[] ids = ["id"];
+        var meanings = new Dictionary<string, IdentificationMeaning> { ["game"] = new("game") };
         var configuration = new IdentificationConfiguration<ManifestDetectionDefinition[]>(
-            new() { ["id"] = [new("files.path", "a")] },
-            new() { ["game"] = new(Rules: [new(new(), AnyDetection: ids, RawValue: "game")]) });
+            new() { ["id"] = [new("files.path", "a", Meanings: meanings)] });
         var identifier = new ManifestIdentifier(configuration);
-        ids[0] = "changed";
+        meanings["game"] = new("changed");
         configuration.Detections.Clear();
-        configuration.Results.Clear();
         Assert.Equal("game", identifier.Identify(new(1, 1, [new("a", 1)]),
             TestContext.Current.CancellationToken)["game"].Value);
     }
 
     [Fact]
-    public void InvalidMappingReferencesAndAmbiguousOutputModesAreRejected()
+    public void InconsistentPoliciesAndAmbiguousOutputModesAreRejected()
     {
-        var results = Results();
-        Assert.Throws<ArgumentException>(() => IdentificationEvaluator.Validate(["first"], results));
-        results["biz"] = results["biz"] with
-        {
-            Rules = [new(new(), RawValue: "raw", TextId: "translated")]
-        };
-        Assert.Throws<ArgumentException>(() => IdentificationEvaluator.Validate([], results));
-        results["biz"] = results["biz"] with
-        {
-            Rules = [new(new(), AnyDetection: [], RawValue: "raw")]
-        };
-        Assert.Throws<ArgumentException>(() => IdentificationEvaluator.Validate([], results));
+        var meanings = Meanings();
+        meanings["first"]["biz"] = meanings["first"]["biz"] with { Multiple = true };
+        Assert.Equal(CoreErrorCode.IdentificationConfigurationInvalid, Assert.Throws<CoreException>(() => Compile(meanings)).Code);
+        meanings = Meanings();
+        meanings["first"]["biz"] = new(RawValue: "raw", TextId: "translated");
+        Assert.Equal(CoreErrorCode.IdentificationConfigurationInvalid, Assert.Throws<CoreException>(() => Compile(meanings)).Code);
+        meanings["first"]["biz"] = new();
+        Assert.Equal(CoreErrorCode.IdentificationConfigurationInvalid, Assert.Throws<CoreException>(() => Compile(meanings)).Code);
     }
 }

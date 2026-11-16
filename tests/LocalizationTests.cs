@@ -136,13 +136,13 @@ public sealed class LocalizationTests
     public void IdentificationRuleTextIdsExistAndTemplatesAcceptExtractedValues()
     {
         var configuration = GameIdentifier.LoadConfiguration();
-        foreach (IdentificationResultDefinition information in configuration.Results.Values)
+        foreach (IdentificationMeaning information in configuration.Detections.Values
+            .SelectMany(detection => detection.Meanings?.Values ?? Enumerable.Empty<IdentificationMeaning>()))
         {
             Assert.NotNull(information.LabelTextId);
             Assert.True(Text.Contains(information.LabelTextId), information.LabelTextId);
             Assert.Equal(0, CompositeFormat.Parse(Text.Get(information.LabelTextId)).MinimumArgumentCount);
-            foreach (IdentificationResultRule rule in information.Rules)
-            {
+            IdentificationMeaning rule = information;
                 if (rule.TextId is { } textId)
                 {
                     Assert.True(Text.Contains(textId), textId);
@@ -154,7 +154,6 @@ public sealed class LocalizationTests
                     Assert.InRange(CompositeFormat.Parse(Text.Get(formatId)).MinimumArgumentCount, 1, 2);
                     Assert.NotEmpty(Text.Format(formatId, "1.0.0", "dynamic-plugin"));
                 }
-            }
         }
     }
 

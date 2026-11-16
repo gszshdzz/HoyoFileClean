@@ -15,86 +15,74 @@ internal static class IdentificationEvaluator
     internal static bool IsConflict<T>(IEnumerable<T> values, bool multiple)
         => !multiple && values.Distinct().Skip(1).Any();
 
-    internal static void Validate(IEnumerable<string> detectionIds,
-        IReadOnlyDictionary<string, IdentificationResultDefinition> results)
+    internal sealed record Definition(IdentificationMeaning Policy,
+        IReadOnlyList<(string Id, IdentificationMeaning Meaning)> Mappings);
+
+    internal static IReadOnlyDictionary<string, Definition> Compile(
+        IEnumerable<(string Id, Dictionary<string, IdentificationMeaning>? Meanings)> detections)
     {
-        ArgumentNullException.ThrowIfNull(detectionIds);
-        ArgumentNullException.ThrowIfNull(results);
-        var known = detectionIds.ToHashSet(StringComparer.Ordinal);
-        if (results.Count == 0) throw new ArgumentException("Identification requires results.");
-        foreach (var (id, definition) in results)
+        var fields = new Dictionary<string, List<(string Id, IdentificationMeaning Meaning)>>(StringComparer.Ordinal);
+        foreach (var (id, meanings) in detections)
         {
-            if (string.IsNullOrWhiteSpace(id) || definition is null || definition.Rules is not { Length: > 0 }
-                || (definition.Multiple && definition.RetainConflicts))
-                throw new ArgumentException("Invalid identification result definition.");
-            var unconditionalOutputs = new Dictionary<string, IdentifiedValue>(StringComparer.Ordinal);
-            foreach (IdentificationResultRule rule in definition.Rules)
+            if (string.IsNullOrWhiteSpace(id)) throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid);
+            foreach (var (field, meaning) in meanings ?? [])
             {
-                if (rule is null || rule.When is null
-                    || rule.When.Any(pair => !known.Contains(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
-                    || (rule.AnyDetection is not null && (rule.AnyDetection.Length == 0
-                        || rule.AnyDetection.Any(id => !known.Contains(id))))
-                    || new[] { rule.Source, rule.TextId, rule.RawValue }.Count(value => value is not null) != 1
-                    || (rule.Source is not null && !known.Contains(rule.Source))
-                    || (rule.TextId is not null && string.IsNullOrWhiteSpace(rule.TextId))
-                    || (rule.RawValue is not null && string.IsNullOrWhiteSpace(rule.RawValue))
-                    || (rule.DisplayFormatTextId is not null && (rule.Source is null
-                        || string.IsNullOrWhiteSpace(rule.DisplayFormatTextId))))
-                    throw new ArgumentException("Invalid identification result rule.");
-                if (rule.When.Count == 0 && rule.AnyDetection is not null && rule.Source is null)
-                {
-                    var output = new IdentifiedValue(rule.RawValue, rule.TextId, null);
-                    foreach (string detection in rule.AnyDetection)
-                    {
-                        if (unconditionalOutputs.TryGetValue(detection, out var previous) && previous != output)
-                            throw new ArgumentException("One detection cannot unconditionally map a field to different values.");
-                        unconditionalOutputs[detection] = output;
-                    }
-                }
+                if (string.IsNullOrWhiteSpace(field) || meaning is null
+                    || (meaning.FromDetection ? 1 : 0) + (meaning.RawValue is null ? 0 : 1)
+                        + (meaning.TextId is null ? 0 : 1) != 1
+                    || meaning.RawValue is not null && string.IsNullOrWhiteSpace(meaning.RawValue)
+                    || meaning.TextId is not null && string.IsNullOrWhiteSpace(meaning.TextId)
+                    || meaning.Multiple && meaning.RetainConflicts
+                    || meaning.DisplayFormatTextId is not null && (!meaning.FromDetection
+                        || string.IsNullOrWhiteSpace(meaning.DisplayFormatTextId)))
+                    throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: field);
+                if (!fields.TryGetValue(field, out var mappings)) fields.Add(field, mappings = []);
+                if (mappings.Any(mapping => mapping.Id == id && mapping.Meaning != meaning))
+                    throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: id);
+                mappings.Add((id, meaning));
             }
         }
+        if (fields.Count == 0) throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid);
+        return fields.ToDictionary(pair => pair.Key, pair =>
+        {
+            IdentificationMeaning first = pair.Value[0].Meaning;
+            if (pair.Value.Any(mapping => mapping.Meaning.LabelTextId != first.LabelTextId
+                || mapping.Meaning.Multiple != first.Multiple
+                || mapping.Meaning.RetainConflicts != first.RetainConflicts))
+                throw new CoreException(CoreErrorCode.IdentificationConfigurationInvalid, input: pair.Key);
+            return new Definition(first with { Required = pair.Value.Any(mapping => mapping.Meaning.Required) },
+                pair.Value.Distinct().ToArray());
+        }, StringComparer.Ordinal);
     }
 
     internal static IReadOnlyDictionary<string, Result> Evaluate(IReadOnlyList<IdentificationClue> detections,
-        IReadOnlyDictionary<string, IdentificationResultDefinition> definitions, CancellationToken token)
+        IReadOnlyDictionary<string, Definition> definitions, CancellationToken token)
     {
         var results = new Dictionary<string, Result>(StringComparer.Ordinal);
         foreach (var (id, definition) in definitions)
         {
             token.ThrowIfCancellationRequested();
             var matches = new HashSet<Match>();
-            foreach (IdentificationResultRule rule in definition.Rules)
+            foreach (var (detectionId, meaning) in definition.Mappings)
             {
                 token.ThrowIfCancellationRequested();
-                if (!rule.When.All(condition => detections.Any(clue => clue.Id == condition.Key
-                    && clue.Value == condition.Value))) continue;
-                string[]? alternatives = rule.AnyDetection?.Where(id => detections.Any(clue => clue.Id == id)).ToArray();
-                if (alternatives is { Length: 0 }) continue;
-                if (rule.Source is null)
+                foreach (IdentificationClue clue in detections.Where(clue => clue.Id == detectionId))
                 {
-                    var value = new IdentifiedValue(rule.RawValue, rule.TextId, null);
-                    foreach (string evidence in (alternatives ?? rule.When.Keys.ToArray()).DefaultIfEmpty(id))
-                        matches.Add(new(evidence, value));
-                }
-                else
-                {
-                    foreach (IdentificationClue clue in detections)
-                    {
-                        token.ThrowIfCancellationRequested();
-                        if (clue.Id != rule.Source) continue;
-                        string key = clue.Item is null ? clue.Id : clue.Id + ":" + clue.Item;
-                        matches.Add(new(key, new IdentifiedValue(clue.Value, null, rule.DisplayFormatTextId, clue.Item)));
-                    }
+                    token.ThrowIfCancellationRequested();
+                    string key = clue.Item is null ? clue.Id : clue.Id + ":" + clue.Item;
+                    matches.Add(new(key, meaning.FromDetection
+                        ? new IdentifiedValue(clue.Value, null, meaning.DisplayFormatTextId, clue.Item)
+                        : new IdentifiedValue(meaning.RawValue, meaning.TextId, null)));
                 }
             }
             IdentifiedValue[] values = matches.Select(match => match.Value).Distinct().ToArray();
-            if (values.Length == 0 && definition.Required)
+            if (values.Length == 0 && definition.Policy.Required)
                 throw new CoreException(CoreErrorCode.GameIdentificationFailed, input: id);
-            if (IsConflict(values, definition.Multiple) && !definition.RetainConflicts)
+            if (IsConflict(values, definition.Policy.Multiple) && !definition.Policy.RetainConflicts)
                 throw new CoreException(CoreErrorCode.GameDetectionConflict, input: id);
             results.Add(id, new Result(Array.AsReadOnly(values), Array.AsReadOnly(matches
                 .OrderBy(match => match.Id, StringComparer.Ordinal).ThenBy(match => match.Value.RawValue, StringComparer.Ordinal)
-                .ToArray()), definition.Multiple));
+                .ToArray()), definition.Policy.Multiple));
         }
         token.ThrowIfCancellationRequested();
         return new ReadOnlyDictionary<string, Result>(results);

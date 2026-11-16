@@ -2,22 +2,24 @@
 
 Session：8。
 
-GUI 现在先扫描游戏，再获取 manifest。点击扫描时先识别，识别成功后继续文件枚举／MD5；识别失败不会产生扫描快照。结果暂放在扫描按钮下方，并在内存中保留原始提取键值和有意义的信息。关闭窗口释放结果，不写入游戏目录。
+GUI 先扫描游戏，再获取 manifest。点击扫描后复用现有扫描器枚举文件，用该文件表完成路径识别，再按需计算 MD5；识别失败不发布快照。轻扫即可识别，不依赖 MD5，也不另行遍历游戏目录，排除路径和跳过的链接不参与资源路径识别。结果显示在扫描按钮下方，不写入游戏目录。
 
 `config/GameIdentificationRules.cs` 与 `config/NetworkServices.cs` 都是独立的 C# 开发适配数据定义，直接随核心库编译，不使用嵌入或旁置适配 JSON；更改配置后必须重新构建，不读取用户旁置的替代文件。核心识别入口可接收配置对象，便于测试和以后复用。
 
-## 两层规则
+## 检测项内嵌含义
 
-第一层 `Detections` 定义“在哪里取什么值”，不定义游戏含义。例如字典中的条目：
+配置只有 `Detections`；每项同时定义检测方式及 `Meanings`，不再有顶层 `Results` 或跨项条件。例如：
 
 ```csharp
 ["ini_version"] = new(
     Paths: ["./config.ini", "other/version.txt"],
     Pattern: @"^[ \t]*game_version[ \t]*=[ \t]*(?<value>[^\r\n]*)",
-    CanCompare: true)
+    CanCompare: true,
+    Meanings: new() { ["version"] = new(FromDetection: true,
+        LabelTextId: "IdentificationLabelVersion") })
 ```
 
-- `Paths` 是相对游戏根目录的候选文件列表；允许 `./` 前缀，不允许越界、绝对路径或通配符。缺失候选继续尝试其他文件，不递归找文件，不跟随链接。
+- `Paths` 是相对游戏根目录的候选路径；允许 `./` 前缀，不允许越界、绝对路径或通配符。不指定 `Pattern` 时在已有扫描文件表中精确匹配；`Prefix: true` 时匹配完整目录前缀，空目录不算命中。不打开资源正文，不新增目录遍历，扫描器统一负责排除和链接处理。独立调用 `Identify` 未传文件表时复用现有轻扫，GUI 直接使用本次枚举结果。
 - `Pattern` 是 .NET 正则表达式，使用多行模式，必须有名为 `value` 的捕获组。所有命中都参加校验，不以最后一次覆盖前值；相同文件只读一次。匹配有超时，文件有大小限制。
 - `CanCompare: true`：全部值须为 .NET `Version` 可解析的 2～4 段非负整数版本，按数字段取最大，例如 `1.10.0 > 1.9.0`。只出现一次的无效版本也报错，不静默忽略；不支持带预发行后缀的语义版本。
 - `CanCompare: false`：去除首尾空白后必须完全一致；重复相同值允许，大小写不同也视为不同。
@@ -25,39 +27,39 @@ GUI 现在先扫描游戏，再获取 manifest。点击扫描时先识别，识�
 - `JsonObjectKeys: true` 表示将提取值作为 JSON 对象解析，取实际顶层键名；`IgnoredKeys` 配置忽略键。`uapc` 当前只排除启动器项 `hyp`，没有 `cn/global` 后缀筛选，也没有游戏 ID 白名单；出现多个不同游戏键仍按不可比较字段报冲突。
 - 正则可额外捕获 `item`，用于动态条目，例如 `plugin_(?<item>[^\s=]+)_version`。每个实际插件 ID 独立合并／比较版本，不需要逐插件增加配置。内存和 JSON 用“检测条目 ID:实际条目 ID”记录，如 `ini_plugin_version:futurePlugin`。
 
-第二层 `Results` 定义“哪些提取结果意味着什么”。例如当前官服映射：
+每项的 `Meanings` 定义“命中意味着什么”。例如：
 
 ```csharp
-["channel"] = new("IdentificationLabelChannel", Required: true, Multiple: false,
-    Rules: [new(new()
+["exe_hk4e_cn"] = new(["YuanShen.exe"], Meanings: new()
     {
-        ["ini_game_id"] = "hk4e_cn", ["ini_channel"] = "1", ["ini_sub_channel"] = "1"
-    }, TextId: "IdentificationChannelOfficial")])
+        ["game"] = new("hk4e", LabelTextId: "IdentificationLabelGame"),
+        ["biz"] = new("hk4e_cn", LabelTextId: "IdentificationLabelGame")
+    })
 ```
 
-- `When` 中所有“检测条目 ID → 精确值”条件同时满足时，该规则生效；空字典表示不加条件。
-- `Source` 引用某个检测条目的原始值，`RawValue` 给出固定原始结果，`TextId` 引用现有语言 ID；三者只能指定一个。例如 `IdentificationChannelOfficial` 对应“官服”。来源值可配置 `DisplayFormatTextId`：`{0}` 为提取值，`{1}` 为动态 `item`，插件统一使用 `{1}（{0}）`，不维护逐插件文案。`LabelTextId` 指定字段标题。
-- `AnyDetection` 表示列出的线索任意命中即可；与 `When` 同时配置时仍需满足全部精确值条件。多个同值证据归并，不重复显示值；证据 ID 保留供 manifest 提示和 JSON 使用。
-- 同一信息可配置多条规则，分别引用不同游戏、文件格式的检测条目。没有匹配来源的规则不提供结果，不回退猜测。
+- `FromDetection: true` 使用当前检测项原值，`RawValue` 给出固定结果，`TextId` 引用语言 ID，三者只能指定一个。`DisplayFormatTextId` 的 `{0}` 为原值、`{1}` 为动态条目 ID；`LabelTextId` 指定标题。
+- 命中含义取并集，同值去重；同一字段的标题、多值及冲突策略必须一致。没有跨检测 ID 的条件或来源引用。
+- 未命中的字段不提供结果。默认至少需要 `game` 或 `biz` 才算识别成功，版本、语言、插件均允许未知。
 - `Required: true` 而没有结果：中止识别与扫描。`Multiple: false` 却映射出多个不同结果：报冲突；相同结果去重。插件等集合可用 `Multiple: true`。
-- 不设置 `is_gui`，避免重复维护；第二层信息列表和规则中的文本 ID 已经定义显示内容。当前临时结果区统一列出信息。
-- 适配配置维护命中条件、信息来源和文本 ID；实际中文与模板统一放在 `presentation/Languages/zh-CN.json`。核心不读取语言资源，返回原始值或文本 ID，GUI 再呈现；改动后测试校验 ID 存在及模板参数数量。
+- 中文及模板位于 `presentation/Languages/zh-CN.json`；核心返回原值或文本 ID，GUI 再呈现。
 
-新增适配时，先增加检测条目，再给现有信息增加对应规则。不要为每个游戏复制扫描流程；修改后运行识别与 GUI 回归测试。
+新增适配只增加自带含义的检测项，不复制扫描流程，修改后运行识别与 GUI 回归测试。
 
-游戏与 manifest 的配置文件均为 `*IdentificationRules.cs`，用 `Create()` 返回 `IdentificationConfiguration<TDetection>`；共用结果定义在 `core/Models/Identification.cs`。两种读取器只负责按格式取得线索，后续都调用 `IdentificationEvaluator`，不各自实现条件映射、去重和结果约束。游戏默认必要信息缺失或单值冲突即失败；manifest 默认 `RetainConflicts: true` 保留冲突，这由同一结果定义表达，不是第二套判定逻辑。
+两份配置通过 `Create()` 返回 `IdentificationConfiguration<TDetection>`，共用 `IdentificationMeaning` 和 `IdentificationEvaluator`，统一去重、证据归并及约束。游戏单值冲突失败，manifest 默认保留冲突；两份配置独立，不按相同 ID 匹配。游戏参数为未来网络自动获取作准备，本轮不自动联网或选包。
 
 ## 当前证据范围
 
-用户提供 `refs/config.ini`：`game_version=7.2.0`，`uapc` 包含 `hk4e_cn`，`channel=1`、`sub_channel=1` 由用户确认对应原神国服官服。重复相同的 `uapc` 允许；重复不同版本按最大值处理。
+原始样本中 `game_version=7.2.0`、`uapc` 包含 `hk4e_cn`。重复相同的 `uapc` 允许，重复不同版本取最大值。渠道对应关系尚未完整确认：`channel`／`sub_channel` 仅记录原值，不映射“官服”，不限制身份识别。同一原始字段重复不同值仍报矛盾。登录开关、附加 SDK 等影响待有证据后单独处理，不据渠道推断 manifest 不同。
 
 样本还包含 `plugin_COa9vWaYX9_version=1.0.0`，因此临时展示该插件与版本。未提供可确认本体／语音资源包安装状态的文件，不据此声称已识别完整包列表；“未检测到”也不等于未安装。识别结果不会自动联网、选择游戏或勾选网络包。CLI 独立扫描维持通用目录扫描，不强制识别游戏。
 
-界面只显示实际游戏 ID，不再额外显示游戏名称；游戏、版本、渠道放在同一行，动态插件信息另起一行。渠道含义仍由第二层配置映射，不把官服含义泛化为所有游戏通用规则。
+首行有 `biz` 显示 `biz`，否则显示 `game`，并显示已知版本；不重复显示游戏族或猜渠道名称。插件及“发现的包体”另行显示，包含规则确定的本体与语音等所有包体。
 
-与 manifest 识别共用术语：`game` 表示游戏族，`biz` 表示完整官方游戏标识，`package` 表示资源包，`plugins` 表示插件 ID 与版本。游戏识别配置的信息键使用 `biz` 和 `plugins`，不从完整标识拆出游戏族、不把插件解释为资源包；原始检测键 `ini_game_id` 等及 `scan.gameDetections` 不变。
+`game` 是游戏族，`biz` 是完整官方标识，`package` 是资源包，`plugins` 是插件 ID 与版本。游戏侧 `package` 是允许多值的本地发现包体集合：根执行文件命中本体 `game`，原神两种布局及星铁语音路径命中对应包名。多包正常共存，不证明完整安装或当前使用语言。以后新增小包只需增加有证据的规则，本轮不猜测绝区零小包。不拆分 biz 猜游戏族，不把插件当资源包；原始检测键 `ini_game_id` 等不变。
 
 ## 扫描 JSON 的识别记录
+
+识别配置异常遵循原有文案分离方式：核心只抛 `CoreException` 错误码及上下文，`presentation/DiagnosticText.cs` 映射到 `presentation/Languages/zh-CN.json`，不在识别逻辑中写异常描述。
 
 `ScanScope.GameDetections` 是可选字段，写出为 `scan.gameDetections`，内容为原始检测键值，不保存中文或展示文本 ID。核心扫描接口可接收已取得的 `identification`，生成的内存快照和扫描 JSON 会保留此记录；GUI 当前扫描已传入识别结果，但本轮不新增 GUI 导出按钮或 CLI 强制识别选项。
 
@@ -65,13 +67,15 @@ GUI 现在先扫描游戏，再获取 manifest。点击扫描时先识别，识�
 
 ## 验收
 
+本轮内嵌含义及扫描复用回归：核心／CLI `Total: 452, Errors: 0, Failed: 0, Skipped: 0, Not Run: 7`；桌面 `Total: 162, Errors: 0, Failed: 0, Skipped: 0, Not Run: 1`。未运行项为显式测试，未扫描真实游戏或访问官方网络。覆盖未知渠道、路径识别、多包共存、空目录和备份路径、资源正文不打开、链接安全、历史恢复、GUI biz 优先／game 回退；新增本体、语音、配置提供的非语音包体集合及“发现的包体”标签回归。扫描排除回归在修复前轻扫／重扫各失败一项，复用文件表后均通过。轻扫后移走资源目录、仍从原文件表识别的测试证明路径识别不再另行读目录。
+
 启动 `dotnet run --project desktop\HoyoFileClean.Desktop.csproj --no-restore`。
 
-1. 第一页应是“1 游戏扫描”，第二页是“2 参考清单”。用包含原始样本的目录扫描，按钮下方首行应显示游戏 `hk4e_cn`、版本 `7.2.0`、渠道官服，不额外显示“原神”；次行显示实际插件 ID 与版本。此目录仅证明识别规则，不代表完整游戏安装。
+1. 样本首行显示 `hk4e_cn`、`7.2.0`，不显示“官服”；已知插件另行显示。只有 `StarRail.exe` 时显示 `hkrpg`，版本未知。
 2. 实际游戏目录做 MD5 重扫，点击“取消扫描”：结束后不能下一步、没有旧识别结果，按钮恢复后可重新扫描。轻扫也支持取消，但小目录可能瞬间结束。
 3. 不改真实游戏文件。在临时样本副本末尾增加 `game_version=7.10.0`，再次扫描应显示 `7.10.0`；改成 `game_version=bad`，应报无法比较并禁止前进。恢复后可成功。
 4. 在临时副本末尾增加 `channel=2`，应报矛盾；改为 `channel=1`，允许重复并成功。不含识别文件的空目录应识别失败，而不是产生成功的空扫描。
 5. 成功后下一步，手动选择 manifest 或使用既有本地／网络获取流程，解析后进入比较。网络包仍默认不选；本地目录拖放应保持可用。历史扫描 JSON 仍按原根目录校验导入，不宣称重新识别。
-6. 扫描验收副本 `dynamic-plugin`，应同时显示原插件和 `futurePlugin（2.10.0）`，无需修改配置。导入 `identified-scan.json` 时游戏根目录填其记录的 `recorded-game` 路径（该目录已被测试移走），应仍显示 `hk4e_cn`、版本、渠道与插件信息，证明未读取游戏文件。
+6. 临时原神／星铁中、日语音路径中各放一个文件，应显示 `zh-cn`、`ja-jp`；空目录、备份及相似路径不命中。渠道单个值换为未知值仍可识别。带检测记录的 JSON 在根目录移走后仍能恢复结果。
 
 所有操作只读游戏输入；真实清理仍未实现。自动化证据、发布目录及已生成的五组验收副本路径记在 `.scratch/game-identification/issues/01-identification-and-scan.md`。使用 `valid` 应显示 `7.2.0` 和插件 `1.0.0`，`version-max` 应显示 `7.10.0`，`version-invalid`／`channel-conflict`／`unknown` 应失败且不能前进；返回 `valid` 后应恢复。

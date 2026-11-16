@@ -15,6 +15,7 @@ public sealed partial class MainForm : Form
     private TableLayoutPanel manualReferenceActions = null!;
     private TableLayoutPanel localReferenceActions = null!;
     private readonly ReferenceParser referenceParser;
+    private readonly Func<string, bool> confirmPatchReference;
     private readonly Button parseManualReference = MakeButton(L.Get("Button_Execute"), "ParseManualReference");
     private readonly ProgressBar parsingProgress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
     private readonly ProgressBar comparisonProgress = new() { Name = "ComparisonProgress", Dock = DockStyle.Fill, Visible = false };
@@ -38,11 +39,29 @@ public sealed partial class MainForm : Form
 
     public MainForm() : this(new WizardSession()) { }
 
+    private void Advance()
+    {
+        if (!session.CanAdvance) return;
+        if (session.Step == 1)
+        {
+            string[] patches = session.Reference!.Sources.Where(source => source.ManifestKind == FileValues.SophonPatch)
+                .Select(source => Path.GetFileName(source.Path)).ToArray();
+            if (patches.Length > 0 && !confirmPatchReference(L.Format("PatchReferenceWarning",
+                string.Join(Environment.NewLine, patches)))) return;
+        }
+        session.Next();
+        RefreshView();
+        if (session.Step == 3) differences.Render();
+    }
+
     internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null,
-        Func<IReadOnlyList<NetworkService>>? loadNetworkServices = null)
+        Func<IReadOnlyList<NetworkService>>? loadNetworkServices = null, Func<string, bool>? confirmPatchReference = null)
     {
         this.session = session;
         this.referenceParser = referenceParser ?? new ReferenceParser();
+        this.confirmPatchReference = confirmPatchReference ?? (message => MessageBox.Show(this, message,
+            L.Get("PatchReferenceWarningTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes);
         this.networkClient = networkClient ?? new NetworkManifestClient(networkHttp);
         this.loadNetworkServices = loadNetworkServices ?? (() => NetworkManifestClient.Services);
         Disposed += (_, _) => networkHttp.Dispose();
@@ -83,7 +102,7 @@ public sealed partial class MainForm : Form
         layout.Controls.Add(buttons, 0, 3);
         Controls.Add(layout);
         back.Click += (_, _) => { session.Back(); RefreshView(); };
-        next.Click += (_, _) => { session.Next(); RefreshView(); if (session.Step == 3) differences.Render(); };
+        next.Click += (_, _) => Advance();
         skip.Click += async (_, _) => await ImportReportAsync();
         execute.Click += async (_, _) => await ExecuteAsync();
         close.Click += (_, _) => Close();

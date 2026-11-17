@@ -8,7 +8,7 @@
     <Compile Include="..\config\Maintenance.cs" Link="Configuration\Maintenance.cs" />
     <Compile Include="..\config\NetworkServices.cs" Link="Configuration\NetworkServices.cs" />
     <Compile Include="..\config\GameIdentificationRules.cs" Link="Configuration\GameIdentificationRules.cs" />
-    <Compile Include="..\config\GameExclusionRules.cs" Link="Configuration\GameExclusionRules.cs" />
+    <Compile Include="..\config\GameFileRules.cs" Link="Configuration\GameFileRules.cs" />
     <Compile Include="..\config\AutomaticManifestRules.cs" Link="Configuration\AutomaticManifestRules.cs" />
     <Compile Include="..\config\ManifestIdentificationRules.cs" Link="Configuration\ManifestIdentificationRules.cs" />
     <PackageReference Include="Google.Protobuf" Version="3.36.2" />

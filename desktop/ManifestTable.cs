@@ -138,16 +138,7 @@ internal sealed class ManifestTable : DataGridView
             (background.B * 9 + foreground.B) / 10);
 
     private void PositionSelectAll()
-    {
-        if (Columns.Count == 0) return;
-        Rectangle header = GetCellDisplayRectangle(0, -1, true);
-        Size size = selectAll.GetPreferredSize(Size.Empty);
-        Rectangle bounds = new(header.Left + (header.Width - size.Width) / 2,
-            header.Top + (header.Height - size.Height) / 2, size.Width, size.Height);
-        if (selectAll.Bounds != bounds) selectAll.Bounds = bounds;
-        bool visible = ColumnHeadersVisible && header.Width >= size.Width && header.Height >= size.Height;
-        if (selectAll.Visible != visible) selectAll.Visible = visible;
-    }
+        => GridSelectionHeader.Position(this, selectAll);
 
     private void RefreshSelectAll()
     {

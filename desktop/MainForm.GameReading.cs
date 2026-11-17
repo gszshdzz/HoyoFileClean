@@ -315,7 +315,7 @@ public sealed partial class MainForm
         bool hasPreset = false;
         await RunWorkAsync(token => GameIdentifier.Identify(root, token), identification =>
         {
-            GameExclusionPreset? preset = GameIdentifier.GetExclusionPreset(identification);
+            GameFilePreset? preset = GameIdentifier.GetFilePreset(identification);
             hasPreset = preset is not null;
             ReplacePreset(excludedDirectories, presetDirectories, preset?.ScanDirectories ?? []);
             ReplacePreset(excludedFiles, presetFiles, preset?.ScanFiles ?? []);

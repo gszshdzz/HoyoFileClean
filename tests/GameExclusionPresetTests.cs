@@ -24,8 +24,8 @@ public sealed class GameExclusionPresetTests
         File.WriteAllText(Path.Combine(root, "Audio_Chinese_pkg_version"), "audio");
         Directory.CreateDirectory(Path.Combine(root, "ldiff"));
         File.WriteAllText(Path.Combine(root, "ldiff", "patch"), "patch");
-        GameExclusionPreset preset = Assert.IsType<GameExclusionPreset>(
-            GameIdentifier.GetExclusionPreset(GameIdentifier.Identify(root, TestContext.Current.CancellationToken)));
+        GameFilePreset preset = Assert.IsType<GameFilePreset>(
+            GameIdentifier.GetFilePreset(GameIdentifier.Identify(root, TestContext.Current.CancellationToken)));
         FileListSnapshot scan = DirectoryScanner.Scan(root, preset.ScanDirectories, preset.ScanFiles,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Contains("pkg_version", scan.Files.Keys);
@@ -55,7 +55,7 @@ public sealed class GameExclusionPresetTests
         using var locked = new FileStream(Path.Combine(root, "unrelated.bin"), FileMode.Create,
             FileAccess.ReadWrite, FileShare.None);
         GameIdentification identification = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
-        Assert.NotNull(GameIdentifier.GetExclusionPreset(identification));
+        Assert.NotNull(GameIdentifier.GetFilePreset(identification));
         Assert.Throws<OperationCanceledException>(() => GameIdentifier.Identify(root, new CancellationToken(true)));
     }
 
@@ -64,7 +64,7 @@ public sealed class GameExclusionPresetTests
     {
         string root = Root();
         File.WriteAllText(Path.Combine(root, "config.ini"), "uapc={\"unknown_cn\":{}}");
-        Assert.Null(GameIdentifier.GetExclusionPreset(GameIdentifier.Identify(root, TestContext.Current.CancellationToken)));
+        Assert.Null(GameIdentifier.GetFilePreset(GameIdentifier.Identify(root, TestContext.Current.CancellationToken)));
     }
 
     [Fact]

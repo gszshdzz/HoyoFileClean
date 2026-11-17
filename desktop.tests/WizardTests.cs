@@ -228,16 +228,14 @@ public sealed class WizardTests
     {
         WizardSession session = Ready();
         session.Select("game-only", true);
-        session.ConfirmSelection(true);
-        Assert.True(session.CanDemonstrateDeletion);
+        Assert.Equal(1, session.SelectedCount);
         session.InvalidateReference();
         Assert.Null(session.Reference);
         Assert.NotNull(session.Game);
         Assert.Null(session.Comparison);
         Assert.Empty(session.Rows);
         Assert.Equal(0, session.SelectedCount);
-        Assert.False(session.SelectionConfirmed);
-        Assert.False(session.CanDemonstrateDeletion);
+        Assert.Equal(0, session.SelectedSize);
     }
 
     [Fact]
@@ -251,18 +249,16 @@ public sealed class WizardTests
     }
 
     [Fact]
-    public async Task BusyStateBlocksRepeatedOperationsInputChangesNavigationAndDeletion()
+    public async Task BusyStateBlocksRepeatedOperationsInputChangesNavigationAndSelection()
     {
         WizardSession session = Ready();
         session.Select("game-only", true);
-        session.ConfirmSelection(true);
         using var release = new ManualResetEventSlim();
         bool applied = false;
         Task operation = session.RunAsync(() => release.Wait(TimeSpan.FromSeconds(10)), result => applied = result);
         try
         {
             Assert.False(session.CanAdvance);
-            Assert.False(session.CanDemonstrateDeletion);
             await Assert.ThrowsAsync<InvalidOperationException>(() => session.RunAsync(() => 0, _ => { }));
             Assert.Throws<InvalidOperationException>(session.Back);
             Assert.Throws<InvalidOperationException>(session.Next);
@@ -284,7 +280,7 @@ public sealed class WizardTests
         Assert.False(session.IsBusy);
         Assert.Null(session.Game);
         Assert.Null(session.Comparison);
-        Assert.False(session.CanDemonstrateDeletion);
+        Assert.Equal(0, session.SelectedCount);
         await session.RunAsync(() => 3, value => Assert.Equal(3, value));
         Assert.False(session.IsBusy);
     }
@@ -300,25 +296,21 @@ public sealed class WizardTests
     }
 
     [Fact]
-    public void AnyActualSelectionChangeClearsConfirmationButRedundantEventsDoNot()
+    public void SelectionSummaryTracksActualChangesAndIgnoresRedundantEvents()
     {
         WizardSession session = Ready();
-        Assert.False(session.CanDemonstrateDeletion);
-        session.ConfirmSelection(true);
-        Assert.False(session.SelectionConfirmed);
+        Assert.Equal(0, session.SelectedCount);
         session.Select("game-only", true);
         Assert.Equal(3, session.SelectedSize);
-        Assert.False(session.CanDemonstrateDeletion);
-        session.ConfirmSelection(true);
         session.Select("GAME-ONLY", true);
-        Assert.True(session.SelectionConfirmed);
+        Assert.Equal(1, session.SelectedCount);
+        Assert.Equal(3, session.SelectedSize);
         session.Select("different", true);
         Assert.Equal(2, session.SelectedCount);
         Assert.Equal(8, session.SelectedSize);
-        Assert.False(session.SelectionConfirmed);
-        session.ConfirmSelection(true);
         session.Select("game-only", false);
-        Assert.False(session.SelectionConfirmed);
+        Assert.Equal(1, session.SelectedCount);
+        Assert.Equal(5, session.SelectedSize);
     }
 
     [Fact]
@@ -332,16 +324,15 @@ public sealed class WizardTests
     }
 
     [Fact]
-    public void FilterRemovesHiddenSelectionAndClearsConfirmation()
+    public void FilterRemovesHiddenSelectionAndUpdatesSummary()
     {
         WizardSession session = Ready();
         session.Select("game-only", true);
         session.Select("different", true);
-        session.ConfirmSelection(true);
         session.SetFilters([DifferenceCategory.GameOnly]);
         Assert.True(session.IsSelected("game-only"));
         Assert.False(session.IsSelected("different"));
-        Assert.False(session.SelectionConfirmed);
+        Assert.Equal(3, session.SelectedSize);
         Assert.Single(session.VisibleRows);
         session.SetFilters([DifferenceCategory.OutsideScope]);
         Assert.Equal(0, session.SelectedCount);
@@ -349,13 +340,12 @@ public sealed class WizardTests
     }
 
     [Fact]
-    public void RecomparisonResetsSelectionAndConfirmation()
+    public void RecomparisonResetsSelectionAndSummary()
     {
         WizardSession session = Ready();
         session.Select("game-only", true);
-        session.ConfirmSelection(true);
         session.AcceptComparison(FileComparer.Compare(session.Game!, session.Reference!));
-        Assert.False(session.SelectionConfirmed);
+        Assert.Equal(0, session.SelectedSize);
         Assert.Equal(0, session.SelectedCount);
     }
 
@@ -625,7 +615,6 @@ public sealed class WizardTests
         WizardSession session = Ready();
         session.Next();
         session.Select("game-only", true);
-        session.ConfirmSelection(true);
         using var form = new MainForm(session)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
@@ -642,7 +631,7 @@ public sealed class WizardTests
         Assert.NotNull(session.Game);
         Assert.Null(session.Comparison);
         Assert.Equal(0, session.SelectedCount);
-        Assert.False(session.SelectionConfirmed);
+        Assert.Equal(0, session.SelectedSize);
         Assert.False(Find<Button>(form, "Next").Enabled);
         Find<RadioButton>(form, "ManualSource").Checked = true;
         Assert.Single(Find<DataGridView>(form, "Manifests").Rows.Cast<DataGridViewRow>());
@@ -1609,8 +1598,8 @@ public sealed class WizardTests
         Assert.Equal(1, session.Comparison!.Summary.OnlyA);
         Assert.Equal(1, session.Comparison.Summary.OnlyB);
         session.Select("game-only", true);
-        session.ConfirmSelection(true);
-        Assert.True(session.CanDemonstrateDeletion);
+        Assert.Equal(1, session.SelectedCount);
+        Assert.Equal(3, session.SelectedSize);
         Assert.Equal("abc", File.ReadAllText(Path.Combine(root, "game-only")));
     }
 

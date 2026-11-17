@@ -1,7 +1,7 @@
 namespace HoyoFileClean;
 
-// 开发者维护，修改后重新构建；仅定义扫描排除预置及其适用身份，不参与游戏识别。
-internal static class GameExclusionRules
+// 开发者维护，修改后重新构建；定义扫描排除、结果隐藏及其适用身份，不参与游戏识别。
+internal static class GameFileRules
 {
     internal static readonly IReadOnlyDictionary<string, string> PresetGames = new Dictionary<string, string>
     {
@@ -11,8 +11,8 @@ internal static class GameExclusionRules
     };
 
     // Exact root-relative paths, case-insensitive. pkg_version and voice package metadata stay in scans.
-    internal static readonly IReadOnlyDictionary<string, GameExclusionPreset> ExclusionPresets =
-        new Dictionary<string, GameExclusionPreset>(StringComparer.Ordinal)
+    internal static readonly IReadOnlyDictionary<string, GameFilePreset> Presets =
+        new Dictionary<string, GameFilePreset>(StringComparer.Ordinal)
         {
             ["hk4e_cn"] = new(["Screenshot", "BeyondAssets", "chunk", "ldiff",
                 "YuanShen_Data/Persistent", "YuanShen_Data/SDKCaches", "YuanShen_Data/webCaches"],

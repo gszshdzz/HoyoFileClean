@@ -43,7 +43,7 @@ public sealed class DifferencePanelTests
         WizardSession session = Ready(detection: detection, executable: executable);
         Assert.False(session.IsResultHidden("Audio_Chinese_pkg_version"));
         Assert.Contains(session.VisibleRows, row => row.Path == "Audio_Chinese_pkg_version");
-        var preset = GameIdentifier.GetExclusionPreset(session.Identification!)!;
+        var preset = GameIdentifier.GetFilePreset(session.Identification!)!;
         Assert.Empty((preset.ResultHiddenFiles ?? []).Intersect(preset.ScanFiles, StringComparer.OrdinalIgnoreCase));
         Assert.Equal(["pkg_version"], preset.ResultHiddenFiles);
     });

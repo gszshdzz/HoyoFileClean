@@ -37,10 +37,8 @@ public sealed class WizardSession
     internal bool IsCancellationRequested => cancellation?.IsCancellationRequested == true;
     internal bool CanCancel => IsBusy && cancellation is not null && !IsCancellationRequested;
     internal bool CloseRequested { get; private set; }
-    public bool SelectionConfirmed { get; private set; }
     public int SelectedCount => selected.Count;
     public long SelectedSize => selectedSize;
-    public bool CanDemonstrateDeletion => !IsBusy && selected.Count > 0 && SelectionConfirmed && Comparison is not null;
     public bool CanAdvance => !IsBusy && Step switch
     {
         0 => Game is not null,
@@ -139,7 +137,6 @@ public sealed class WizardSession
         Rows = [];
         rowsByPath.Clear();
         foreach (ManifestFile file in selected.Values.ToArray()) SetSelected(file, false);
-        SelectionConfirmed = false;
         ShowHiddenResults = false;
     }
 
@@ -171,7 +168,7 @@ public sealed class WizardSession
         ClearComparison();
         Game = game;
         Identification = restored;
-        resultHiddenPaths = (restored is null ? [] : GameIdentifier.GetExclusionPreset(restored)?.ResultHiddenFiles ?? [])
+        resultHiddenPaths = (restored is null ? [] : GameIdentifier.GetFilePreset(restored)?.ResultHiddenFiles ?? [])
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -203,7 +200,6 @@ public sealed class WizardSession
         ShowHiddenResults = value;
         if (!value)
             foreach (string path in selected.Keys.Where(IsResultHidden).ToArray()) SetSelected(selected[path], false);
-        SelectionConfirmed = false;
     }
 
     public void SetFilters(IEnumerable<DifferenceCategory> filters)
@@ -235,7 +231,6 @@ public sealed class WizardSession
         bool changed = value ? selected.TryAdd(file.Path, file) : selected.Remove(file.Path);
         if (!changed) return;
         selectedSize += value ? file.Size : -file.Size;
-        SelectionConfirmed = false;
         SelectionChanged?.Invoke(file.Path, value);
     }
 
@@ -245,12 +240,6 @@ public sealed class WizardSession
             throw new ArgumentException(L.Get("SelectionNotVisible"));
         if (!row.CanSelect) throw new ArgumentException(L.Get("SelectionRequiresScannedGameFile"));
         return row;
-    }
-
-    public void ConfirmSelection(bool value)
-    {
-        RequireIdle();
-        SelectionConfirmed = value && selected.Count > 0 && Comparison is not null;
     }
 
     private void RequireIdle()

@@ -158,18 +158,18 @@ public static class GameIdentifier
         return null;
     }
 
-    public static GameExclusionPreset? GetExclusionPreset(GameIdentification identification)
+    public static GameFilePreset? GetFilePreset(GameIdentification identification)
     {
         if (identification.Information.TryGetValue("biz", out IdentifiedInformation? biz))
             foreach (IdentifiedValue value in biz.Values)
                 if (value.RawValue is { } key)
                 {
-                    if (GameExclusionRules.PresetGames.TryGetValue(key, out string? gameKey)) key = gameKey;
-                    if (GameExclusionRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset)) return preset;
+                    if (GameFileRules.PresetGames.TryGetValue(key, out string? gameKey)) key = gameKey;
+                    if (GameFileRules.Presets.TryGetValue(key, out GameFilePreset? preset)) return preset;
                 }
         if (identification.Information.TryGetValue("game", out IdentifiedInformation? game))
             foreach (IdentifiedValue value in game.Values)
-                if (value.RawValue is { } key && GameExclusionRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset))
+                if (value.RawValue is { } key && GameFileRules.Presets.TryGetValue(key, out GameFilePreset? preset))
                     return preset;
         return null;
     }

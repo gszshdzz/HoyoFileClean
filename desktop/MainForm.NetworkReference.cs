@@ -17,6 +17,9 @@ public sealed partial class MainForm
     private readonly Button cancelNetwork = MakeButton(L.Get("Button_CancelNetwork"), "CancelNetwork");
     private readonly ManifestTable networkManifests = new("NetworkManifests");
     private Panel networkReferencePage = null!;
+    private TableLayoutPanel networkChoices = null!;
+    private readonly Label automaticNetworkInformation = new() { Name = "AutomaticNetworkInformation", AutoSize = true, Dock = DockStyle.Top };
+    private bool IsNetworkSource => automaticSource.Checked || networkSource.Checked;
     private sealed record NetworkRegion(NetworkService Service)
     {
         public override string ToString() => L.Get(Service.NameTextId);
@@ -44,6 +47,7 @@ public sealed partial class MainForm
             networkConfigurationError = DiagnosticText.ForDesktop(error);
         }
         var choices = new TableLayoutPanel { Name = "NetworkChoices", Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 2 };
+        networkChoices = choices;
         for (int i = 0; i < 3; i++) choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
         choices.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         choices.RowStyles.Add(new RowStyle(SizeType.Absolute, networkGames.ItemHeight * Maintenance.NetworkChoiceVisibleRows + networkGames.Margin.Vertical + 4));
@@ -84,7 +88,11 @@ public sealed partial class MainForm
         networkManifests.CheckedFilesChanged += ReferenceChanged;
         queryNetwork.Click += async (_, _) => await QueryNetworkAsync();
         getNetwork.Click += async (_, _) => await GetNetworkManifestsAsync();
-        parseNetwork.Click += async (_, _) => await FetchAndParseNetworkAsync();
+        parseNetwork.Click += async (_, _) =>
+        {
+            if (automaticSource.Checked) await FetchAutomaticNetworkAsync();
+            else await FetchAndParseNetworkAsync();
+        };
         networkRegions.MouseDoubleClick += async (_, args) =>
         {
             if (args.Button == MouseButtons.Left && networkRegions.IndexFromPoint(args.Location) >= 0)
@@ -105,6 +113,7 @@ public sealed partial class MainForm
             status.Text = L.Get("CancellingNetwork");
         };
         var input = Vertical();
+        input.Controls.Add(automaticNetworkInformation);
         input.Controls.Add(choices);
         input.Controls.Add(OperationActions("NetworkActions", cancelNetwork, queryNetwork, getNetwork, parseNetwork));
         return Page(input, networkManifests);
@@ -121,14 +130,23 @@ public sealed partial class MainForm
     {
         networkManifests.Rows.Clear();
         ReferenceChanged();
-        if (session.Step == 1 && networkSource.Checked) status.Text = DescribeNetworkInput();
+        if (session.Step == 1 && IsNetworkSource) status.Text = DescribeNetworkInput();
     }
 
-    private string DescribeNetworkInput() => networkConfigurationError ?? (networkManifests.Rows.Count > 0
+    private string DescribeNetworkInput() => networkConfigurationError ?? (automaticSource.Checked ? L.Get("AutomaticNetworkHint") : networkManifests.Rows.Count > 0
         ? L.Get("SelectPackagesHint")
         : networkGames.Items.Count > 0 && networkGames.SelectedItem is not NetworkGame ? L.Get("SelectGameHint")
         : networkGames.SelectedItem is not NetworkGame game ? L.Get("QueryServiceHint")
         : L.Format("GameVersionHint", game.Version.Biz, game.Version.Version));
+
+    private string DescribeAutomaticNetworkInformation()
+    {
+        string Values(string field) => session.Identification?.Information.GetValueOrDefault(field) is { Values.Count: > 0 } info
+            ? string.Join(L.Get("ListSeparator"), info.Values.Select(value => value.RawValue ?? L.Get("UnavailableValue")))
+            : L.Get("UnavailableValue");
+        return L.Format("AutomaticNetworkInformation", Values(ResultText.IdentityField(session.Identification?.Information)),
+            Values("version"), Values("package"));
+    }
 
     private async Task QueryNetworkAsync()
     {
@@ -162,9 +180,51 @@ public sealed partial class MainForm
             () => L.Format("ManifestListFound", networkManifests.Rows.Count));
     }
 
+    private async Task FetchAutomaticNetworkAsync()
+    {
+        if (session.IsBusy || !automaticSource.Checked) return;
+        if (GameIdentifier.HasIncompleteRules(session.Identification))
+        {
+            status.Text = L.Get("AutomaticNetworkRulesIncomplete");
+            return;
+        }
+        ClearNetworkFiles();
+        string? Value(string field) => session.Identification?.Information.GetValueOrDefault(field)?.Values.SingleOrDefault()?.RawValue;
+        string? biz = Value("biz"), version = Value("version");
+        string[] packages = session.Identification?.Information.GetValueOrDefault("package")?.Values
+            .Select(value => value.RawValue).OfType<string>().Distinct(StringComparer.Ordinal).ToArray() ?? [];
+        if (biz is null || !NetworkManifestClient.IsValidVersion(version) || packages.Length == 0)
+        {
+            status.Text = L.Get("AutomaticNetworkIdentificationRequired");
+            return;
+        }
+        bool ready = false;
+        NetworkService[] services = networkRegions.Items.Cast<NetworkRegion>().Select(region => region.Service).ToArray();
+        await RunWorkAsync(token =>
+        {
+            var matches = new List<(NetworkService Service, RemoteGame Game)>();
+            foreach (NetworkService service in services)
+                matches.AddRange(networkClient.GetGamesAsync(service, token).GetAwaiter().GetResult()
+                    .Where(game => game.Biz == biz).Select(game => (service, game)));
+            if (matches.Count == 0) throw new CoreException(CoreErrorCode.ManifestChannelUnavailable);
+            if (matches.Count != 1) throw new CoreException(CoreErrorCode.ManifestGameAmbiguous);
+            return networkClient.GetCatalogAsync(matches[0].Service, biz, token, version, matches[0].Game.Id).GetAwaiter().GetResult();
+        }, catalog =>
+        {
+            var inputs = catalog.Manifests.Select(manifest => new ReferenceInput(
+                new LocalManifestFile(manifest.Category, manifest.Url.AbsoluteUri, manifest.DownloadSize, default), manifest));
+            networkManifests.AddNetworkFiles(inputs, biz, catalog.Version);
+            if (packages.Any(package => !catalog.Manifests.Any(manifest => manifest.MatchingField == package)))
+                throw new CoreException(CoreErrorCode.ManifestPackageUnavailable);
+            networkManifests.CheckPackages(packages);
+            ready = true;
+        }, L.Get("QueryingManifests"), DesktopOperation.Network);
+        if (ready && !IsDisposed && !session.CloseRequested) await FetchAndParseNetworkAsync();
+    }
+
     private async Task FetchAndParseNetworkAsync()
     {
-        if (session.IsBusy || !networkSource.Checked) return;
+        if (session.IsBusy || !IsNetworkSource) return;
         ReferenceInput[] inputs = networkManifests.CheckedInputs;
         if (inputs.Length == 0) return;
         ReferenceChanged();

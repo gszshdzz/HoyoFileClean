@@ -19,6 +19,7 @@ public sealed class NetworkReferenceTests
         internal bool FailChina;
         internal bool NoGame;
         internal bool ExtraGames;
+        internal bool InvalidOtherGameVersion;
         internal bool ExtraPackage;
         internal bool SharedManifestUrl;
         internal bool FailExtraPackage;
@@ -53,7 +54,7 @@ public sealed class NetworkReferenceTests
                 data = new { game_branches = (NoGame ? Array.Empty<(string Biz, string Id)>()
                     : ExtraGames ? new[] { (biz, "1"), ("future_cn", "2"), ("future_cn", "3") } : new[] { (biz, "1") })
                     .Select(item => new { game = new { biz = item.Item1, id = item.Item2 }, main = new
-                    { tag = "7.2.0", branch = "main", password = "p", package_id = "pkg" + item.Item2 } }) };
+                    { tag = InvalidOtherGameVersion && item.Item2 != "1" ? "unknown" : "7.2.0", branch = "main", password = "p", package_id = "pkg" + item.Item2 } }) };
             else if (request.RequestUri.AbsolutePath.EndsWith("getBuild"))
             {
                 string version = Uri.UnescapeDataString(request.RequestUri.Query.Split("tag=")[1]);
@@ -118,6 +119,7 @@ public sealed class NetworkReferenceTests
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false, Size = new Size(800, 650) };
         form.Show();
+        Find<RadioButton>(form, "NetworkSource").Checked = true;
         Application.DoEvents();
         Assert.IsType<WindowsFormsSynchronizationContext>(SynchronizationContext.Current);
         Assert.Equal(0, handler.Requests);
@@ -340,6 +342,7 @@ public sealed class NetworkReferenceTests
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
+        Find<RadioButton>(form, "NetworkSource").Checked = true;
         if (stage != "query")
         {
             ClickAndWait(form, session, "QueryNetwork");
@@ -442,6 +445,7 @@ public sealed class NetworkReferenceTests
         using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
         { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
         form.Show();
+        Find<RadioButton>(form, "NetworkSource").Checked = true;
         var regions = Find<ListBox>(form, "NetworkRegions");
         var games = Find<ListBox>(form, "NetworkGames");
         void DoubleClick(ListBox list, Point location)
@@ -639,8 +643,165 @@ public sealed class NetworkReferenceTests
         Assert.Equal(@"C:\manifests\local", HoyoFileClean.Presentation.DiagnosticText.DisplaySource(@"C:\manifests\local"));
     }
 
+    private static WizardSession AutomaticSession(string biz = "hk4e_cn", string version = "7.1.0", params string[] packages)
+    {
+        var session = ReferenceSession();
+        var information = new Dictionary<string, IdentifiedInformation>
+        {
+            ["biz"] = new("IdentificationLabelGame", [new(biz, null, null)]),
+            ["version"] = new("IdentificationLabelVersion", [new(version, null, null)]),
+            ["package"] = new("IdentificationLabelGame", (packages.Length == 0 ? new[] { "game" } : packages)
+                .Select(package => new IdentifiedValue(package, null, null)).ToArray())
+        };
+        session.AcceptGame(session.Game!, session.Game!.Sources[0].Scan!.Root,
+            new GameIdentification(new Dictionary<string, string>(), information));
+        return session;
+    }
+
+    [Theory]
+    [InlineData("hk4e_cn")]
+    [InlineData("hk4e_global")]
+    public void AutomaticFetchUsesIdentifiedVersionAndPackagesAndLocksSelection(string biz) => OnSta(() =>
+    {
+        using var handler = new Handler { ExtraPackage = true };
+        using var http = new HttpClient(handler);
+        var session = AutomaticSession(biz, "7.1.0", "future-voice");
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        var automatic = Find<RadioButton>(form, "AutomaticSource");
+        Assert.True(automatic.Checked);
+        Assert.Equal("自动获取", automatic.Text);
+        Assert.Equal("网络选择", Find<RadioButton>(form, "NetworkSource").Text);
+        Assert.Equal(0, automatic.Parent!.Controls.GetChildIndex(automatic));
+        Assert.False(Find<Control>(form, "NetworkChoices").Visible);
+        Assert.False(Find<Button>(form, "QueryNetwork").Visible);
+        Assert.False(Find<Button>(form, "GetNetworkManifests").Visible);
+        Assert.Equal(0, handler.Requests);
+        ClickAndWait(form, session, "ParseNetworkReference");
+        var table = Find<ManifestTable>(form, "NetworkManifests");
+        var information = Find<Label>(form, "AutomaticNetworkInformation");
+        Assert.True(information.Visible);
+        Assert.Contains(biz, information.Text);
+        Assert.Contains("7.1.0", information.Text);
+        Assert.Contains("future-voice", information.Text);
+        Assert.Equal(2, table.Rows.Count);
+        Assert.True(table.ReadOnly);
+        Assert.False(Find<CheckBox>(table, "SelectAllManifests").Enabled);
+        Assert.Equal("future-voice", Assert.Single(table.CheckedInputs).Remote!.MatchingField);
+        table.ToggleAll();
+        Assert.Single(table.CheckedInputs);
+        Assert.Equal(new[] { "7.1.0" }, handler.Versions);
+        Assert.DoesNotContain(handler.Paths, path => path.EndsWith("manifest-game"));
+        Assert.EndsWith("manifest-future-voice", handler.Paths.Last());
+        Assert.NotNull(session.Reference);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        foreach (DataGridViewRow row in table.Rows)
+        {
+            Assert.Equal(biz, row.Cells["Game"].Value);
+            Assert.Equal("7.1.0", row.Cells["Version"].Value);
+            Assert.Equal((string?)row.Cells["Package"].Value == "future-voice" ? "已解析" : "未获取", row.Cells["State"].Value);
+        }
+        using var image = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(image, new Rectangle(Point.Empty, form.Size));
+        Find<RadioButton>(form, "NetworkSource").Checked = true;
+        Assert.Null(session.Reference);
+        Assert.Empty(table.Rows.Cast<DataGridViewRow>());
+        Assert.False(table.ReadOnly);
+        Assert.True(Find<Control>(form, "NetworkChoices").Visible);
+        Assert.False(information.Visible);
+    });
+
+    [Fact]
+    public void AutomaticFetchWithoutIdentificationMakesNoRequest() => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = ReferenceSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http));
+        form.Show();
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.Equal(0, handler.Requests);
+        Assert.Null(session.Reference);
+        Assert.Contains("完整游戏标识", Find<Label>(form, "Status").Text);
+    });
+
+    [Fact]
+    public void AutomaticMissingPackageKeepsCatalogWithoutDownloadingPartialReference() => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = AutomaticSession("hk4e_cn", "7.1.0", "game", "missing");
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http));
+        form.Show();
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.Single(Find<ManifestTable>(form, "NetworkManifests").Rows.Cast<DataGridViewRow>());
+        Assert.Equal(4, handler.Requests);
+        Assert.Null(session.Reference);
+        Assert.False(Find<Button>(form, "Next").Enabled);
+    });
+
+    [Theory]
+    [InlineData("getGameBranches")]
+    [InlineData("getBuild")]
+    [InlineData("manifest-game")]
+    public void AutomaticFetchCancellationAndRecoveryUseExistingNetworkLifecycle(string path) => OnSta(() =>
+    {
+        using var handler = new Handler { BlockPath = path };
+        using var http = new HttpClient(handler);
+        var session = AutomaticSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http));
+        form.Show();
+        Find<Button>(form, "ParseNetworkReference").PerformClick();
+        WaitUntil(() => handler.Blocked.Task.IsCompleted);
+        Find<Button>(form, "CancelNetwork").PerformClick();
+        WaitUntil(() => !session.IsBusy && !Find<ProgressBar>(form, "OperationProgress").Visible);
+        Assert.Null(session.Reference);
+        Assert.True(Find<ManifestTable>(form, "NetworkManifests").ReadOnly);
+        handler.BlockPath = null;
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.NotNull(session.Reference);
+    });
+
+    [Theory]
+    [InlineData("nap_cn", true)]
+    [InlineData("nap_global", true)]
+    [InlineData("bh3_cn", true)]
+    [InlineData("bh3_global", true)]
+    [InlineData("hk4e_cn", false)]
+    [InlineData("hkrpg_cn", false)]
+    public void IncompleteGameRulesDisableOnlyAutomaticSource(string biz, bool incomplete) => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = AutomaticSession(biz);
+        Assert.Equal(incomplete, GameIdentifier.HasIncompleteRules(session.Identification));
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http));
+        form.Show();
+        Assert.Equal(!incomplete, Find<RadioButton>(form, "AutomaticSource").Enabled);
+        Assert.Equal(incomplete, Find<RadioButton>(form, "NetworkSource").Checked);
+        Assert.True(Find<RadioButton>(form, "LocalSource").Enabled);
+        Assert.True(Find<RadioButton>(form, "ManualSource").Enabled);
+        Assert.Equal(0, handler.Requests);
+    });
+
+    [Fact]
+    public void AutomaticFetchDoesNotValidateUnrelatedGameVersions() => OnSta(() =>
+    {
+        using var handler = new Handler { ExtraGames = true, InvalidOtherGameVersion = true };
+        using var http = new HttpClient(handler);
+        var session = AutomaticSession();
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http));
+        form.Show();
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.NotNull(session.Reference);
+        Assert.Equal(new[] { "7.1.0" }, handler.Versions);
+    });
+
     private static void ClickAndWait(MainForm form, WizardSession session, string name)
     {
+        if (name == "QueryNetwork" && Find<RadioButton>(form, "AutomaticSource").Checked)
+            Find<RadioButton>(form, "NetworkSource").Checked = true;
         Find<Button>(form, name).PerformClick();
         WaitUntil(() => !session.IsBusy && !Find<ProgressBar>(form, "OperationProgress").Visible,
             timeoutSeconds: 10);

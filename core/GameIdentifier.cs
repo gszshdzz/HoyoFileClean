@@ -7,6 +7,11 @@ namespace HoyoFileClean;
 
 public static class GameIdentifier
 {
+    public static bool HasIncompleteRules(GameIdentification? identification)
+        => identification is not null && new[] { "game", "biz" }.Any(field =>
+            identification.Information.GetValueOrDefault(field)?.Values.Any(value =>
+                value.RawValue is { } raw && GameIdentificationRules.IncompleteGames.Contains(raw)) == true);
+
     public static IdentificationConfiguration<GameDetectionDefinition> LoadConfiguration()
     {
         IdentificationConfiguration<GameDetectionDefinition> configuration = GameIdentificationRules.Create();

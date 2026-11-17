@@ -8,6 +8,20 @@ internal sealed class ManifestTable : DataGridView
     public event Action? CheckedFilesChanged;
     internal event Action<ReferenceInput, FileListSnapshot, string>? DetailsRequested;
     private bool updating;
+    private bool busy;
+    private bool selectionLocked;
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal bool SelectionLocked
+    {
+        get => selectionLocked;
+        set
+        {
+            if (selectionLocked == value) return;
+            selectionLocked = value;
+            SetBusy(busy);
+            InvalidateColumn(0);
+        }
+    }
     private readonly bool groupByModifiedHour;
     private bool[] hourBands = [];
     private readonly CheckBox selectAll = new()
@@ -81,6 +95,17 @@ internal sealed class ManifestTable : DataGridView
         };
         SelectionChanged += (_, _) => { if (!updating) ClearSelection(); };
         CellDoubleClick += (_, args) => OpenDetails(args.RowIndex, args.ColumnIndex);
+        CellPainting += (_, args) =>
+        {
+            if (!selectionLocked || args.ColumnIndex != 0 || args.RowIndex < 0) return;
+            args.Paint(args.ClipBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
+            var state = args.Value is true ? System.Windows.Forms.VisualStyles.CheckBoxState.CheckedDisabled
+                : System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedDisabled;
+            Size size = CheckBoxRenderer.GetGlyphSize(args.Graphics!, state);
+            CheckBoxRenderer.DrawCheckBox(args.Graphics!, new Point(args.CellBounds.Left + (args.CellBounds.Width - size.Width) / 2,
+                args.CellBounds.Top + (args.CellBounds.Height - size.Height) / 2), state);
+            args.Handled = true;
+        };
         Sort(Columns[groupByModifiedHour ? "Modified" : "Name"]!,
             groupByModifiedHour ? ListSortDirection.Descending : ListSortDirection.Ascending);
     }
@@ -149,12 +174,20 @@ internal sealed class ManifestTable : DataGridView
 
     internal void SetBusy(bool busy)
     {
-        if (ReadOnly == busy) return;
-        ReadOnly = busy;
-        if (!busy)
+        this.busy = busy;
+        if (ReadOnly == (busy || selectionLocked)) return;
+        ReadOnly = busy || selectionLocked;
+        if (!ReadOnly)
             foreach (DataGridViewColumn column in Columns) column.ReadOnly = column.Index != 0;
         RefreshSelectAll();
     }
+
+    internal void CheckPackages(IReadOnlyCollection<string> packages)
+        => ChangeRows(() =>
+        {
+            foreach (DataGridViewRow row in Rows)
+                row.Cells[0].Value = packages.Contains(Data(row).Input.Remote!.MatchingField, StringComparer.Ordinal);
+        });
 
     internal static string FormatSize(long bytes, bool detailedGigabytes = false)
     {
@@ -319,7 +352,7 @@ internal sealed class ManifestTable : DataGridView
 
     internal void OpenDetails(int rowIndex, int columnIndex)
     {
-        if (ReadOnly || rowIndex < 0 || rowIndex >= Rows.Count || columnIndex <= 0) return;
+        if (busy || rowIndex < 0 || rowIndex >= Rows.Count || columnIndex <= 0) return;
         DataGridViewRow row = Rows[rowIndex];
         ManifestRow data = Data(row);
         if (data.State is not ReferenceState.Parsed || data.Snapshot is not { } snapshot) return;

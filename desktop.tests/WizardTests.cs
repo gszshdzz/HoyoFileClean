@@ -423,7 +423,7 @@ public sealed class WizardTests
         Assert.False(Find<Button>(form, "Back").Enabled);
         Assert.False(Find<Button>(form, "Execute").Visible);
         Assert.Empty(form.Controls.Find("Import", true));
-        Assert.True(Find<RadioButton>(form, "NetworkSource").Checked);
+        Assert.True(Find<RadioButton>(form, "AutomaticSource").Checked);
         Assert.False(Find<CheckBox>(form, "HeavyScan").Checked);
         Assert.True(Find<DataGridView>(form, "Manifests").Columns["Name"]!.ReadOnly);
     });
@@ -496,6 +496,7 @@ public sealed class WizardTests
     });
 
     [Theory]
+    [InlineData("AutomaticSource", false)]
     [InlineData("NetworkSource", false)]
     [InlineData("LocalSource", false)]
     [InlineData("ManualSource", true)]
@@ -510,11 +511,11 @@ public sealed class WizardTests
         Find<RadioButton>(form, mode).Checked = true;
         Application.DoEvents();
         Assert.True(Find<RadioButton>(form, mode).Checked);
-        Assert.Single(new[] { "NetworkSource", "LocalSource", "ManualSource" },
+        Assert.Single(new[] { "AutomaticSource", "NetworkSource", "LocalSource", "ManualSource" },
             name => Find<RadioButton>(form, name).Checked);
         Assert.Equal(manual, Find<DataGridView>(form, "Manifests").Visible);
         Assert.Equal(manual, Find<Label>(form, "ReferenceResult").Visible);
-        Assert.Equal(mode == "NetworkSource", Find<DataGridView>(form, "NetworkManifests").Visible);
+        Assert.Equal(mode is "NetworkSource" or "AutomaticSource", Find<DataGridView>(form, "NetworkManifests").Visible);
         Assert.Equal(mode == "LocalSource", Find<DataGridView>(form, "LocalManifests").Visible);
         if (mode == "LocalSource")
         {

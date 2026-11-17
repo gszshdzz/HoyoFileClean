@@ -25,7 +25,8 @@ public sealed partial class MainForm : Form
         BackColor = SystemColors.Control, Padding = new Padding(0, 3, 0, 3) };
     private readonly ManifestTable manifests = new("Manifests");
     private readonly Label referenceResult = new() { Name = "ReferenceResult", AutoSize = true, Dock = DockStyle.Top };
-    private readonly RadioButton networkSource = new() { Name = "NetworkSource", Text = L.Get("NetworkSourceLabel"), AutoSize = true, Checked = true };
+    private readonly RadioButton automaticSource = new() { Name = "AutomaticSource", Text = L.Get("AutomaticSourceLabel"), AutoSize = true };
+    private readonly RadioButton networkSource = new() { Name = "NetworkSource", Text = L.Get("NetworkSourceLabel"), AutoSize = true };
     private readonly RadioButton localSource = new() { Name = "LocalSource", Text = L.Get("LocalSourceLabel"), AutoSize = true };
     private readonly RadioButton manualSource = new() { Name = "ManualSource", Text = L.Get("ManualSourceLabel"), AutoSize = true };
     private readonly Panel referenceModeContent = new() { Dock = DockStyle.Fill };
@@ -128,7 +129,7 @@ public sealed partial class MainForm : Form
         };
         RefreshView();
         ActiveControl = session.Step == 0 ? gameRoot
-            : session.Step == 1 ? (manualSource.Checked ? manualSource : networkSource) : execute;
+            : session.Step == 1 ? (manualSource.Checked ? manualSource : automaticSource) : execute;
     }
 
     private Panel BuildReferencePage()
@@ -162,16 +163,17 @@ public sealed partial class MainForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.Controls.Add(Buttons(networkSource, localSource, manualSource), 0, 0);
+        layout.Controls.Add(Buttons(automaticSource, networkSource, localSource, manualSource), 0, 0);
         layout.Controls.Add(referenceModeContent, 0, 1);
         // Set the initial selection after grouping, before wiring invalidation events.
         if (session.Reference is not null) manualSource.Checked = true;
-        else networkSource.Checked = true;
-        foreach (RadioButton option in new[] { networkSource, localSource, manualSource })
+        else automaticSource.Checked = true;
+        foreach (RadioButton option in new[] { automaticSource, networkSource, localSource, manualSource })
         {
             option.CheckedChanged += (_, _) =>
             {
                 if (!option.Checked) return;
+                if (automaticSource.Checked || networkManifests.SelectionLocked) ClearNetworkFiles();
                 manifests.ResetResults();
                 localManifests.ResetResults();
                 networkManifests.ResetResults();
@@ -212,13 +214,14 @@ public sealed partial class MainForm : Form
     private void ReferenceChanged()
     {
         session.InvalidateReference();
-        if (session.Step == 1) status.Text = networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
+        if (session.Step == 1) status.Text = IsNetworkSource ? DescribeNetworkInput() : L.Get("ReferenceInputChanged");
         differences.Render();
         RefreshView();
     }
 
     private void GameChanged()
     {
+        if (automaticSource.Checked && networkManifests.Rows.Count > 0) ClearNetworkFiles();
         if (loadedIdentification is null) previewIdentification = null;
         session.InvalidateGame();
         ResetScanProgress();
@@ -235,7 +238,7 @@ public sealed partial class MainForm : Form
             status.Text = session.Step switch
             {
                 1 => session.Reference is not null ? L.Get("ReferenceReady")
-                    : networkSource.Checked ? DescribeNetworkInput() : L.Get("ReferenceInputRequired"),
+                    : IsNetworkSource ? DescribeNetworkInput() : L.Get("ReferenceInputRequired"),
                 0 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : L.Get("GameInputRequired"),
                 2 => session.Comparison is not null ? L.Get("ComparisonReady") : L.Get("ComparisonInputRequired"),
                 _ => L.Get("DifferenceReviewHint")
@@ -249,10 +252,22 @@ public sealed partial class MainForm : Form
         }
         back.Enabled = !session.IsBusy && session.Step > 0;
         next.Visible = session.Step < 3;
-        ShowReferencePage(networkSource.Checked ? networkReferencePage : localSource.Checked ? localReferencePage : manualReferencePage);
+        automaticSource.Enabled = !session.IsBusy && !GameIdentifier.HasIncompleteRules(session.Identification);
+        if (automaticSource.Checked && !session.IsBusy && GameIdentifier.HasIncompleteRules(session.Identification))
+        {
+            networkSource.Checked = true;
+            if (session.Step == 1) status.Text = L.Get("AutomaticNetworkRulesIncomplete");
+        }
+        ShowReferencePage(IsNetworkSource ? networkReferencePage : localSource.Checked ? localReferencePage : manualReferencePage);
+        networkChoices.Visible = !automaticSource.Checked;
+        automaticNetworkInformation.Visible = automaticSource.Checked;
+        automaticNetworkInformation.Text = DescribeAutomaticNetworkInformation();
+        queryNetwork.Visible = getNetwork.Visible = !automaticSource.Checked;
+        networkManifests.SelectionLocked = automaticSource.Checked;
         queryNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkRegions.SelectedItem is not null;
         getNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkGames.SelectedItem is not null;
-        parseNetwork.Enabled = !session.IsBusy && networkSource.Checked && networkManifests.CheckedInputs.Length > 0;
+        parseNetwork.Enabled = !session.IsBusy && (automaticSource.Checked
+            ? networkConfigurationError is null : networkSource.Checked && networkManifests.CheckedInputs.Length > 0);
         networkVersion.Enabled = !session.IsBusy && customNetworkVersion.Checked;
         parseManualReference.Enabled = !session.IsBusy && manualSource.Checked && manifests.CheckedInputs.Length > 0;
         parseLocalReference.Enabled = !session.IsBusy && localSource.Checked && localManifests.CheckedInputs.Length > 0;
@@ -278,7 +293,7 @@ public sealed partial class MainForm : Form
             : L.Get("IdentificationMissing");
         referenceResult.Text = session.Reference is { } reference
             ? L.Format("ReferenceSummary", reference.FileCount, reference.TotalSize) : L.Get("ReferenceResultMissing");
-        comparisonResult.Render(session, networkSource.Checked ? networkManifests.CheckedNetworkMetadata : null);
+        comparisonResult.Render(session, IsNetworkSource ? networkManifests.CheckedNetworkMetadata : null);
     }
 
     private void ShowReferencePage(Panel target)

@@ -58,7 +58,9 @@ public sealed partial class MainForm
         browseRules.Click += (_, _) => BrowseFile(exclusionJson, json: true);
         Button importRules = MakeButton(L.Get("Button_ImportExclusionRules"), "ImportExclusionRules");
         importRules.Click += async (_, _) => await ImportExclusionRulesAsync();
-        options.Controls.Add(LabeledRow(L.Get("ExclusionRulesJsonLabel"), exclusionJson, browseRules, importRules));
+        Button exportRules = MakeButton(L.Get("Button_ExportExclusionRules"), "ExportExclusionRules");
+        exportRules.Click += async (_, _) => await ExportExclusionRulesAsync();
+        options.Controls.Add(LabeledRow(L.Get("ExclusionRulesJsonLabel"), exclusionJson, browseRules, importRules, exportRules));
         EnablePathDrop(exclusionJson, directory: false);
         Label exclusionHint = Note(L.Get("ExclusionPathHint"));
         exclusionHint.Padding = Padding.Empty;
@@ -270,6 +272,34 @@ public sealed partial class MainForm
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException
             or CoreException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         { status.Text = L.Get("ExclusionRulesImportFailed"); }
+        finally { RefreshView(); }
+    }
+
+    private static string? ChooseExclusionOutput(IWin32Window owner)
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = L.Get("Button_ExportExclusionRules"), Filter = L.Get("JsonFileFilter"),
+            DefaultExt = "json", AddExtension = true, FileName = "exclusion-rules.json", OverwritePrompt = false
+        };
+        return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    private async Task ExportExclusionRulesAsync()
+    {
+        if (session.IsBusy || chooseExclusionOutput(this) is not { } path) return;
+        var rules = new ExclusionRules(excludedDirectories.Items.Cast<string>().ToArray(), excludedFiles.Items.Cast<string>().ToArray());
+        Task operation = session.RunAsync(() => { rules.Write(path); return path; }, _ => { });
+        status.Text = L.Get("ExportingExclusionRules");
+        RefreshView();
+        try
+        {
+            await operation;
+            status.Text = L.Format("SavedPath", path);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        { status.Text = L.Get("ExclusionRulesExportFailed"); }
         finally { RefreshView(); }
     }
 

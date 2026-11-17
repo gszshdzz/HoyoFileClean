@@ -15,6 +15,7 @@ public sealed partial class MainForm : Form
     private TableLayoutPanel localReferenceActions = null!;
     private readonly ReferenceParser referenceParser;
     private readonly Func<string, bool> confirmPatchReference;
+    private readonly Func<IWin32Window, string?> chooseExclusionOutput;
     private readonly Button parseManualReference = MakeButton(L.Get("Button_Execute"), "ParseManualReference");
     private readonly ProgressBar parsingProgress = new() { Name = "OperationProgress", Dock = DockStyle.Fill, Visible = false };
     private readonly ProgressBar comparisonProgress = new() { Name = "ComparisonProgress", Dock = DockStyle.Fill, Visible = false };
@@ -52,9 +53,11 @@ public sealed partial class MainForm : Form
     }
 
     internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null,
-        Func<IReadOnlyList<NetworkService>>? loadNetworkServices = null, Func<string, bool>? confirmPatchReference = null)
+        Func<IReadOnlyList<NetworkService>>? loadNetworkServices = null, Func<string, bool>? confirmPatchReference = null,
+        Func<IWin32Window, string?>? chooseExclusionOutput = null)
     {
         this.session = session;
+        this.chooseExclusionOutput = chooseExclusionOutput ?? ChooseExclusionOutput;
         this.referenceParser = referenceParser ?? new ReferenceParser();
         this.confirmPatchReference = confirmPatchReference ?? (message => MessageBox.Show(this, message,
             L.Get("PatchReferenceWarningTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning,

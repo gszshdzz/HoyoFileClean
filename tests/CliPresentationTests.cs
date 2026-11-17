@@ -5,8 +5,7 @@ namespace HoyoFileClean.Tests;
 
 public sealed class CliPresentationTests
 {
-    private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData("invalid-list", "清单 JSON 格式无效", "ListJsonInvalid")]

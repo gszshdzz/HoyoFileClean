@@ -162,8 +162,7 @@ public sealed class ManifestIdentifierTests
     [InlineData(true)]
     public void RealConversionPathRecognizesProtobufAndPreservesFilesAndOutputContract(bool compressed)
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         byte[] bytes = new SophonManifestProto { Assets = { new SophonManifestAssetProperty
         {
@@ -193,8 +192,7 @@ public sealed class ManifestIdentifierTests
     [Fact]
     public void SavedMetadataIsRecomputedAndPerInputMetadataSurvivesCombination()
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string first = Path.Combine(directory, "first.json"), second = Path.Combine(directory, "second.json");
         var forged = new Dictionary<string, ManifestMetadataField> { ["game"] = new([new("fake", "fake")]) };
@@ -210,8 +208,7 @@ public sealed class ManifestIdentifierTests
     [Fact]
     public void ExportUsesTheLoadedSingleSnapshotAndRefusesToOverwrite()
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string input = Path.Combine(directory, "input.json"), output = Path.Combine(directory, "export.json");
         File.WriteAllText(input, JsonSerializer.Serialize(Document("YuanShen.exe"),

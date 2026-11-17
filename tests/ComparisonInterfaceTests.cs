@@ -6,8 +6,7 @@ namespace HoyoFileClean.Tests;
 
 public sealed class ComparisonInterfaceTests
 {
-    private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     [Fact]
     public void DirectCoreCallsAndCliCompatibleWriterProduceIdenticalReports()

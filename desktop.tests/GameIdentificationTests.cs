@@ -289,8 +289,7 @@ public sealed class GameIdentificationTests
 
     private static string CreateRoot()
     {
-        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "game-gui-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(TestTemporaryFiles.Root, "game-gui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
     }

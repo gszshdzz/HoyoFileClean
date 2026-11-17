@@ -22,8 +22,7 @@ public sealed class IdentificationEvaluatorTests
     private static (GameIdentification Game, IReadOnlyDictionary<string, ManifestMetadataField> Manifest) Identify(
         string[] clues, Dictionary<string, Dictionary<string, IdentificationMeaning>> meanings)
     {
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "shared-identification-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(TestTemporaryFiles.Root, "shared-identification-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         File.WriteAllLines(Path.Combine(root, "clues.txt"), clues.Select(id => id + "=" + id));
         string[] ids = ["first", "corroboration", "other"];

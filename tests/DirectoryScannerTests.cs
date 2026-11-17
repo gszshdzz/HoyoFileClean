@@ -8,9 +8,7 @@ namespace HoyoFileClean.Tests;
 public sealed class DirectoryScannerTests
 {
     private const string ExampleMd5 = "900150983cd24fb0d6963f7d28e17f72";
-    private readonly string directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
     private string Root => Path.Combine(directory, "root");
     private string Output => Path.Combine(directory, "scan.json");
 

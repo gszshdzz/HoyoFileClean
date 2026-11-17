@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\tests\TestTemporaryFiles.cs" Link="TestTemporaryFiles.cs" />
     <ProjectReference Include="..\desktop\HoyoFileClean.Desktop.csproj" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
   </ItemGroup>

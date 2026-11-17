@@ -9,8 +9,7 @@ namespace HoyoFileClean.Desktop.Tests;
 public sealed class ComparisonPanelTests
 {
     private const string Hash = "900150983cd24fb0d6963f7d28e17f72";
-    private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData(false)]

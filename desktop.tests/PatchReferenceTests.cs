@@ -74,8 +74,7 @@ public sealed class PatchReferenceTests
 
     private static FileListSnapshot Read(string name, bool patch)
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, name);
         File.WriteAllText(path, JsonSerializer.Serialize(new

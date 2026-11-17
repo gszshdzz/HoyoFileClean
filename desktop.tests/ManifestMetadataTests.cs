@@ -15,8 +15,7 @@ public sealed class ManifestMetadataTests
     [InlineData("BH3.exe", "bh3")]
     public void OfficialBizTakesPrecedenceAndGameIsTheFallback(string executable, string name) => NativeTestHost.OnSta(() =>
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, "sample.json");
         File.WriteAllText(path, JsonSerializer.Serialize(new
@@ -114,8 +113,7 @@ public sealed class ManifestMetadataTests
     [Fact]
     public void BatchKeepsPerFileMetadataEvenWhenCombinedFilesConflict()
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         ReferenceInput Write(string name, long size)
         {

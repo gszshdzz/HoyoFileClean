@@ -128,8 +128,7 @@ public sealed class WizardTests
         Assert.Throws<CoreException>(() => ExclusionRules.Read(path, directory));
     }
 
-    private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData(650)]

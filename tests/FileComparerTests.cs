@@ -8,9 +8,7 @@ public sealed class FileComparerTests
 {
     private const string Hash = "900150983cd24fb0d6963f7d28e17f72";
     private const string OtherHash = "d41d8cd98f00b204e9800998ecf8427e";
-    private readonly string directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
     private string Output => Path.Combine(directory, "comparison.json");
 
     [Fact]

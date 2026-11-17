@@ -10,8 +10,7 @@ internal static class NativeTestHost
 {
     internal static WizardSession ReferenceSession()
     {
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Desktop.Tests", Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var session = new WizardSession();
         session.AcceptGame(DirectoryScanner.Scan(root), root);

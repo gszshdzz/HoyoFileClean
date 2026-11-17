@@ -125,8 +125,7 @@ public sealed class NetworkManifestTests
     public async Task MissingPackageDoesNotRequestOrWrite(string? package)
     {
         using HttpClient http = Client(_ => throw new InvalidOperationException("Must not send"));
-        string output = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", Guid.NewGuid().ToString("N") + ".json");
+        string output = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N") + ".json");
         await Assert.ThrowsAnyAsync<ArgumentException>(() => new NetworkManifestClient(http)
             .ConvertAsync(China, "hk4e_cn", null, output, package!, TestContext.Current.CancellationToken));
         Assert.False(File.Exists(output));
@@ -632,8 +631,7 @@ public sealed class NetworkManifestTests
             downloads.Add(field);
             return Bytes(field == "game" ? main : voice);
         });
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string output = Path.Combine(directory, "network.json");
         ConversionSummary summary = await new NetworkManifestClient(http).ConvertAsync(China, "hk4e_cn", "1.0.0", output,

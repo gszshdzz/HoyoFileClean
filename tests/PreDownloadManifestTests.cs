@@ -9,8 +9,7 @@ namespace HoyoFileClean.Tests;
 public sealed class PreDownloadManifestTests
 {
     private const string Md5 = "900150983cd24fb0d6963f7d28e17f72";
-    private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+    private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     // refs/ is intentionally untracked. Run this local evidence explicitly;
     // ordinary regression must remain runnable in a fresh checkout without samples.

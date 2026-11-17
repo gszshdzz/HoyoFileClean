@@ -6,8 +6,7 @@ public sealed class GameExclusionPresetTests
 {
     private static string Root()
     {
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "preset-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(TestTemporaryFiles.Root, "preset-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return root;
     }

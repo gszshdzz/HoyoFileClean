@@ -294,6 +294,8 @@ manifest 转换限制压缩输入最多 64 MiB、解压后最多 128 MiB；这�
 
 运行自动测试：
 
+日常优先使用[按需测试入口](docs/testing.md)，只选相关测试类；下面是阶段验收用的两套全量入口。测试项目会在正常结束（含断言失败）后自行永久删除本轮创建的临时目录，不清空游戏缓存或构建缓存。
+
 ```powershell
 dotnet run --project tests\HoyoFileClean.Tests.csproj
 dotnet run --project desktop.tests\HoyoFileClean.Desktop.Tests.csproj

@@ -19,8 +19,7 @@ public sealed class FileEntryInterfaceTests
     [InlineData("overflow")]
     public void JsonAndProtobufEnforceTheSameFileSemantics(string scenario)
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         ManifestFile[] files = scenario switch
         {

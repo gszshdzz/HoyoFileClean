@@ -237,7 +237,7 @@ public sealed class NetworkReferenceTests
             Control control = Find<Control>(form, name);
             Assert.True(client.Contains(control.RectangleToScreen(control.ClientRectangle)), name);
         }
-        string screenshot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp", "opencode", "network-reference.png");
+        string screenshot = Path.Combine(TestTemporaryFiles.Root, "network-reference.png");
         using var image = new Bitmap(form.Width, form.Height);
         form.DrawToBitmap(image, new Rectangle(Point.Empty, form.Size));
         image.Save(screenshot);

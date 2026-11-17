@@ -4,8 +4,7 @@ namespace HoyoFileClean.Tests;
 
 public sealed class GameIdentifierTests
 {
-    private readonly string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Temp", "opencode", "identification-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(TestTemporaryFiles.Root, "identification-" + Guid.NewGuid().ToString("N"));
 
     private const string Sample = """
         [General]
@@ -177,8 +176,7 @@ public sealed class GameIdentifierTests
         Assert.False(result.Information.ContainsKey("channel"));
         Assert.Equal("1.0.0", Assert.Single(result.Information["plugins"].Values).RawValue);
         Assert.Equal(before, File.ReadAllBytes(path));
-        string acceptance = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Temp", "opencode", "HoyoFileClean-session8-acceptance-" + Guid.NewGuid().ToString("N"));
+        string acceptance = Path.Combine(TestTemporaryFiles.Root, "acceptance-" + Guid.NewGuid().ToString("N"));
         foreach ((string name, string extra) in new[]
         {
             ("valid", ""), ("version-max", "\ngame_version=7.10.0"),

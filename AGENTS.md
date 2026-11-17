@@ -19,6 +19,10 @@
 
 ## Agent skills
 
+### 测试
+
+运行测试前阅读 `docs/testing.md`。日常按改动范围使用 `tests/run-tests.ps1 -Suite Core|Desktop -Class ...`；公共接口、共用测试设施或阶段验收执行一次所需全量，同一代码版本不反复跑已通过的全量。新增测试临时文件统一放在 `TestTemporaryFiles.Root`；用户授权测试项目在收尾时自行永久删除本轮目录，这一限定场景不受仅用 `safedelete` 的人工删除规则约束。真实输入缓存和历史未知文件仍受原安全规则保护。
+
 ### Issue tracker
 
 方案与任务使用本地 Markdown，约定见 `docs/agents/issue-tracker.md`。

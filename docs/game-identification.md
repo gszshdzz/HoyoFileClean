@@ -6,6 +6,8 @@ GUI 正式扫描前须成功执行“读取游戏并加载预置排除”，未�
 
 `config/GameIdentificationRules.cs` 与 `config/NetworkServices.cs` 都是独立的 C# 开发适配数据定义，直接随核心库编译，不使用嵌入或旁置适配 JSON；更改配置后必须重新构建，不读取用户旁置的替代文件。核心识别入口可接收配置对象，便于测试和以后复用。
 
+`config/GameIdentificationRules.cs` 与 `config/ManifestIdentificationRules.cs` 仅定义识别检测及含义。扫描排除预置和选择预置所需的 biz 到游戏族映射独立维护在 `config/GameExclusionRules.cs`，同样随核心库编译；排除规则不参与身份识别。此拆分仅调整配置归属，不改变预置内容或选择行为（session 21）。
+
 ## 检测项内嵌含义
 
 配置只有 `Detections`；每项同时定义检测方式及 `Meanings`，不再有顶层 `Results` 或跨项条件。例如：

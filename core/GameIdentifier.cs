@@ -159,12 +159,12 @@ public static class GameIdentifier
             foreach (IdentifiedValue value in biz.Values)
                 if (value.RawValue is { } key)
                 {
-                    if (GameIdentificationRules.PresetGames.TryGetValue(key, out string? gameKey)) key = gameKey;
-                    if (GameIdentificationRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset)) return preset;
+                    if (GameExclusionRules.PresetGames.TryGetValue(key, out string? gameKey)) key = gameKey;
+                    if (GameExclusionRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset)) return preset;
                 }
         if (identification.Information.TryGetValue("game", out IdentifiedInformation? game))
             foreach (IdentifiedValue value in game.Values)
-                if (value.RawValue is { } key && GameIdentificationRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset))
+                if (value.RawValue is { } key && GameExclusionRules.ExclusionPresets.TryGetValue(key, out GameExclusionPreset? preset))
                     return preset;
         return null;
     }

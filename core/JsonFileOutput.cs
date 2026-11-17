@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace HoyoFileClean;
 
-internal static class JsonFileOutput
+public static class JsonFileOutput
 {
     private static readonly JsonSerializerOptions writerOptions = new()
     {

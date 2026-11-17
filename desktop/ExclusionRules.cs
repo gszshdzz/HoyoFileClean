@@ -10,6 +10,9 @@ internal sealed record ExclusionRules(IReadOnlyList<string> Directories, IReadOn
         RespectNullableAnnotations = true
     };
 
+    internal void Write(string path)
+        => JsonFileOutput.WriteNew(path, new ExclusionRuleDocument(Directories, Files));
+
     internal static ExclusionRules Read(string path, string root)
     {
         using var stream = File.OpenRead(path);

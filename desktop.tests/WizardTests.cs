@@ -1754,6 +1754,50 @@ public sealed class WizardTests
     });
 
     [Fact]
+    public void ExportedExclusionsRoundTripAndRepeatedImportsDeduplicate() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        string root = session.Game!.Sources[0].Scan!.Root;
+        string path = Path.Combine(directory, "exported-exclusions.json");
+        using var form = new MainForm(session, chooseExclusionOutput: _ => path)
+        {
+            StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false
+        };
+        form.Show();
+        Find<TextBox>(form, "GameRoot").Text = root;
+        ListBox dirs = Find<ListBox>(form, "ExcludedDirectories"), files = Find<ListBox>(form, "ExcludedFiles");
+        dirs.Items.Add("Cache");
+        files.Items.Add("settings.ini");
+        Button import = Find<Button>(form, "ImportExclusionRules"), export = Find<Button>(form, "ExportExclusionRules");
+        var row = Assert.IsType<TableLayoutPanel>(import.Parent);
+        Assert.Same(row, export.Parent);
+        Assert.Equal(row.GetColumn(import) + 1, row.GetColumn(export));
+        export.PerformClick();
+        WaitForPageWork(form, session, "ExportExclusionRules");
+        ExclusionRules rules = ExclusionRules.Read(path, root);
+        Assert.Equal("Cache", Assert.Single(rules.Directories));
+        Assert.Equal("settings.ini", Assert.Single(rules.Files));
+        dirs.Items.Clear();
+        files.Items.Clear();
+        dirs.Items.Add("cache");
+        files.Items.Add("SETTINGS.INI");
+        Find<TextBox>(form, "ExclusionJson").Text = path;
+        for (int i = 0; i < 2; i++)
+        {
+            import.PerformClick();
+            WaitForPageWork(form, session, "ImportExclusionRules");
+            Assert.Equal("cache", Assert.Single(dirs.Items.Cast<string>()));
+            Assert.Equal("SETTINGS.INI", Assert.Single(files.Items.Cast<string>()));
+        }
+        string original = File.ReadAllText(path);
+        export.PerformClick();
+        WaitForPageWork(form, session, "ExportExclusionRules");
+        Assert.Equal(original, File.ReadAllText(path));
+        Assert.Contains("另选文件名", Find<Label>(form, "Status").Text);
+        form.Close();
+    });
+
+    [Fact]
     public void HistoricalImportNavigationUsesRecordedStatusAndFailureCannotRestoreOldResult() => OnSta(() =>
     {
         WizardSession session = Ready();

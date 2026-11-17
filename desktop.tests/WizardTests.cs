@@ -197,6 +197,9 @@ public sealed class WizardTests
         session.AcceptComparison(FileComparer.Compare(game, reference));
         session.Next();
         Assert.Equal(3, session.Step);
+        Assert.True(session.CanAdvance);
+        session.Next();
+        Assert.Equal(4, session.Step);
         Assert.False(session.CanAdvance);
         session.Back();
         Assert.True(session.CanAdvance);

@@ -193,13 +193,7 @@ public sealed class DifferencePanel : UserControl
             + (row.Category == DifferenceCategory.OutsideScope ? L.Get("OutsideScopeWarning") : "");
     }
 
-    private static string CategoryName(DifferenceCategory category) => category switch
-    {
-        DifferenceCategory.GameOnly => L.Get("CategoryGameOnly"),
-        DifferenceCategory.ReferenceOnly => L.Get("CategoryReferenceOnly"),
-        DifferenceCategory.Different => L.Get("CategoryDifferent"),
-        _ => L.Get("CategoryOutsideScope")
-    };
+    private static string CategoryName(DifferenceCategory category) => DifferenceText.CategoryName(category);
 
     private static void AddTree(Panel panel, string title, TreeView tree)
     {

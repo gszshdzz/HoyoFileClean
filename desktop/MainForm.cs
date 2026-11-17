@@ -4,7 +4,7 @@ public sealed partial class MainForm : Form
 {
     private readonly WizardSession session;
     private readonly Panel content = new() { Dock = DockStyle.Fill };
-    private readonly Label[] steps = new Label[4];
+    private readonly Label[] steps = new Label[5];
     private readonly Panel[] pages;
     private readonly Button back = MakeButton(L.Get("Button_Back"), "Back");
     private readonly Button execute = MakeButton(L.Get("Button_Execute"), "Execute");
@@ -35,6 +35,7 @@ public sealed partial class MainForm : Form
     private readonly CheckBox heavy = new() { Text = L.Get("HeavyScanHint"), AutoSize = true, Name = "HeavyScan" };
     private readonly ComparisonPanel comparisonResult = new();
     private readonly DifferencePanel differences;
+    private readonly FileOperationPanel fileOperations;
 
     public MainForm() : this(new WizardSession()) { }
 
@@ -51,6 +52,7 @@ public sealed partial class MainForm : Form
         session.Next();
         RefreshView();
         if (session.Step == 3) differences.Render();
+        if (session.Step == 4) fileOperations.Render();
     }
 
     internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null,
@@ -73,7 +75,10 @@ public sealed partial class MainForm : Form
         ClientSize = new Size(1040, 780);
         AutoScaleMode = AutoScaleMode.Dpi;
         differences = new DifferencePanel(session);
-        pages = [BuildScanPage(), BuildReferencePage(), BuildComparisonPage(), BuildDifferencePage()];
+        fileOperations = new FileOperationPanel(session);
+        var operationPage = new Panel { Dock = DockStyle.Fill };
+        operationPage.Controls.Add(fileOperations);
+        pages = [BuildScanPage(), BuildReferencePage(), BuildComparisonPage(), BuildDifferencePage(), operationPage];
         foreach (ManifestTable table in new[] { manifests, localManifests, networkManifests })
             table.DetailsRequested += (input, snapshot, information) =>
             {
@@ -86,11 +91,11 @@ public sealed partial class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var flow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Padding = new Padding(0, 0, 0, 12) };
+        var flow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 5, Padding = new Padding(0, 0, 0, 12) };
         string[] titles = StepTitles();
         for (int i = 0; i < steps.Length; i++)
         {
-            flow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            flow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
             steps[i] = new Label { Text = titles[i], AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 6) };
             flow.Controls.Add(steps[i], i, 0);
         }
@@ -241,6 +246,7 @@ public sealed partial class MainForm : Form
                     : IsNetworkSource ? DescribeNetworkInput() : L.Get("ReferenceInputRequired"),
                 0 => session.Game is { } game ? ResultText.DescribeGameStatus(game, importGameSource.Checked) : L.Get("GameInputRequired"),
                 2 => session.Comparison is not null ? L.Get("ComparisonReady") : L.Get("ComparisonInputRequired"),
+                4 => L.Get("FileOperationHint"),
                 _ => L.Get("DifferenceReviewHint")
             };
         }
@@ -251,7 +257,7 @@ public sealed partial class MainForm : Form
             steps[i].Text = (i == session.Step ? L.Get("CurrentStepPrefix") : "") + StepTitles()[i];
         }
         back.Enabled = !session.IsBusy && session.Step > 0;
-        next.Visible = session.Step < 3;
+        next.Visible = session.Step < 4;
         automaticSource.Enabled = !session.IsBusy && !GameIdentifier.HasIncompleteRules(session.Identification);
         if (automaticSource.Checked && !session.IsBusy && GameIdentifier.HasIncompleteRules(session.Identification))
         {
@@ -322,7 +328,7 @@ public sealed partial class MainForm : Form
 
     private static Button MakeButton(string text, string name) => new() { Text = text, Name = name, AutoSize = true, MinimumSize = new Size(90, 30) };
     private static string[] StepTitles() => [L.Get("StepGame"), L.Get("StepReference"),
-        L.Get("StepComparison"), L.Get("StepDifferences")];
+        L.Get("StepComparison"), L.Get("StepDifferences"), L.Get("StepFileOperation")];
     private static Label Note(string text)
         => new() { Text = text, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 5) };
     private static TableLayoutPanel Vertical()

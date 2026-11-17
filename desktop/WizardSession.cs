@@ -39,11 +39,13 @@ public sealed class WizardSession
     internal bool CloseRequested { get; private set; }
     public int SelectedCount => selected.Count;
     public long SelectedSize => selectedSize;
+    public IEnumerable<DifferenceRow> SelectedRows => Rows.Where(row => selected.ContainsKey(row.Path));
     public bool CanAdvance => !IsBusy && Step switch
     {
         0 => Game is not null,
         1 => Reference is not null,
         2 => Comparison is not null,
+        3 => Comparison is not null,
         _ => false
     };
 

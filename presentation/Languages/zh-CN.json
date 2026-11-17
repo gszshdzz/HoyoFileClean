@@ -1,4 +1,10 @@
 {
+  "SelectAllResults": "选择当前筛选范围内全部可选文件",
+  "ShowHiddenResults": "显示隐藏项",
+  "ResultFilterEqual": "相同",
+  "ResultFilterCount": "{0} ({1:N0})",
+  "ResultEqualHashHint": "MD5 与大小相同",
+  "ResultEqualSizeHint": "仅大小相同，未完整校验内容",
   "LoadGamePresetAction": "读取游戏并加载预置排除",
   "GamePresetLoaded": "已读取游戏信息；已加载可用预置，尚未正式扫描。",
   "GamePresetUnavailable": "已读取游戏信息，但没有对应预置；保留手动规则，尚未正式扫描。",

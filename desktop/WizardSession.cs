@@ -1,6 +1,6 @@
 namespace HoyoFileClean.Desktop;
 
-public enum DifferenceCategory { All, GameOnly, ReferenceOnly, Different, OutsideScope }
+public enum DifferenceCategory { GameOnly, ReferenceOnly, Different, OutsideScope, Equal }
 
 internal enum DesktopOperation { Work, Parsing, Network, Scan }
 
@@ -13,14 +13,22 @@ public sealed record DifferenceRow(string Path, ManifestFile? Game, ManifestFile
 // UI-independent state. Neither paths in a report nor a checked tree node authorize file operations.
 public sealed class WizardSession
 {
+    private static readonly IReadOnlyList<DifferenceCategory> defaultFilters = Enum.GetValues<DifferenceCategory>()
+        .Where(category => category != DifferenceCategory.Equal).ToList().AsReadOnly();
     private readonly Dictionary<string, ManifestFile> selected = new(StringComparer.OrdinalIgnoreCase);
+    private long selectedSize;
+    internal event Action<string, bool>? SelectionChanged;
     private readonly Dictionary<string, DifferenceRow> rowsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> resultHiddenPaths = new(StringComparer.OrdinalIgnoreCase);
     public FileListSnapshot? Reference { get; private set; }
     public FileListSnapshot? Game { get; private set; }
     public GameIdentification? Identification { get; private set; }
     public ComparisonResult? Comparison { get; private set; }
     public IReadOnlyList<DifferenceRow> Rows { get; private set; } = [];
-    public DifferenceCategory Filter { get; private set; }
+    public IReadOnlyList<DifferenceCategory> Filters { get; private set; } = defaultFilters;
+    public bool ShowHiddenResults { get; private set; }
+    public bool IsResultHidden(string path) => resultHiddenPaths.Contains(path);
+    public IEnumerable<DifferenceRow> DisplayRows => Rows.Where(row => ShowHiddenResults || !IsResultHidden(row.Path));
     public int Step { get; private set; }
     public bool IsBusy { get; private set; }
     private CancellationTokenSource? cancellation;
@@ -31,7 +39,7 @@ public sealed class WizardSession
     internal bool CloseRequested { get; private set; }
     public bool SelectionConfirmed { get; private set; }
     public int SelectedCount => selected.Count;
-    public long SelectedSize => selected.Values.Sum(file => file.Size);
+    public long SelectedSize => selectedSize;
     public bool CanDemonstrateDeletion => !IsBusy && selected.Count > 0 && SelectionConfirmed && Comparison is not null;
     public bool CanAdvance => !IsBusy && Step switch
     {
@@ -115,6 +123,7 @@ public sealed class WizardSession
         RequireResultApplicationOrIdle();
         Game = null;
         Identification = null;
+        resultHiddenPaths.Clear();
         InvalidateComparison();
     }
 
@@ -129,8 +138,9 @@ public sealed class WizardSession
         Comparison = null;
         Rows = [];
         rowsByPath.Clear();
-        selected.Clear();
+        foreach (ManifestFile file in selected.Values.ToArray()) SetSelected(file, false);
         SelectionConfirmed = false;
+        ShowHiddenResults = false;
     }
 
     public void AcceptReference(FileListSnapshot reference)
@@ -161,6 +171,8 @@ public sealed class WizardSession
         ClearComparison();
         Game = game;
         Identification = restored;
+        resultHiddenPaths = (restored is null ? [] : GameIdentifier.GetExclusionPreset(restored)?.ResultHiddenFiles ?? [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public void AcceptComparison(ComparisonResult comparison)
@@ -175,34 +187,64 @@ public sealed class WizardSession
             .Concat(comparison.OutsideScope.Select(item => new DifferenceRow(item.File.Path,
                 item.PresentIn == FileValues.SideA ? item.File : null, item.PresentIn == FileValues.SideB ? item.File : null, DifferenceCategory.OutsideScope)))
             .OrderBy(row => row.Path, StringComparer.Ordinal).ToArray();
-        Filter = DifferenceCategory.All;
+        Filters = defaultFilters;
+        var differences = Rows.Select(row => row.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Rows = Rows.Concat(Game.Files.Values.Where(file => !differences.Contains(file.Path) && Reference.Files.ContainsKey(file.Path))
+            .Select(file => new DifferenceRow(file.Path, file, Reference.Files[file.Path], DifferenceCategory.Equal)))
+            .OrderBy(row => row.Path, StringComparer.Ordinal).ToArray();
         foreach (DifferenceRow row in Rows) rowsByPath.Add(row.Path, row);
     }
 
-    public IEnumerable<DifferenceRow> VisibleRows => Rows.Where(row => Filter == DifferenceCategory.All || row.Category == Filter);
+    public IEnumerable<DifferenceRow> VisibleRows => DisplayRows.Where(row => Filters.Contains(row.Category));
 
-    public void SetFilter(DifferenceCategory filter)
+    public void SetShowHiddenResults(bool value)
     {
         RequireIdle();
-        Filter = filter;
+        ShowHiddenResults = value;
+        if (!value)
+            foreach (string path in selected.Keys.Where(IsResultHidden).ToArray()) SetSelected(selected[path], false);
+        SelectionConfirmed = false;
+    }
+
+    public void SetFilters(IEnumerable<DifferenceCategory> filters)
+    {
+        RequireIdle();
+        Filters = filters.Distinct().ToList().AsReadOnly();
         var visible = VisibleRows.Where(row => row.CanSelect).Select(row => row.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (string path in selected.Keys.Where(path => !visible.Contains(path)).ToArray())
         {
-            selected.Remove(path);
-            SelectionConfirmed = false;
+            SetSelected(selected[path], false);
         }
     }
 
     public bool IsSelected(string path) => selected.ContainsKey(path);
 
     public void Select(string path, bool value)
+        => SelectRange([path], value);
+
+    public void SelectRange(IEnumerable<string> paths, bool value)
     {
         RequireIdle();
-        if (!rowsByPath.TryGetValue(path, out DifferenceRow? row) || (Filter != DifferenceCategory.All && row.Category != Filter))
+        DifferenceRow[] rows = paths.Distinct(StringComparer.OrdinalIgnoreCase).Select(RequireSelectable).ToArray();
+        foreach (DifferenceRow row in rows)
+            SetSelected(row.Game!, value);
+    }
+
+    private void SetSelected(ManifestFile file, bool value)
+    {
+        bool changed = value ? selected.TryAdd(file.Path, file) : selected.Remove(file.Path);
+        if (!changed) return;
+        selectedSize += value ? file.Size : -file.Size;
+        SelectionConfirmed = false;
+        SelectionChanged?.Invoke(file.Path, value);
+    }
+
+    private DifferenceRow RequireSelectable(string path)
+    {
+        if (!rowsByPath.TryGetValue(path, out DifferenceRow? row) || (!ShowHiddenResults && IsResultHidden(path)) || !Filters.Contains(row.Category))
             throw new ArgumentException(L.Get("SelectionNotVisible"));
         if (!row.CanSelect) throw new ArgumentException(L.Get("SelectionRequiresScannedGameFile"));
-        bool changed = value ? selected.TryAdd(row.Path, row.Game!) : selected.Remove(row.Path);
-        if (changed) SelectionConfirmed = false;
+        return row;
     }
 
     public void ConfirmSelection(bool value)

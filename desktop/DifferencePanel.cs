@@ -3,214 +3,366 @@ namespace HoyoFileClean.Desktop;
 public sealed class DifferencePanel : UserControl
 {
     private readonly WizardSession session;
-    private readonly TreeView gameTree = new() { Name = "GameTree", Dock = DockStyle.Fill, CheckBoxes = true, HideSelection = false };
-    private readonly TreeView referenceTree = new() { Name = "ReferenceTree", Dock = DockStyle.Fill, CheckBoxes = false, HideSelection = false };
-    private readonly ComboBox filter = new() { Name = "DifferenceFilter", DropDownStyle = ComboBoxStyle.DropDownList, Width = 250 };
-    private readonly CheckBox confirm = new() { Name = "ConfirmSelection", Text = L.Get("ConfirmSelectedFiles"), AutoSize = true };
-    private readonly Button demonstrate = new() { Name = "DemonstrateDelete", Text = L.Get("DemonstrateDelete"), AutoSize = true };
-    private readonly Label selection = new() { Name = "SelectionSummary", AutoSize = true };
-    private readonly TextBox details = new() { Name = "DifferenceDetails", Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical };
-    private bool rendering;
-    private bool hasRendered;
+    private readonly ResultGrid grid = new()
+    {
+        Name = "DifferenceGrid", Dock = DockStyle.Fill, AllowUserToAddRows = false,
+        AllowUserToDeleteRows = false, AllowUserToResizeRows = false, RowHeadersVisible = false,
+        ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, MultiSelect = false,
+        SelectionMode = DataGridViewSelectionMode.CellSelect, BackgroundColor = SystemColors.Window,
+        BorderStyle = BorderStyle.None, CellBorderStyle = DataGridViewCellBorderStyle.None, VirtualMode = true, ReadOnly = true
+    };
+    private readonly CheckBox showHidden = new() { Name = "ShowHiddenResults", Text = L.Get("ShowHiddenResults"), AutoSize = true };
+    private readonly Label selection = new() { Name = "SelectionSummary", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 8) };
+    private readonly Dictionary<DifferenceCategory, Button> filters = [];
+    private readonly CheckBox selectAll = new()
+    {
+        Name = "SelectAllResults", AccessibleName = L.Get("SelectAllResults"),
+        ThreeState = true, AutoCheck = false, AutoSize = true, Enabled = false
+    };
+    private readonly HashSet<string> collapsed = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Branch> fileBranches = new(StringComparer.OrdinalIgnoreCase);
+    private Branch root = new("", "");
+    private readonly List<DisplayRow> visible = [];
     private ComparisonResult? renderedComparison;
-    private DifferenceCategory renderedFilter;
+    private DifferenceCategory[] renderedFilters = [];
+    private bool renderedHidden;
+    private bool hasRendered;
+    private bool rendering;
 
     public DifferencePanel(WizardSession session)
     {
         this.session = session;
+        session.SelectionChanged += OnSelectionChanged;
+        grid.CheckBoxToggleRequested += ToggleRowSelection;
         Name = "DifferencePanel";
         Dock = DockStyle.Fill;
-        filter.Items.AddRange([L.Get("FilterAllDifferences"), L.Get("CategoryGameOnly"), L.Get("CategoryReferenceOnly"), L.Get("CategoryDifferent"), L.Get("FilterOutsideScope")]);
-        filter.SelectedIndex = 0;
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var top = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-        top.Controls.AddRange([new Label { Text = L.Get("FilterLabel"), AutoSize = true, Padding = new Padding(0, 5, 0, 0) }, filter]);
-        var split = new SplitContainer { Size = new Size(900, 400), SplitterDistance = 448, Dock = DockStyle.Fill, Orientation = Orientation.Vertical };
-        AddTree(split.Panel1, L.Get("GameTreeHeading"), gameTree);
-        AddTree(split.Panel2, L.Get("ReferenceTreeHeading"), referenceTree);
-        var bottom = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-        bottom.Controls.AddRange([selection, confirm, demonstrate]);
-        layout.Controls.Add(top, 0, 0);
-        layout.Controls.Add(split, 0, 1);
-        layout.Controls.Add(details, 0, 2);
-        layout.Controls.Add(bottom, 0, 3);
-        var warning = new Label
+        var top = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+        foreach (DifferenceCategory category in Enum.GetValues<DifferenceCategory>())
         {
-            Name = "DifferenceWarning",
-            Text = L.Get("DifferenceWarning"),
-            AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 6), MaximumSize = new Size(740, 0)
-        };
-        layout.SizeChanged += (_, _) => warning.MaximumSize = new Size(Math.Max(120, layout.ClientSize.Width - warning.Margin.Horizontal), 0);
-        layout.Controls.Add(warning, 0, 4);
-        Controls.Add(layout);
-        filter.SelectedIndexChanged += (_, _) =>
-        {
-            if (rendering || session.IsBusy) return;
-            session.SetFilter((DifferenceCategory)filter.SelectedIndex);
-            Render();
-        };
-        gameTree.BeforeCheck += (_, args) =>
-        {
-            if (args.Node is null) return;
-            if (!rendering && (session.IsBusy || args.Node.Tag is not DifferenceRow { CanSelect: true })) args.Cancel = true;
-        };
-        gameTree.AfterCheck += (_, args) =>
-        {
-            if (rendering || args.Node?.Tag is not DifferenceRow row) return;
-            session.Select(row.Path, args.Node.Checked);
-            RefreshSelection();
-        };
-        foreach (TreeView tree in new[] { gameTree, referenceTree })
-        {
-            tree.BeforeExpand += (_, args) =>
+            var button = new Button { Name = "Filter" + category, AutoSize = true };
+            filters.Add(category, button);
+            top.Controls.Add(button);
+            button.Click += (_, _) =>
             {
-                if (args.Node?.Tag is Branch branch && args.Node.Nodes.Count == 1 && args.Node.Nodes[0].Tag is null)
-                {
-                    args.Node.Nodes.Clear();
-                    AddChildren(args.Node.Nodes, branch, tree == gameTree);
-                }
-            };
-            tree.AfterSelect += (_, args) =>
-            {
-                details.Text = args.Node?.Tag is DifferenceRow row ? Describe(row) : L.Get("DirectorySelectionHint");
+                if (session.IsBusy) return;
+                session.SetFilters(session.Filters.Contains(category)
+                    ? session.Filters.Where(value => value != category)
+                    : session.Filters.Append(category));
+                Render();
             };
         }
-        confirm.CheckedChanged += (_, _) =>
+        top.Controls.Add(showHidden);
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Selected", HeaderText = "", Width = 32, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, ThreeState = true, ValueType = typeof(CheckState) });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Game", HeaderText = L.Get("GameTreeHeading"), ReadOnly = true, SortMode = DataGridViewColumnSortMode.NotSortable });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "", ReadOnly = true, Width = 38, AutoSizeMode = DataGridViewAutoSizeColumnMode.None, SortMode = DataGridViewColumnSortMode.NotSortable });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Reference", HeaderText = L.Get("ReferenceTreeHeading"), ReadOnly = true, SortMode = DataGridViewColumnSortMode.NotSortable });
+        grid.Columns[2].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        grid.Controls.Add(selectAll);
+        selectAll.Click += (_, _) =>
         {
-            if (rendering) return;
-            session.ConfirmSelection(confirm.Checked);
+            if (session.IsBusy || root.SelectableCount == 0) return;
+            session.SelectRange(SelectablePaths(root), root.CheckState != CheckState.Checked);
             RefreshSelection();
         };
-        demonstrate.Click += (_, _) => DemonstrateDeletion();
+        grid.Layout += (_, _) => PositionSelectAll();
+        grid.Scroll += (_, _) => PositionSelectAll();
+        grid.ColumnWidthChanged += (_, _) => PositionSelectAll();
+        grid.ColumnHeadersHeightChanged += (_, _) => PositionSelectAll();
+        layout.Controls.Add(top, 0, 0);
+        layout.Controls.Add(grid, 0, 1);
+        layout.Controls.Add(selection, 0, 2);
+        Controls.Add(layout);
+        showHidden.CheckedChanged += (_, _) =>
+        {
+            if (rendering || session.IsBusy) return;
+            session.SetShowHiddenResults(showHidden.Checked);
+            Render();
+        };
+        // Clicks update session state directly; cells have no independent edit state.
+        grid.CellValueNeeded += (_, args) =>
+        {
+            if (args.RowIndex < 0 || args.RowIndex >= visible.Count) return;
+            DisplayRow item = visible[args.RowIndex];
+            if (args.ColumnIndex == 0) args.Value = item.Directory?.CheckState ??
+                (item.File is { CanSelect: true } row && session.IsSelected(row.Path) ? CheckState.Checked : CheckState.Unchecked);
+            else if (item.Directory is { } directory)
+            {
+                string label = new string(' ', item.Depth * 4) + (collapsed.Contains(directory.Path) ? "▶ " : "▼ ") + directory.Name + "/";
+                args.Value = args.ColumnIndex switch { 1 => directory.HasGame ? label : "", 3 => directory.HasReference ? label : "", _ => "" };
+            }
+            else if (item.File is { } file)
+                args.Value = args.ColumnIndex switch { 1 => FileText(file.Game, item.Depth), 3 => FileText(file.Reference, item.Depth), _ => Status(file.Category) };
+        };
+        grid.CellValuePushed += (_, args) =>
+        {
+            if (rendering || args.ColumnIndex != 0) return;
+            SetRowSelection(args.RowIndex, args.Value is true or CheckState.Checked);
+        };
+        grid.CellDoubleClick += (_, args) => { if (args.ColumnIndex == 0) ToggleRowSelection(args.RowIndex); };
+        grid.SelectionChanged += (_, _) => grid.ClearSelection();
+        grid.CellFormatting += (_, args) =>
+        {
+            Color color = FileAtRow(args.RowIndex)?.Category switch
+            {
+                DifferenceCategory.Different => Color.Firebrick,
+                DifferenceCategory.GameOnly or DifferenceCategory.ReferenceOnly => Color.Purple,
+                _ => SystemColors.WindowText
+            };
+            args.CellStyle.ForeColor = args.CellStyle.SelectionForeColor = color;
+            args.CellStyle.BackColor = args.CellStyle.SelectionBackColor = SystemColors.Window;
+        };
+        grid.CellPainting += (_, args) =>
+        {
+            if (args.RowIndex < 0 || args.RowIndex >= visible.Count || args.ColumnIndex < 0) return;
+            DataGridViewPaintParts parts = args.PaintParts & ~DataGridViewPaintParts.Focus & ~DataGridViewPaintParts.SelectionBackground;
+            if (args.ColumnIndex == 0 && visible[args.RowIndex].Directory is null && FileAtRow(args.RowIndex) is not { CanSelect: true }) parts &= ~DataGridViewPaintParts.ContentForeground;
+            args.Paint(args.ClipBounds, parts);
+            args.Handled = true;
+        };
+        grid.CellToolTipTextNeeded += (_, args) =>
+        {
+            if (FileAtRow(args.RowIndex) is not { } row) return;
+            args.ToolTipText = args.ColumnIndex switch
+            {
+                1 or 3 => row.Path,
+                2 when row.Category == DifferenceCategory.Equal => L.Get(row.Game?.Hash is not null && row.Reference?.Hash is not null ? "ResultEqualHashHint" : "ResultEqualSizeHint"),
+                2 => CategoryName(row.Category), _ => ""
+            };
+        };
+        grid.CellClick += (_, args) =>
+        {
+            if (args.ColumnIndex == 0) { ToggleRowSelection(args.RowIndex); return; }
+            if (session.IsBusy || args.RowIndex < 0 || args.ColumnIndex is not (1 or 3)) return;
+            if (args.RowIndex >= visible.Count || visible[args.RowIndex].Directory is not { } directory) return;
+            if (!collapsed.Add(directory.Path)) collapsed.Remove(directory.Path);
+            RebuildRows();
+            RefreshSelection();
+        };
         Render();
     }
 
     public void Render()
     {
-        if (hasRendered && ReferenceEquals(renderedComparison, session.Comparison) && renderedFilter == session.Filter)
+        if (!ReferenceEquals(renderedComparison, session.Comparison)) collapsed.Clear();
+        if (!hasRendered || !ReferenceEquals(renderedComparison, session.Comparison) ||
+            !renderedFilters.SequenceEqual(session.Filters) || renderedHidden != session.ShowHiddenResults)
         {
-            RefreshSelection();
-            return;
-        }
-        rendering = true;
-        gameTree.BeginUpdate();
-        referenceTree.BeginUpdate();
-        try
-        {
-            filter.SelectedIndex = (int)session.Filter;
-            gameTree.Nodes.Clear();
-            referenceTree.Nodes.Clear();
-            var root = new Branch("");
-            foreach (DifferenceRow row in session.VisibleRows)
-            {
-                string[] parts = row.Path.Split('/');
-                Branch branch = root;
-                foreach (string part in parts[..^1])
-                {
-                    if (!branch.Directories.TryGetValue(part, out Branch? child))
-                        branch.Directories.Add(part, child = new Branch(part));
-                    branch = child;
-                }
-                branch.Files.Add(row);
-            }
-            AddChildren(gameTree.Nodes, root, true);
-            AddChildren(referenceTree.Nodes, root, false);
-            details.Text = session.Comparison is null ? L.Get("ComparisonResultMissing") : ResultText.Describe(session.Comparison);
+            BuildTree();
+            RebuildRows();
             renderedComparison = session.Comparison;
-            renderedFilter = session.Filter;
+            renderedFilters = session.Filters.ToArray();
+            renderedHidden = session.ShowHiddenResults;
             hasRendered = true;
         }
-        finally
+        DifferenceRow[] displayRows = session.DisplayRows.ToArray();
+        foreach ((DifferenceCategory category, Button button) in filters)
         {
-            gameTree.EndUpdate();
-            referenceTree.EndUpdate();
-            rendering = false;
+            int count = displayRows.Count(row => row.Category == category);
+            bool active = session.Filters.Contains(category);
+            button.Text = (active ? "✓ " : "") + L.Format("ResultFilterCount", CategoryName(category), count);
+            button.BackColor = active ? SystemColors.ControlLight : SystemColors.Control;
         }
         RefreshSelection();
     }
 
-    private void AddChildren(TreeNodeCollection nodes, Branch branch, bool game)
+    private void BuildTree()
+    {
+        root = new Branch("", "");
+        fileBranches.Clear();
+        foreach (DifferenceRow row in session.VisibleRows)
+        {
+            string[] parts = row.Path.Split('/');
+            Branch branch = root;
+            bool selected = row.CanSelect && session.IsSelected(row.Path);
+            branch.Include(row, selected);
+            foreach (string part in parts[..^1])
+            {
+                if (!branch.Directories.TryGetValue(part, out Branch? child))
+                {
+                    string path = branch.Path.Length == 0 ? part : branch.Path + "/" + part;
+                    branch.Directories.Add(part, child = new Branch(part, path, branch));
+                }
+                branch = child;
+                branch.Include(row, selected);
+            }
+            branch.Files.Add(row);
+            if (row.CanSelect) fileBranches.Add(row.Path, branch);
+        }
+    }
+
+    private void RebuildRows()
+    {
+        rendering = true;
+        grid.SuspendLayout();
+        try
+        {
+            int first = grid.FirstDisplayedScrollingRowIndex;
+            string? anchor = first >= 0 && first < visible.Count ? visible[first].Path : null;
+            grid.CancelEdit();
+            grid.CurrentCell = null;
+            visible.Clear();
+            AddChildren(root, 0);
+            grid.RowCount = visible.Count;
+            grid.ClearSelection();
+            if (anchor is not null && visible.Count > 0)
+            {
+                int restored = visible.FindIndex(row => row.Path.Equals(anchor, StringComparison.OrdinalIgnoreCase));
+                grid.FirstDisplayedScrollingRowIndex = restored >= 0 ? restored : Math.Min(first, visible.Count - 1);
+            }
+            grid.Invalidate();
+        }
+        finally { grid.ResumeLayout(); rendering = false; }
+    }
+
+    private void AddChildren(Branch branch, int depth)
     {
         foreach (Branch child in branch.Directories.Values)
         {
-            var node = new TreeNode(child.Name + L.Get("DirectorySuffix")) { Tag = child };
-            node.Nodes.Add(new TreeNode(L.Get("TreePlaceholder")));
-            nodes.Add(node);
+            visible.Add(new DisplayRow(null, child, depth));
+            if (!collapsed.Contains(child.Path)) AddChildren(child, depth + 1);
         }
+        foreach (DifferenceRow row in branch.Files)
+            visible.Add(new DisplayRow(row, null, depth));
+    }
+
+    internal DifferenceRow? FileAtRow(int index) => index >= 0 && index < visible.Count ? visible[index].File : null;
+
+    private void ToggleRowSelection(int index)
+    {
+        if (index < 0 || index >= visible.Count) return;
+        DisplayRow row = visible[index];
+        bool value = row.Directory is { } directory ? directory.CheckState != CheckState.Checked
+            : row.File is { } file && !session.IsSelected(file.Path);
+        SetRowSelection(index, value);
+    }
+
+    private void SetRowSelection(int index, bool value)
+    {
+        if (session.IsBusy || index < 0 || index >= visible.Count) return;
+        DisplayRow row = visible[index];
+        if (row.Directory is { SelectableCount: > 0 } directory) session.SelectRange(SelectablePaths(directory), value);
+        else if (row.File is { CanSelect: true } file) session.Select(file.Path, value);
+        else return;
+        RefreshSelection();
+    }
+
+    private static IEnumerable<string> SelectablePaths(Branch branch) => branch.Files.Where(row => row.CanSelect).Select(row => row.Path)
+        .Concat(branch.Directories.Values.SelectMany(SelectablePaths));
+
+    private void OnSelectionChanged(string path, bool value)
+    {
+        if (!fileBranches.TryGetValue(path, out Branch? branch)) return;
+        for (Branch? current = branch; current is not null; current = current.Parent)
+            current.SelectedCount += value ? 1 : -1;
+    }
+
+    private void PositionSelectAll()
+    {
+        Rectangle header = grid.GetCellDisplayRectangle(0, -1, true);
+        Size size = selectAll.GetPreferredSize(Size.Empty);
+        Rectangle bounds = new(header.Left + (header.Width - size.Width) / 2,
+            header.Top + (header.Height - size.Height) / 2, size.Width, size.Height);
+        if (selectAll.Bounds != bounds) selectAll.Bounds = bounds;
+        bool visible = grid.ColumnHeadersVisible && header.Width >= size.Width && header.Height >= size.Height;
+        if (selectAll.Visible != visible) selectAll.Visible = visible;
+    }
+
+    private static string FileText(ManifestFile? file, int depth) => file is null ? "" :
+        new string(' ', depth * 4) + file.Path.Split('/')[^1] + "  ·  " + L.Format("FileSizeBytes", file.Size);
+
+    private static string Status(DifferenceCategory category) => category switch
+    {
+        DifferenceCategory.GameOnly => "←", DifferenceCategory.ReferenceOnly => "→",
+        DifferenceCategory.Different => "≠", DifferenceCategory.Equal => "=", _ => "—"
+    };
+
+    private void RefreshSelection()
+    {
         bool previous = rendering;
         rendering = true;
         try
         {
-            foreach (DifferenceRow row in branch.Files)
-            {
-                ManifestFile? file = game ? row.Game : row.Reference;
-                string name = (file?.Path ?? row.Path).Split('/')[^1];
-                var node = new TreeNode(L.Format("DifferenceNodeLabel", name, CategoryName(row.Category),
-                    file is null ? L.Get("SideRecordMissingParenthesized") : L.Format("FileSizeBytes", file.Size)))
-                {
-                    Tag = row,
-                    Checked = game && session.IsSelected(row.Path)
-                };
-                nodes.Add(node);
-            }
+            showHidden.Checked = session.ShowHiddenResults;
+            showHidden.Enabled = !session.IsBusy;
+            foreach (Button button in filters.Values) button.Enabled = !session.IsBusy;
+            selectAll.Enabled = !session.IsBusy && root.SelectableCount > 0;
+            selectAll.CheckState = root.CheckState;
+            grid.InvalidateColumn(0);
+            selection.Text = L.Format("SelectionSummary", session.SelectedCount, session.SelectedSize);
         }
         finally { rendering = previous; }
-    }
-
-    private void RefreshSelection()
-    {
-        rendering = true;
-        try
-        {
-            filter.Enabled = !session.IsBusy;
-            selection.Text = L.Format("SelectionSummary", session.SelectedCount, session.SelectedSize);
-            confirm.Checked = session.SelectionConfirmed;
-            confirm.Enabled = !session.IsBusy && session.SelectedCount > 0;
-            demonstrate.Enabled = session.CanDemonstrateDeletion;
-        }
-        finally { rendering = false; }
-    }
-
-    private void DemonstrateDeletion()
-    {
-        if (!session.CanDemonstrateDeletion) return;
-        if (MessageBox.Show(this,
-            L.Format("DeleteDemoConfirmation", session.SelectedCount, session.SelectedSize),
-            L.Get("DeleteDemoConfirmationTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
-        MessageBox.Show(this, L.Get("DeleteDemoCompleted"), L.Get("DeleteDemoTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
-
-    private static string Describe(DifferenceRow row)
-    {
-        static string FileText(ManifestFile? file) => file is null ? L.Get("SideRecordMissing") : L.Format("FileDetails", file.Path, file.Size, file.Hash ?? L.Get("HashNotCalculated"));
-        return CategoryName(row.Category) + L.Get("GameDetailPrefix") + FileText(row.Game) + L.Get("ReferenceDetailPrefix") + FileText(row.Reference)
-            + (row.Category == DifferenceCategory.OutsideScope ? L.Get("OutsideScopeWarning") : "");
     }
 
     private static string CategoryName(DifferenceCategory category) => category switch
     {
         DifferenceCategory.GameOnly => L.Get("CategoryGameOnly"),
-        DifferenceCategory.ReferenceOnly => L.Get("CategoryReferenceOnly"),
-        DifferenceCategory.Different => L.Get("CategoryDifferent"),
-        _ => L.Get("CategoryOutsideScope")
+        DifferenceCategory.ReferenceOnly => L.Get("CategoryReferenceOnly"), DifferenceCategory.Different => L.Get("CategoryDifferent"),
+        DifferenceCategory.Equal => L.Get("ResultFilterEqual"), _ => L.Get("CategoryOutsideScope")
     };
 
-    private static void AddTree(Panel panel, string title, TreeView tree)
+    private sealed class ResultGrid : DataGridView
     {
-        panel.Controls.Add(tree);
-        panel.Controls.Add(new Label { Text = title, Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 6, 0, 6) });
+        internal ResultGrid() => DoubleBuffered = true;
+        internal event Action<int>? CheckBoxToggleRequested;
+
+        protected override void OnKeyDown(KeyEventArgs args)
+        {
+            if (args.KeyCode == Keys.Space && args.Modifiers == Keys.None && CurrentCell?.ColumnIndex == 0)
+            {
+                CheckBoxToggleRequested?.Invoke(CurrentCell.RowIndex);
+                args.SuppressKeyPress = true;
+                return;
+            }
+            base.OnKeyDown(args);
+        }
+
+        protected override void OnKeyUp(KeyEventArgs args)
+        {
+            if (args.KeyCode == Keys.Space && args.Modifiers == Keys.None && CurrentCell?.ColumnIndex == 0)
+            {
+                args.Handled = true;
+                return;
+            }
+            base.OnKeyUp(args);
+        }
     }
 
-    private sealed class Branch(string name)
+    private sealed record DisplayRow(DifferenceRow? File, Branch? Directory, int Depth)
+    {
+        public string Path => File?.Path ?? Directory!.Path;
+    }
+    private sealed class Branch(string name, string path, Branch? parent = null)
     {
         public string Name { get; } = name;
+        public string Path { get; } = path;
+        public Branch? Parent { get; } = parent;
         public SortedDictionary<string, Branch> Directories { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<DifferenceRow> Files { get; } = [];
+        public bool HasGame { get; set; }
+        public bool HasReference { get; set; }
+        public int SelectableCount { get; set; }
+        public int SelectedCount { get; set; }
+        public CheckState CheckState => SelectedCount == 0 ? CheckState.Unchecked
+            : SelectedCount == SelectableCount ? CheckState.Checked : CheckState.Indeterminate;
+
+        public void Include(DifferenceRow row, bool selected)
+        {
+            HasGame |= row.Game is not null;
+            HasReference |= row.Reference is not null;
+            if (row.CanSelect) SelectableCount++;
+            if (selected) SelectedCount++;
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) session.SelectionChanged -= OnSelectionChanged;
+        base.Dispose(disposing);
     }
 }

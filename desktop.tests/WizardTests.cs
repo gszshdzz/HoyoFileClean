@@ -338,12 +338,12 @@ public sealed class WizardTests
         session.Select("game-only", true);
         session.Select("different", true);
         session.ConfirmSelection(true);
-        session.SetFilter(DifferenceCategory.GameOnly);
+        session.SetFilters([DifferenceCategory.GameOnly]);
         Assert.True(session.IsSelected("game-only"));
         Assert.False(session.IsSelected("different"));
         Assert.False(session.SelectionConfirmed);
         Assert.Single(session.VisibleRows);
-        session.SetFilter(DifferenceCategory.OutsideScope);
+        session.SetFilters([DifferenceCategory.OutsideScope]);
         Assert.Equal(0, session.SelectedCount);
         Assert.All(session.VisibleRows, row => Assert.False(row.CanSelect));
     }
@@ -380,37 +380,69 @@ public sealed class WizardTests
     }
 
     [Fact]
-    public void NativeTreesEnforceSelectionAndReflectConfirmationState() => OnSta(() =>
+    public void DifferenceRefreshReflectsAuthoritativeSelection() => OnSta(() =>
+    {
+        WizardSession session = Ready();
+        using var panel = new DifferencePanel(session);
+        DataGridView tree = Find<DataGridView>(panel, "DifferenceGrid");
+        DataGridViewRow node = tree.Rows.Cast<DataGridViewRow>().Single(node => panel.FileAtRow(node.Index) is { Category: DifferenceCategory.GameOnly });
+        session.Select(panel.FileAtRow(node.Index)!.Path, true);
+        panel.Render();
+        Assert.Equal(CheckState.Checked, node.Cells[0].Value);
+        Assert.Contains("1", Find<Label>(panel, "SelectionSummary").Text);
+    });
+
+    [Fact]
+    public void RangeSelectionRejectsAnInvalidMemberWithoutPartialUpdates()
+    {
+        WizardSession session = Ready();
+        Assert.Throws<ArgumentException>(() => session.SelectRange(["game-only", "reference-only"], true));
+        Assert.Equal(0, session.SelectedCount);
+        session.SelectRange(["game-only", "different", "GAME-ONLY"], true);
+        Assert.Equal(2, session.SelectedCount);
+        Assert.Equal(8, session.SelectedSize);
+        Assert.False(session.IsSelected("excluded/unknown"));
+        session.SetFilters([DifferenceCategory.Different]);
+        Assert.Equal(1, session.SelectedCount);
+        Assert.Equal(5, session.SelectedSize);
+        session.SelectRange(["different"], false);
+        Assert.Equal(0, session.SelectedCount);
+        Assert.Equal(0, session.SelectedSize);
+        session.Select("different", true);
+        session.InvalidateComparison();
+        Assert.Equal(0, session.SelectedSize);
+    }
+
+    [Fact]
+    public void NativeGridEnforcesSelectionAndReflectsState() => OnSta(() =>
     {
         WizardSession session = Ready();
         using var panel = new DifferencePanel(session);
         panel.CreateControl();
-        TreeView left = Find<TreeView>(panel, "GameTree"), right = Find<TreeView>(panel, "ReferenceTree");
-        Assert.True(left.CheckBoxes);
-        Assert.False(right.CheckBoxes);
-        TreeNode onlyGame = left.Nodes.Cast<TreeNode>().Single(node => node.Tag is DifferenceRow { Category: DifferenceCategory.GameOnly });
-        onlyGame.Checked = true;
+        DataGridView grid = Find<DataGridView>(panel, "DifferenceGrid");
+        DataGridViewRow onlyGame = grid.Rows.Cast<DataGridViewRow>().Single(node => panel.FileAtRow(node.Index) is { Category: DifferenceCategory.GameOnly });
+        onlyGame.Cells[0].Value = true;
         Assert.Equal(1, session.SelectedCount);
-        CheckBox confirm = Find<CheckBox>(panel, "ConfirmSelection");
-        Button delete = Find<Button>(panel, "DemonstrateDelete");
-        Assert.False(delete.Enabled);
-        confirm.Checked = true;
-        Assert.True(delete.Enabled);
-        TreeNode different = left.Nodes.Cast<TreeNode>().Single(node => node.Tag is DifferenceRow { Category: DifferenceCategory.Different });
-        different.Checked = true;
-        Assert.False(confirm.Checked);
-        Assert.False(delete.Enabled);
-        TreeNode absent = left.Nodes.Cast<TreeNode>().Single(node => node.Tag is DifferenceRow { Category: DifferenceCategory.ReferenceOnly });
-        absent.Checked = true;
-        Assert.False(absent.Checked);
-        TreeNode folder = left.Nodes.Cast<TreeNode>().Single(node => node.Text.StartsWith("excluded"));
-        folder.Checked = true;
-        Assert.False(folder.Checked);
-        folder.Expand();
-        Assert.Single(folder.Nodes.Cast<TreeNode>());
-        Assert.IsType<DifferenceRow>(folder.Nodes[0].Tag);
-        folder.Nodes[0].Checked = true;
-        Assert.False(folder.Nodes[0].Checked);
+        Assert.Equal("", onlyGame.Cells[3].Value);
+        Assert.Equal("←", onlyGame.Cells[2].Value);
+        Color color = Color.Empty;
+        grid.CellFormatting += (_, args) => color = args.CellStyle.ForeColor;
+        _ = onlyGame.Cells[1].FormattedValue;
+        Assert.Equal(Color.Purple, color);
+        DataGridViewRow different = grid.Rows.Cast<DataGridViewRow>().Single(node => panel.FileAtRow(node.Index) is { Category: DifferenceCategory.Different });
+        different.Cells[0].Value = true;
+        Assert.Equal(2, session.SelectedCount);
+        Assert.Equal("≠", different.Cells[2].Value);
+        _ = different.Cells[1].FormattedValue;
+        Assert.Equal(Color.Firebrick, color);
+        DataGridViewRow absent = grid.Rows.Cast<DataGridViewRow>().Single(node => panel.FileAtRow(node.Index) is { Category: DifferenceCategory.ReferenceOnly });
+        grid.CurrentCell = absent.Cells[0];
+        Assert.False(grid.BeginEdit(false));
+        Assert.Equal("", absent.Cells[1].Value);
+        Assert.Equal("→", absent.Cells[2].Value);
+        Assert.Empty(panel.Controls.Find("ConfirmSelection", true));
+        Assert.Empty(panel.Controls.Find("DemonstrateDelete", true));
+        Assert.Empty(panel.Controls.Find("DifferenceDetails", true));
     });
 
     [Fact]
@@ -450,7 +482,7 @@ public sealed class WizardTests
             1 => ["Manifests", "ReferenceResult", "Next", "ParseManualReference"],
             0 => ["GameRoot", "ExcludedDirectories", "ExcludedFiles", "Next", "ReadGame"],
             2 => ["ComparisonResult", "Next", "Execute"],
-            _ => ["GameTree", "ReferenceTree", "ConfirmSelection", "DemonstrateDelete"]
+            _ => ["DifferenceGrid", "ShowHiddenResults", "SelectionSummary", "SelectAllResults"]
         };
         foreach (string name in controls.Concat(["CloseWizard", "Status"]))
         {
@@ -459,9 +491,9 @@ public sealed class WizardTests
         }
         if (step == 3)
         {
-            var warning = Find<Label>(form, "DifferenceWarning");
-            Assert.True(warning.Height >= warning.GetPreferredSize(new Size(warning.Width, 0)).Height, "底部警告文字被裁切");
-            Assert.NotEmpty(Find<ComboBox>(form, "DifferenceFilter").Text);
+            Assert.Contains("(", Find<Button>(form, "FilterGameOnly").Text);
+            Assert.Empty(form.Controls.Find("FilterAll", true));
+            Assert.Empty(form.Controls.Find("DifferenceFilter", true));
         }
         Directory.CreateDirectory(directory);
         using var bitmap = new Bitmap(form.Width, form.Height);
@@ -1164,13 +1196,13 @@ public sealed class WizardTests
     {
         WizardSession session = Ready();
         using var panel = new DifferencePanel(session);
-        TreeView tree = Find<TreeView>(panel, "GameTree");
-        TreeNode first = tree.Nodes[0];
+        DataGridView tree = Find<DataGridView>(panel, "DifferenceGrid");
+        DataGridViewRow first = tree.Rows[0];
         panel.Render();
-        Assert.Same(first, tree.Nodes[0]);
+        Assert.Same(first, tree.Rows[0]);
         session.InvalidateComparison();
         panel.Render();
-        Assert.Empty(tree.Nodes.Cast<TreeNode>());
+        Assert.Empty(tree.Rows.Cast<DataGridViewRow>());
     });
 
     [Fact]

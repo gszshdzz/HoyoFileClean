@@ -16,7 +16,7 @@ internal static class GameExclusionRules
         {
             ["hk4e_cn"] = new(["Screenshot", "BeyondAssets", "chunk", "ldiff",
                 "YuanShen_Data/Persistent", "YuanShen_Data/SDKCaches", "YuanShen_Data/webCaches"],
-                ["config.ini", "beyond_pkg_version"]),
+                ["config.ini", "beyond_pkg_version"], ["pkg_version"]),
             ["hkrpg"] = new(["ldiff", "StarRail_Data/ScreenShots", "StarRail_Data/SDKCaches", "StarRail_Data/webCaches",
                 "StarRail_Data/Persistent/Apm", "StarRail_Data/Persistent/Archive", "StarRail_Data/Persistent/Asb",
                 "StarRail_Data/Persistent/DesignData", "StarRail_Data/Persistent/IFix", "StarRail_Data/Persistent/Lua",
@@ -28,10 +28,10 @@ internal static class GameExclusionRules
                 "StarRail_Data/Persistent/Audio/AudioPackage/Windows/AudioLangRedord.txt",
                 "StarRail_Data/Persistent/Audio/AudioPackage/Windows/Extra.pck",
                 "StarRail_Data/Persistent/Audio/AudioPackage/Windows/PckPatchConfig.json",
-                "StarRail_Data/Persistent/Audio/AudioPackage/Windows/M_AudioV.bytes"]),
+                "StarRail_Data/Persistent/Audio/AudioPackage/Windows/M_AudioV.bytes"], ["pkg_version"]),
             ["nap"] = new(["ldiff", "ScreenShot", "ZenlessZoneZero_Data/Persistent",
-                "ZenlessZoneZero_Data/SDKCaches", "ZenlessZoneZero_Data/webCaches"], ["config.ini"]),
+                "ZenlessZoneZero_Data/SDKCaches", "ZenlessZoneZero_Data/webCaches"], ["config.ini"], ["pkg_version"]),
             ["bh3"] = new(["ldiff", "ScreenShot", "BH3_Data/SDKCaches", "BH3_Data/webCaches", "LauncherPlugins"],
-                ["config.ini", "Version.txt", "@IgnoredFiles"])
+                ["config.ini", "Version.txt", "@IgnoredFiles"], ["pkg_version"])
         };
 }

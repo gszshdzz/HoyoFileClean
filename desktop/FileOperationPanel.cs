@@ -9,11 +9,13 @@ public sealed record FileOperationRequest(FileOperationKind Kind, string Root,
 public sealed class FileOperationPanel : UserControl
 {
     private readonly WizardSession session;
+    private DifferenceRow[] displayedRows = [];
     private readonly Label summary = new() { Name = "FileOperationSummary", AutoSize = true, Dock = DockStyle.Fill };
     private readonly DataGridView files = new() { Name = "FileOperationFiles", Dock = DockStyle.Fill, ReadOnly = true,
         AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false,
         AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, MultiSelect = false,
-        AllowUserToResizeRows = false, SelectionMode = DataGridViewSelectionMode.CellSelect };
+        AllowUserToResizeRows = false, SelectionMode = DataGridViewSelectionMode.CellSelect,
+        VirtualMode = true };
     private readonly RadioButton recycle = new() { Name = "RecycleFiles", Text = L.Get("FileOperationRecycle"), Checked = true, AutoSize = true };
     private readonly RadioButton delete = new() { Name = "DeleteFiles", Text = L.Get("FileOperationDelete"), AutoSize = true };
     private readonly RadioButton move = new() { Name = "MoveFiles", Text = L.Get("FileOperationMove"), AutoSize = true };
@@ -39,6 +41,25 @@ public sealed class FileOperationPanel : UserControl
         AddColumn("State", L.Get("FileOperationStateColumn"), 80, 8);
         AddColumn("Message", L.Get("FileOperationMessageColumn"), 120, 15);
         AddColumn("Path", L.Get("FileOperationPathColumn"), 240, 35);
+        files.CellValueNeeded += (_, args) =>
+        {
+            if (args.RowIndex < 0 || args.RowIndex >= displayedRows.Length) return;
+            DifferenceRow row = displayedRows[args.RowIndex];
+            args.Value = args.ColumnIndex switch
+            {
+                0 => DifferenceText.CategoryName(row.Category),
+                1 => row.Game!.Size,
+                2 => L.Get(row.Reference is null ? "FileOperationNoCounterpart" :
+                    row.Game!.Size == row.Reference.Size ? "FileOperationEqual" : "FileOperationUnequal"),
+                3 => L.Get(row.Reference is null ? "FileOperationNoCounterpart" :
+                    row.Game!.Hash is null || row.Reference.Hash is null ? "FileOperationHashUnchecked" :
+                        string.Equals(row.Game.Hash, row.Reference.Hash, StringComparison.OrdinalIgnoreCase) ? "FileOperationEqual" : "FileOperationUnequal"),
+                4 => L.Get("FileOperationPending"),
+                5 => "",
+                6 => FullPath(row),
+                _ => null
+            };
+        };
         // Like ManifestTable, this is a display list, not another selection surface.
         files.SelectionChanged += (_, _) => files.ClearSelection();
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
@@ -70,24 +91,18 @@ public sealed class FileOperationPanel : UserControl
     {
         summary.Text = L.Format("SelectionSummary", session.SelectedCount, session.SelectedSize) +
             L.Get("FileOperationPreviewHint");
-        files.Rows.Clear();
-        foreach (DifferenceRow row in session.SelectedRows)
-        {
-            string category = DifferenceText.CategoryName(row.Category);
-            string sizeDifference = L.Get(row.Reference is null ? "FileOperationNoCounterpart" :
-                row.Game!.Size == row.Reference.Size ? "FileOperationEqual" : "FileOperationUnequal");
-            string hashDifference = L.Get(row.Reference is null ? "FileOperationNoCounterpart" :
-                row.Game!.Hash is null || row.Reference.Hash is null ? "FileOperationHashUnchecked" :
-                    string.Equals(row.Game.Hash, row.Reference.Hash, StringComparison.OrdinalIgnoreCase) ? "FileOperationEqual" : "FileOperationUnequal");
-            files.Rows.Add(category, row.Game!.Size, sizeDifference, hashDifference, L.Get("FileOperationPending"), "",
-                Path.Combine(session.Game!.Sources[0].Scan!.Root, row.Path.Replace('/', Path.DirectorySeparatorChar)));
-        }
+        displayedRows = session.SelectedRows.ToArray();
+        files.RowCount = displayedRows.Length;
+        files.Invalidate();
         files.ClearSelection();
         recycle.Enabled = delete.Enabled = move.Enabled = destination.Enabled = !session.IsBusy;
         address.Visible = move.Checked;
         address.Enabled = !session.IsBusy;
         execute.Enabled = !session.IsBusy && session.SelectedCount > 0;
     }
+
+    private string FullPath(DifferenceRow row) => Path.Combine(session.Game!.Sources[0].Scan!.Root,
+        row.Path.Replace('/', Path.DirectorySeparatorChar));
 
     private void AddColumn(string name, string heading, int minimumWidth, float weight)
     {

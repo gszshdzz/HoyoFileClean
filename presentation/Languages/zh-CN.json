@@ -132,6 +132,7 @@
   "CategoryGameOnly": "游戏独有",
   "CategoryReferenceOnly": "参考独有",
   "CategoryDifferent": "共有但不同",
+  "CategoryEqual": "相同",
   "FilterOutsideScope": "未扫描范围（不可选）",
   "FilterLabel": "筛选：",
   "GameTreeHeading": "左侧／A：游戏文件（仅文件可勾选）",

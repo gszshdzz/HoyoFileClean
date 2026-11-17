@@ -62,6 +62,25 @@ public sealed class FileOperationPanelTests
     });
 
     [Fact]
+    public void EqualFilesUseEqualCategoryAndVirtualRows() => OnSta(() =>
+    {
+        string root = NewRoot(), reference = NewRoot();
+        File.WriteAllText(Path.Combine(root, "file"), "abc");
+        File.WriteAllText(Path.Combine(reference, "file"), "abc");
+        var session = new WizardSession();
+        session.AcceptGame(DirectoryScanner.Scan(root), root);
+        session.AcceptReference(DirectoryScanner.Scan(reference));
+        session.AcceptComparison(FileComparer.Compare(session.Game!, session.Reference!));
+        session.SetFilters(session.Filters.Append(DifferenceCategory.Equal));
+        session.Select("file", true);
+        using var panel = new FileOperationPanel(session);
+        var table = Find<DataGridView>(panel, "FileOperationFiles");
+        Assert.True(table.VirtualMode);
+        Assert.Equal(1, table.RowCount);
+        Assert.Equal("相同", table.Rows[0].Cells["Category"].Value);
+    });
+
+    [Fact]
     public void WizardHasSeparateFifthStepAndCanReturnToReview() => OnSta(() =>
     {
         var session = Ready();

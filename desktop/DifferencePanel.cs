@@ -291,12 +291,7 @@ public sealed class DifferencePanel : UserControl
         finally { rendering = previous; }
     }
 
-    private static string CategoryName(DifferenceCategory category) => category switch
-    {
-        DifferenceCategory.GameOnly => L.Get("CategoryGameOnly"),
-        DifferenceCategory.ReferenceOnly => L.Get("CategoryReferenceOnly"), DifferenceCategory.Different => L.Get("CategoryDifferent"),
-        DifferenceCategory.Equal => L.Get("ResultFilterEqual"), _ => L.Get("CategoryOutsideScope")
-    };
+    private static string CategoryName(DifferenceCategory category) => DifferenceText.CategoryName(category);
 
     private sealed class ResultGrid : DataGridView
     {

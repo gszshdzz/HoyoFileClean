@@ -62,6 +62,7 @@ dotnet run --project desktop\HoyoFileClean.Desktop.csproj
 - `core/Models/`：官方 JSON 协议、网络结果及清单／报告／排除规则的数据定义；protobuf 仍在 `Protos/Sophon.proto`。
 - `config/Maintenance.cs`：编译前集中维护默认目录、大小限制、超时、连接节拍、线程数、刷新与缓冲参数，不是用户设置。
 - `config/NetworkServices.cs` 与 `config/GameIdentificationRules.cs`：独立的编译期 C# 数据定义，维护者编辑后重新编译，不读取或发布旁置适配 JSON。扩展和验收见 [docs/game-identification.md](docs/game-identification.md)。
+- `config/AutomaticManifestRules.cs`：自动获取禁用名单，与游戏识别及 `config/GameExclusionRules.cs` 的扫描排除预置分离；当前绝区零、崩坏三禁用自动获取，其他来源不受影响。
 - 两份 `*IdentificationRules.cs` 使用 `Create()` 返回 `IdentificationConfiguration<TDetection>`，每条 `Detections` 自带 `Meanings`；共用 `IdentificationEvaluator` 去重、归并证据和约束结果。两份配置独立，不按检测 ID 匹配；自动获取使用游戏侧输出的 biz、版本和 package 匹配官方响应。manifest 有 `biz` 显示 `biz`，否则显示 `game`。详见 [docs/manifest-identification.md](docs/manifest-identification.md)。
 - `presentation/Languages/zh-CN.json`：CLI／GUI 共用文案，直接按字符串 ID 调用，不维护手工 ID 枚举；默认语言在 `config/PresentationOptions.cs`。按当前界面语言加载已嵌入资源，缺少翻译时回退默认语言。只有中文翻译已提供，无语言切换控件；原始标识和路径不翻译，状态逻辑不比较文案。
 

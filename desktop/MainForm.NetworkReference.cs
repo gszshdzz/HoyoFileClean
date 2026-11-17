@@ -173,9 +173,7 @@ public sealed partial class MainForm
         ClearNetworkFiles();
         await RunWorkAsync(token => networkClient.GetCatalogAsync(game.Version, token, version).GetAwaiter().GetResult(), catalog =>
         {
-            var inputs = catalog.Manifests.Select(manifest => new ReferenceInput(
-                new LocalManifestFile(manifest.Category, manifest.Url.AbsoluteUri, manifest.DownloadSize, default), manifest));
-            networkManifests.AddNetworkFiles(inputs, game.Version.Biz, catalog.Version);
+            AddNetworkCatalog(catalog, game.Version.Biz);
         }, L.Get("QueryingManifests"), DesktopOperation.Network,
             () => L.Format("ManifestListFound", networkManifests.Rows.Count));
     }
@@ -211,15 +209,20 @@ public sealed partial class MainForm
             return networkClient.GetCatalogAsync(matches[0].Service, biz, token, version, matches[0].Game.Id).GetAwaiter().GetResult();
         }, catalog =>
         {
-            var inputs = catalog.Manifests.Select(manifest => new ReferenceInput(
-                new LocalManifestFile(manifest.Category, manifest.Url.AbsoluteUri, manifest.DownloadSize, default), manifest));
-            networkManifests.AddNetworkFiles(inputs, biz, catalog.Version);
+            AddNetworkCatalog(catalog, biz);
             if (packages.Any(package => !catalog.Manifests.Any(manifest => manifest.MatchingField == package)))
                 throw new CoreException(CoreErrorCode.ManifestPackageUnavailable);
             networkManifests.CheckPackages(packages);
             ready = true;
         }, L.Get("QueryingManifests"), DesktopOperation.Network);
         if (ready && !IsDisposed && !session.CloseRequested) await FetchAndParseNetworkAsync();
+    }
+
+    private void AddNetworkCatalog(RemoteManifestCatalog catalog, string biz)
+    {
+        var inputs = catalog.Manifests.Select(manifest => new ReferenceInput(
+            new LocalManifestFile(manifest.Category, manifest.Url.AbsoluteUri, manifest.DownloadSize, default), manifest));
+        networkManifests.AddNetworkFiles(inputs, biz, catalog.Version);
     }
 
     private async Task FetchAndParseNetworkAsync()

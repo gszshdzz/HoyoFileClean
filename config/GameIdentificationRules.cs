@@ -4,12 +4,6 @@ namespace HoyoFileClean;
 // 每条检测自带含义；渠道仅记录原值，不用于限制游戏身份或选择 manifest。
 internal static class GameIdentificationRules
 {
-    // 规则尚未覆盖所需资源包的游戏；按 game 或完整 biz 原值匹配，完善后移除。
-    internal static readonly IReadOnlySet<string> IncompleteGames = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "nap", "nap_cn", "nap_global", "bh3", "bh3_cn", "bh3_global"
-    };
-
     internal static IdentificationConfiguration<GameDetectionDefinition> Create() => new(
         Detections: new()
         {

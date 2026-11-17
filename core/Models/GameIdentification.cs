@@ -10,4 +10,4 @@ public sealed record GameIdentification(IReadOnlyDictionary<string, string> Dete
     IReadOnlyDictionary<string, IdentifiedInformation> Information);
 
 public sealed record GameExclusionPreset(IReadOnlyList<string> ScanDirectories,
-    IReadOnlyList<string> ScanFiles);
+    IReadOnlyList<string> ScanFiles, IReadOnlyList<string>? ResultHiddenFiles = null);

@@ -134,7 +134,7 @@ Version.txt
 - 原神 BeyondAssets 在目录树存在但不在两份构建清单中，按独立内容保守保护，不声称已核对其插件专属清单。
 - 星铁中文语音 350 条都位于 StarRail_Data/Persistent/Audio，必须保留这一范围的正式资源与 .hash 校验；不能整片排除 Persistent，也不预置 *.hash。
 - 星铁 Audio 下带摘要的动态文件、AudioV_<摘要>.bytes 等不应固化为逐版本文件名；以上稳定路径列表没有解决其全部保留问题，后续清理功能不能仅凭未列入构建清单就移动它们。
-- pkg_version 和现有中文 Audio_Chinese_pkg_version 是有意排除的元数据，即使列于构建清单；file_category_launcher、version_info、ctable_streaming.dat、StreamingAssets/Persistent/plugindelayed.config 保持正常比较。
+- 此处是原始候选核对，已被顶部批准修订覆盖：`pkg_version` 会热更新，仍扫描与比较，在 session 20 结果选择页默认隐藏；`Audio_Chinese_pkg_version` 已明确为稳定文件，扫描、比较与结果显示均保留。结果隐藏预置不重复本来就不扫描的文件。file_category_launcher、version_info、ctable_streaming.dat、StreamingAssets/Persistent/plugindelayed.config 保持正常比较。
 - 不复制 Collapse 的宽泛 .sys/.ini/.log、d3d/@ 前缀和名称包含匹配，不预置 *.dll、*.exe、*.pck、*.blk、*.block 等扩展名规则。不因文件名含 useless、del、DoNotShip 或 test 而排除。
 - Collapse 固定源码版本：1eabea865cdff9b324f84f6fb62203fe903d3958。
   - https://github.com/CollapseLauncher/Collapse/blob/1eabea865cdff9b324f84f6fb62203fe903d3958/CollapseLauncher/Classes/RepairManagement/Genshin/Fetch.cs

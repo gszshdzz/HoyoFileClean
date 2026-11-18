@@ -2,6 +2,8 @@
 
 两个测试项目分别覆盖核心／CLI 和原生桌面界面。平时只运行与改动有关的测试类，不为了每次编辑反复执行两套全量；不移除重复断言或降低安全回归覆盖。
 
+项目必要性、2026-11-18 耗时基线和批量布局修复见 [测试评估](testing-assessment.md)。原生宿主复用正式入口的字体、视觉样式与 DPI 初始化；不要维护另一套测试专用设置。
+
 ```powershell
 # 核心比较：多个类在同一次运行中执行
 .\tests\run-tests.ps1 -Suite Core -Class FileComparerTests,ComparisonInterfaceTests

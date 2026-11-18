@@ -7,13 +7,16 @@ internal sealed class ComparisonPanel : UserControl
 
     internal ComparisonPanel()
     {
+        SuspendLayout();
         Name = "ComparisonResult";
         Dock = DockStyle.Fill;
         AutoScroll = true;
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4 };
+        layout.SuspendLayout();
         foreach (float width in new[] { 25f, 25f, 25f, 25f })
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, width));
         var scope = new TableLayoutPanel { Name = "ComparisonScope", Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
+        scope.SuspendLayout();
         scope.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddHeading(scope, "ComparisonScopeHeading", 0, 1);
         foreach (var (field, text) in new[]
@@ -38,6 +41,7 @@ internal sealed class ComparisonPanel : UserControl
                 label.MaximumSize = new Size(Math.Max(1, scope.ClientSize.Width - label.Margin.Horizontal), 0);
         };
         var inputs = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4 };
+        inputs.SuspendLayout();
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -59,6 +63,7 @@ internal sealed class ComparisonPanel : UserControl
                 field == "Location" ? L.Get("ComparisonPackagesLabel") : label, 2, row + 1);
         }
         var output = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
+        output.SuspendLayout();
         output.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddHeading(output, "ComparisonOutputHeading", 0, 1);
         foreach (string field in new[] { "OnlyGame", "OnlyReference", "Different", "Matched" })
@@ -73,6 +78,11 @@ internal sealed class ComparisonPanel : UserControl
         layout.SetColumnSpan(inputs, 2);
         layout.Controls.Add(output, 3, 0);
         Controls.Add(layout);
+        scope.ResumeLayout(false);
+        inputs.ResumeLayout(false);
+        output.ResumeLayout(false);
+        layout.ResumeLayout(false);
+        ResumeLayout(true);
     }
 
     internal void Render(WizardSession session, IReadOnlyList<IReadOnlyDictionary<string, ManifestMetadataField>>? referenceMetadata = null)

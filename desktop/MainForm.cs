@@ -60,6 +60,8 @@ public sealed partial class MainForm : Form
         Func<IWin32Window, string?>? chooseExclusionOutput = null)
     {
         this.session = session;
+        SuspendLayout();
+        content.SuspendLayout();
         this.chooseExclusionOutput = chooseExclusionOutput ?? ChooseExclusionOutput;
         this.referenceParser = referenceParser ?? new ReferenceParser();
         this.confirmPatchReference = confirmPatchReference ?? (message => MessageBox.Show(this, message,
@@ -99,7 +101,11 @@ public sealed partial class MainForm : Form
             steps[i] = new Label { Text = titles[i], AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 6) };
             flow.Controls.Add(steps[i], i, 0);
         }
-        foreach (Panel page in pages) content.Controls.Add(page);
+        for (int i = 0; i < pages.Length; i++)
+        {
+            pages[i].Visible = i == session.Step;
+            content.Controls.Add(pages[i]);
+        }
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
         buttons.Controls.AddRange([back, next, close]);
         layout.Controls.Add(flow, 0, 0);
@@ -135,6 +141,8 @@ public sealed partial class MainForm : Form
         RefreshView();
         ActiveControl = session.Step == 0 ? gameRoot
             : session.Step == 1 ? (manualSource.Checked ? manualSource : automaticSource) : execute;
+        content.ResumeLayout(true);
+        ResumeLayout(true);
     }
 
     private Panel BuildReferencePage()
@@ -152,6 +160,7 @@ public sealed partial class MainForm : Form
         manifests.DragDrop += (_, args) => ManualFilesDragDrop(args);
         remove.Click += (_, _) => manifests.RemoveCheckedFiles();
         var input = Vertical();
+        using var inputBatch = new LayoutBatch(input);
         input.Controls.Add(Note(L.Get("ManualManifestHint")));
         manualReferenceActions = OperationActions("ManualReferenceActions", cancelParsing, add, remove, parseManualReference);
         input.Controls.Add(manualReferenceActions);
@@ -165,6 +174,7 @@ public sealed partial class MainForm : Form
         networkReferencePage = BuildNetworkReferencePage();
         referenceModeContent.Controls.Add(networkReferencePage);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        using var layoutBatch = new LayoutBatch(layout);
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -237,6 +247,7 @@ public sealed partial class MainForm : Form
 
     private void RefreshView()
     {
+        using var layoutBatch = new LayoutBatch(this);
         if (displayedStep != session.Step)
         {
             displayedStep = session.Step;
@@ -348,6 +359,7 @@ public sealed partial class MainForm : Form
     private static TableLayoutPanel OperationActions(string name, Button cancel, params Control[] operations)
     {
         var row = new TableLayoutPanel { Name = name, ColumnCount = 2, RowCount = 1, AutoSize = true, Dock = DockStyle.Top };
+        using var layoutBatch = new LayoutBatch(row);
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.Controls.Add(Buttons(operations), 0, 0);
@@ -358,6 +370,7 @@ public sealed partial class MainForm : Form
     private static Panel Page(Control input, Control result)
     {
         var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        using var layoutBatch = new LayoutBatch(panel);
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));

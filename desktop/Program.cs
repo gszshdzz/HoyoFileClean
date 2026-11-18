@@ -2,10 +2,12 @@ namespace HoyoFileClean.Desktop;
 
 internal static class Program
 {
+    internal static void InitializeApplication() => ApplicationConfiguration.Initialize();
+
     [STAThread]
     private static void Main()
     {
-        ApplicationConfiguration.Initialize();
+        InitializeApplication();
         Application.Run(new MainForm());
     }
 }

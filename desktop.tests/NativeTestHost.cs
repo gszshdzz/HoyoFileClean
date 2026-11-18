@@ -8,6 +8,8 @@ namespace HoyoFileClean.Desktop.Tests;
 // Exercise controls on their owning thread with the same message loop as the application.
 internal static class NativeTestHost
 {
+    static NativeTestHost() => HoyoFileClean.Desktop.Program.InitializeApplication();
+
     internal static WizardSession ReferenceSession()
     {
         string root = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));

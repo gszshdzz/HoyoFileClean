@@ -30,6 +30,7 @@ public sealed partial class MainForm
     private Panel BuildScanPage()
     {
         var input = CompactGameInputs();
+        using var inputBatch = new LayoutBatch(input);
         heavy.Text = L.Get("HeavyScanLabel");
         input.Controls.Add(Buttons(scanGameSource, importGameSource));
         Button browse = MakeButton(L.Get("Button_BrowseGame"), "BrowseGame");
@@ -54,6 +55,7 @@ public sealed partial class MainForm
         input.Controls.Add(identificationResult);
 
         var options = CompactGameInputs();
+        using var optionsBatch = new LayoutBatch(options);
         Button browseRules = MakeButton(L.Get("Button_BrowseGame"), "BrowseExclusionJson");
         browseRules.Click += (_, _) => BrowseFile(exclusionJson, json: true);
         Button importRules = MakeButton(L.Get("Button_ImportExclusionRules"), "ImportExclusionRules");
@@ -67,6 +69,7 @@ public sealed partial class MainForm
         options.Controls.Add(exclusionHint);
 
         var lists = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        using var listsBatch = new LayoutBatch(lists);
         lists.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         lists.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         lists.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -78,6 +81,7 @@ public sealed partial class MainForm
         scanFileStatus.Padding = scanByteStatus.Padding = Padding.Empty;
         scanFileStatus.Margin = scanByteStatus.Margin = Padding.Empty;
         TableLayoutPanel results = scanProgressPanel;
+        using var resultsBatch = new LayoutBatch(results);
         results.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         results.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         results.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -87,6 +91,7 @@ public sealed partial class MainForm
         results.Controls.Add(scanByteStatus, 0, 1);
         results.Controls.Add(scanByteProgress, 1, 1);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        using var layoutBatch = new LayoutBatch(layout);
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -125,6 +130,7 @@ public sealed partial class MainForm
         };
         EnablePathDrop(entry, directory);
         var input = CompactGameInputs();
+        using var inputBatch = new LayoutBatch(input);
         input.Controls.Add(Buttons(Note(directory ? L.Get("ExcludedDirectoriesLabel") : L.Get("ExcludedFilesLabel")), add, remove));
         input.Controls.Add(PathRow(entry, browse));
         EnableExclusionDrop(list, directory);
@@ -134,6 +140,7 @@ public sealed partial class MainForm
     private static TableLayoutPanel GameReadingRows(Control[] controls, int fillRow = -1)
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = controls.Length };
+        using var layoutBatch = new LayoutBatch(layout);
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (int i = 0; i < controls.Length; i++)
         {
@@ -159,6 +166,7 @@ public sealed partial class MainForm
     private static TableLayoutPanel LabeledRow(string label, TextBox entry, params Button[] buttons)
     {
         TableLayoutPanel row = PathRow(entry, buttons);
+        using var layoutBatch = new LayoutBatch(row);
         row.ColumnCount++;
         row.ColumnStyles.Insert(0, new ColumnStyle(SizeType.AutoSize));
         foreach (Control control in row.Controls.Cast<Control>().ToArray())
@@ -196,6 +204,7 @@ public sealed partial class MainForm
         entry.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         var row = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = buttons.Length + 1, RowCount = 1 };
+        using var layoutBatch = new LayoutBatch(row);
         row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         row.Controls.Add(entry, 0, 0);

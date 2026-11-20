@@ -11,4 +11,4 @@
 
 不改平台／格式安全规则，不迁移无关测试样例，不更改构建目标和依赖版本，不将官方返回未知算法或格式当成已支持。
 
-现有 `docs/hardcoded-data-review.md` 用户意见保留原文。执行离线核心／CLI 和桌面测试，明确未运行的真实联网／目录诊断，不用自动化冒充人工验收。最终交付见 `docs/configuration-maintenance.md`。
+用户意见保留原文，现归档至 `docs/history/hardcoded-data-review.md`。执行离线核心／CLI 和桌面测试，明确未运行的真实联网／目录诊断，不用自动化冒充人工验收。当前维护说明见 `docs/configuration-maintenance.md`，历史交付见本目录任务记录。

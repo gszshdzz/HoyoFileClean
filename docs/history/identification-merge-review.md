@@ -1,5 +1,7 @@
 # 两类识别合并审查
 
+> 历史审查，配置结构等已继续演进。当前说明见 [游戏识别](../game-identification.md) 和 [manifest 识别](../manifest-identification.md)。
+
 编号：`8,9->7.5`。基线：`main c60b8a8`；游戏识别：`f037a9b`；manifest 识别：`2e6b6f2`。
 
 ## 用户验收纠正后的当前状态

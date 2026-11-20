@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "installedOn": "2026-11-20",
+  "scope": "project",
+  "sources": [
+    {
+      "id": "matt",
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823",
+      "license": "MIT",
+      "skills": [
+        { "id": "grilling", "path": "skills/productivity/grilling" },
+        { "id": "domain-modeling", "path": "skills/engineering/domain-modeling" },
+        { "id": "codebase-design", "path": "skills/engineering/codebase-design" },
+        { "id": "tdd", "path": "skills/engineering/tdd" },
+        { "id": "code-review", "path": "skills/engineering/code-review" },
+        { "id": "diagnosing-bugs", "path": "skills/engineering/diagnosing-bugs" }
+      ]
+    },
+    {
+      "id": "dotnet",
+      "repository": "https://github.com/dotnet/skills",
+      "commit": "c227688ed14de4467e3e45f95dc69a94e905e219",
+      "license": "MIT",
+      "skills": [
+        { "id": "csharp-expert", "path": "plugins/dotnet/skills/csharp-expert" },
+        { "id": "winforms-expert", "path": "plugins/dotnet-winforms/skills/winforms-expert" },
+        { "id": "analyzing-dotnet-performance", "path": "plugins/dotnet-diag/skills/analyzing-dotnet-performance" },
+        { "id": "test-gap-analysis", "path": "plugins/dotnet-test/skills/test-gap-analysis" },
+        { "id": "assertion-quality", "path": "plugins/dotnet-test/skills/assertion-quality" },
+        { "id": "test-analysis-extensions", "path": "plugins/dotnet-test/skills/test-analysis-extensions", "referenceOnly": true }
+      ]
+    },
+    {
+      "id": "security",
+      "repository": "https://github.com/trailofbits/skills",
+      "commit": "149d7b21f4067765b82e67029730b42d228ef4b4",
+      "license": "CC-BY-SA-4.0",
+      "skills": [
+        { "id": "sharp-edges", "path": "plugins/sharp-edges/skills/sharp-edges" },
+        { "id": "differential-review", "path": "plugins/differential-review/skills/differential-review" }
+      ]
+    }
+  ]
+}

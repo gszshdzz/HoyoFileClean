@@ -67,6 +67,59 @@ public sealed class PreDownloadManifestTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PatchWithJsonLikeBinaryPrefixKeepsFileMetadata(bool compressed)
+    {
+        string path = new string('a', 82);
+        var patch = new SophonPatchFileManifest
+        {
+            Assets = { new SophonPatchFileAsset { AssetName = path, AssetSize = 9817920, AssetHashMd5 = Md5 } }
+        };
+        byte[] bytes = patch.ToByteArray();
+        Assert.Equal(new byte[] { 0x0a, 0x7b, 0x0a, 0x52 }, bytes[..4]);
+
+        FileListSnapshot snapshot = ManifestConverter.Read(Write(bytes, compressed), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new ManifestFile(path, 9817920, Md5), Assert.Single(snapshot.Files.Values));
+        Assert.Equal(1, snapshot.FileCount);
+        Assert.Equal(9817920, snapshot.TotalSize);
+        Assert.Equal(FileValues.SophonPatch, Assert.Single(snapshot.Sources).ManifestKind);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void JsonLikeBinaryPrefixDoesNotBypassHashValidation(bool compressed)
+    {
+        var patch = new SophonPatchFileManifest
+        {
+            Assets = { new SophonPatchFileAsset
+            {
+                AssetName = new string('a', 82), AssetSize = 9817920, AssetHashMd5 = new string('z', 32)
+            } }
+        };
+        string input = Write(patch.ToByteArray(), compressed), output = Path.Combine(directory, "export.json");
+
+        Assert.Equal(CoreErrorCode.FileMetadataInvalid,
+            Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
+        Assert.False(File.Exists(output));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InvalidJsonRetainsJsonErrorAfterBinaryRetry(bool compressed)
+    {
+        string input = Write(System.Text.Encoding.UTF8.GetBytes("{invalid"), compressed);
+        string output = Path.Combine(directory, "export.json");
+
+        Assert.Equal(CoreErrorCode.ListJsonInvalid,
+            Assert.Throws<CoreException>(() => ManifestConverter.Convert(input, output)).Code);
+        Assert.False(File.Exists(output));
+    }
+
+    [Theory]
     [InlineData("negative", CoreErrorCode.FileMetadataInvalid)]
     [InlineData("hash", CoreErrorCode.FileMetadataInvalid)]
     [InlineData("path", CoreErrorCode.RelativePathInvalid)]

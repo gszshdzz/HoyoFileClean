@@ -160,6 +160,18 @@ public static class GameIdentifier
 
     public static GameFilePreset? GetFilePreset(GameIdentification identification)
     {
+        GameFilePreset? preset = GetBaseFilePreset(identification);
+        GameFilePreset[] additions = MatchingChannelRules(identification.Information, identification.Detections)
+            .Select(rule => rule.Files).OfType<GameFilePreset>().ToArray();
+        if (additions.Length == 0) return preset;
+        GameFilePreset[] presets = preset is null ? additions : [preset, .. additions];
+        return new(presets.SelectMany(item => item.ScanDirectories).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            presets.SelectMany(item => item.ScanFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            presets.SelectMany(item => item.ResultHiddenFiles ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    private static GameFilePreset? GetBaseFilePreset(GameIdentification identification)
+    {
         if (identification.Information.TryGetValue("biz", out IdentifiedInformation? biz))
             foreach (IdentifiedValue value in biz.Values)
                 if (value.RawValue is { } key)
@@ -173,6 +185,14 @@ public static class GameIdentifier
                     return preset;
         return null;
     }
+
+    private static IEnumerable<GameChannelRules.Rule> MatchingChannelRules(
+        IReadOnlyDictionary<string, IdentifiedInformation> information, IReadOnlyDictionary<string, string> detections)
+        => GameChannelRules.Rules.Where(rule => rule.Information.All(condition =>
+            information.TryGetValue(condition.Key, out IdentifiedInformation? field)
+            && field.Values.Any(value => value.RawValue == condition.Value))
+            && rule.Detections.All(condition => detections.TryGetValue(condition.Key, out string? value)
+                && value == condition.Value));
 
     // Reconstruct recorded identification without opening any game file.
     public static GameIdentification FromDetections(IReadOnlyDictionary<string, string> detections)
@@ -236,6 +256,11 @@ public static class GameIdentifier
                 meanings[pair.Key].Policy.LabelTextId!, pair.Value.Values), StringComparer.Ordinal);
         if (!information.ContainsKey("game") && !information.ContainsKey("biz"))
             throw new CoreException(CoreErrorCode.GameIdentificationFailed, input: "game");
+        string[] channels = MatchingChannelRules(information, detections).Select(rule => rule.Id)
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if (channels.Length > 1) throw ConfigurationError();
+        if (channels.Length == 1)
+            information["channel"] = new("IdentificationLabelChannel", [new(channels[0], null, null)]);
         return new GameIdentification(new ReadOnlyDictionary<string, string>(detections),
             new ReadOnlyDictionary<string, IdentifiedInformation>(information));
     }

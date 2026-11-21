@@ -89,7 +89,7 @@ internal sealed class ComparisonPanel : UserControl
     {
         ShowInput("Game", session.Game);
         ShowInput("Reference", session.Reference);
-        Set("GameGame", Identification(session.Identification, ResultText.IdentityField(session.Identification?.Information)));
+        Set("GameGame", ResultText.DescribeGameIdentity(session.Identification));
         Set("GameVersion", Identification(session.Identification, "version"));
         var metadata = referenceMetadata is { Count: > 0 } && session.Reference is not null ? referenceMetadata
             : session.Reference?.Sources.Select(source => source.Metadata).OfType<IReadOnlyDictionary<string, ManifestMetadataField>>().ToArray() ?? [];

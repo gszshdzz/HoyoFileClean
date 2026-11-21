@@ -11,6 +11,28 @@ public sealed class GameExclusionPresetTests
         return root;
     }
 
+    [Fact]
+    public void GlobalGenshinExcludesItsRuntimePathsWithoutExcludingChinaOrPackageMetadata()
+    {
+        string root = Root();
+        File.WriteAllText(Path.Combine(root, "config.ini"), "uapc={\"hk4e_global\":{}}");
+        foreach (string path in new[] { "GenshinImpact_Data/Persistent/runtime.bin",
+            "GenshinImpact_Data/SDKCaches/cache.bin", "GenshinImpact_Data/webCaches/cache.bin",
+            "YuanShen_Data/Persistent/other.bin", "pkg_version", "Audio_Chinese_pkg_version", "beyond_pkg_version" })
+        {
+            string full = Path.Combine(root, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, "data");
+        }
+        GameFilePreset? preset = GameIdentifier.GetFilePreset(GameIdentifier.Identify(root, TestContext.Current.CancellationToken));
+        Assert.NotNull(preset);
+        FileListSnapshot scan = DirectoryScanner.Scan(root, preset.ScanDirectories, preset.ScanFiles,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(new[] { "Audio_Chinese_pkg_version", "YuanShen_Data/Persistent/other.bin", "pkg_version" },
+            scan.Files.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "pkg_version" }, preset.ResultHiddenFiles);
+    }
+
     [Theory]
     [InlineData("hk4e_cn", 2)]
     [InlineData("hkrpg_cn", 11)]
@@ -45,6 +67,33 @@ public sealed class GameExclusionPresetTests
         Assert.Equal(2, result.Different.Count);
         Assert.Contains(result.Different, item => item.A.Path == "pkg_version");
         Assert.Contains(result.Different, item => item.A.Path == "Audio_Chinese_pkg_version");
+    }
+
+    [Fact]
+    public void BilibiliGenshinAddsSdkExclusionsWithoutChangingBaseIdentityOrOtherPlugins()
+    {
+        string root = Root();
+        File.WriteAllText(Path.Combine(root, "config.ini"), "uapc={\"hk4e_cn\":{}}\nchannel=14\nsub_channel=0");
+        foreach (string path in new[] { "YuanShen.exe", "pkg_version", "sdk_pkg_version",
+            "YuanShen_Data/Plugins/BLPlatform64/BLWebbrowser/locales/zh-CN.pak",
+            "YuanShen_Data/Plugins/PCGameSDK.dll", "YuanShen_Data/Plugins/Other.dll",
+            "YuanShen_Data/Plugins/BLPlatform64_backup/keep.bin", "YuanShen_Data/Plugins/PCGameSDK.dll.backup" })
+        {
+            string full = Path.Combine(root, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, "data");
+        }
+        GameIdentification identification = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
+        Assert.Equal("bilibili", Assert.Single(identification.Information["channel"].Values).RawValue);
+        Assert.Equal("hk4e_cn", Assert.Single(identification.Information["biz"].Values).RawValue);
+        GameFilePreset preset = GameIdentifier.GetFilePreset(identification)!;
+        Assert.Contains("YuanShen_Data/Persistent", preset.ScanDirectories);
+        FileListSnapshot scan = DirectoryScanner.Scan(root, preset.ScanDirectories, preset.ScanFiles,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(new[] { "YuanShen.exe", "YuanShen_Data/Plugins/BLPlatform64_backup/keep.bin",
+            "YuanShen_Data/Plugins/Other.dll", "YuanShen_Data/Plugins/PCGameSDK.dll.backup", "pkg_version" },
+            scan.Files.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "pkg_version" }, preset.ResultHiddenFiles);
     }
 
     [Fact]

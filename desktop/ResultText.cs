@@ -5,6 +5,14 @@ internal static class ResultText
     internal static string IdentityField<T>(IReadOnlyDictionary<string, T>? information)
         => information?.ContainsKey("biz") == true ? "biz" : "game";
 
+    internal static string DescribeGameIdentity(GameIdentification? identification)
+    {
+        string? Values(string field) => identification?.Information.GetValueOrDefault(field) is { Values.Count: > 0 } info
+            ? string.Join(L.Get("ListSeparator"), info.Values.Select(value => value.RawValue)) : null;
+        string identity = Values(IdentityField(identification?.Information)) ?? L.Get("UnavailableValue");
+        return Values("channel") is { } channel ? identity + " / " + channel : identity;
+    }
+
     internal static string DescribeIdentification(GameIdentification identification)
     {
         string DescribeValue(IdentifiedValue value) => value.TextId is { } textId
@@ -15,7 +23,7 @@ internal static class ResultText
                 ? L.Get("IdentificationNotDetected")
                 : string.Join(L.Get("ListSeparator"), info.Values.Select(DescribeValue)));
         string identity = IdentityField(identification.Information);
-        string[] primary = [identity, "version"];
+        string[] primary = [identity, "version", "channel"];
         string header = string.Join(L.Get("ListSeparator"), primary.Where(identification.Information.ContainsKey)
             .Select(id => Describe(identification.Information[id])));
         return string.Join(Environment.NewLine, new[] { header }.Where(value => value.Length > 0)

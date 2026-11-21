@@ -1,7 +1,7 @@
 namespace HoyoFileClean;
 
 // 开发者维护，修改后重新构建；仅定义数据，不创建引擎或发布旁置文件。
-// 每条检测自带含义；渠道仅记录原值，不用于限制游戏身份或选择 manifest。
+// 每条检测自带含义；渠道原值由 GameChannelRules 补充解释，不限制游戏身份或选择 manifest。
 internal static class GameIdentificationRules
 {
     internal static IdentificationConfiguration<GameDetectionDefinition> Create() => new(

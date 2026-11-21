@@ -49,9 +49,17 @@ GUI 正式扫描前须成功执行“读取游戏并加载预置排除”，未�
 
 ## 身份与证据边界
 
-`channel`／`sub_channel` 只记录原值，不映射“官服”或限制身份识别；同一原始字段重复不同值仍报矛盾。不据登录开关、SDK 或渠道推断 manifest 不同。CLI 扫描维持通用目录扫描，不强制识别游戏。
+`channel`／`sub_channel` 保留原始检测值，同一原始字段重复不同值仍报矛盾。`config/GameChannelRules.cs` 在基础身份识别完成后补充解释：`Information` 条件匹配已识别的 `biz` 等信息，再由 `Detections` 条件精确匹配原始检测值；全部条件同时满足才命中。`Id` 直接作为内存信息 `channel` 的原值与 GUI 展示内容，如 `official`、`bilibili`、`google_play`，不另设显示名称，不给每个渠道增加语言资源。字段标题复用现有“渠道”。
 
-首行有 `biz` 显示 `biz`，否则显示 `game`，并显示已知版本；不重复显示游戏族或猜渠道名称。插件及“发现的包体”另行显示，包含规则确定的本体与语音等所有包体。
+渠道表不是完整名单；缺少字段、未知值或身份条件不符时，不生成渠道 ID，仍保留基础身份与文件预置。多个不同渠道 ID 同时命中按配置错误拒绝。命中规则可通过 `Files` 追加扫描排除和结果隐藏路径，与基础预置按不区分大小写去重合并，不覆盖基础规则。不据登录开关、SDK 或渠道推断 manifest 不同；自动获取仍只按官方 `biz`、版本和包体匹配。CLI 扫描维持通用目录扫描，不强制识别游戏。
+
+首行有 `biz` 显示 `biz`，否则显示 `game`，并显示已知版本及已命中的渠道 ID；不重复显示游戏族，不猜未知渠道。自动获取摘要和比较页的本地游戏信息显示为 `hk4e_cn / bilibili` 等；不把本地渠道附加到官方参考清单。插件及“发现的包体”另行显示，包含规则确定的本体与语音等所有包体。
+
+### 文件预置与来源边界
+
+- 原神国服与国际服分别使用 `YuanShen_Data` 和 `GenshinImpact_Data`，继续整体排除各自 `Persistent`，不缩小范围以模仿第三方清理策略。国际服预置依据现有国服规则和 Collapse 配置补齐，只有隔离样本验证，没有真实国际服目录验证。
+- 原神 `hk4e_cn` 且 `channel=14`、`sub_channel=0` 时，追加排除目录 `YuanShen_Data/Plugins/BLPlatform64`，以及文件 `YuanShen_Data/Plugins/PCGameSDK.dll`、`sdk_pkg_version`。路径直接来自用户提供的官服转 B 服 SDK ZIP，仅检查条目，未解压或执行；不排除整个 `Plugins`，不推广到其他 B 服游戏。
+- 已知渠道数值参考 CollapseLauncher-ReleaseRepo 的 `metadata/v3/stable`，固定提交 `c8243daa46648990c4a8a119f71302bf41892cd4`；它是第三方维护线索，不是官方完整渠道列表或兼容性保证。没有据此添加 TapTap 等未确认数值，也没有增加注册表识别、卸载、渠道转换或新网络依赖。
 
 `game` 是游戏族，`biz` 是完整官方标识，`package` 是资源包，`plugins` 是插件 ID 与版本。游戏侧 `package` 是允许多值的本地发现包体集合：根执行文件命中本体 `game`，原神两种布局及星铁语音路径命中对应包名。多包正常共存，不证明完整安装或当前使用语言。以后新增小包只需增加有证据的规则，本轮不猜测绝区零小包。不拆分 biz 猜游戏族，不把插件当资源包；原始检测键 `ini_game_id` 等不变。
 
@@ -59,7 +67,7 @@ GUI 正式扫描前须成功执行“读取游戏并加载预置排除”，未�
 
 识别配置异常遵循原有文案分离方式：核心只抛 `CoreException` 错误码及上下文，`presentation/DiagnosticText.cs` 映射到 `presentation/Languages/zh-CN.json`，不在识别逻辑中写异常描述。
 
-`ScanScope.GameDetections` 是可选字段，写出为 `scan.gameDetections`，内容为原始检测键值，不保存中文或展示文本 ID。核心扫描接口可接收已取得的 `identification`，生成的内存快照和扫描 JSON 会保留此记录；GUI 当前扫描已传入识别结果，但本轮不新增 GUI 导出按钮或 CLI 强制识别选项。
+`ScanScope.GameDetections` 是可选字段，写出为 `scan.gameDetections`，内容为原始检测键值，不保存中文、派生渠道 ID 或展示文本 ID。渠道 ID 与附加文件预置在导入时按当前编译配置重新解释，不访问原目录。核心扫描接口可接收已取得的 `identification`，生成的内存快照和扫描 JSON 会保留此记录；GUI 当前扫描已传入识别结果，但本轮不新增 GUI 导出按钮或 CLI 强制识别选项。
 
 清单读取与转换先校验记录格式并原样保留，不暗中套用默认游戏适配，保证自定义配置产生的扫描结果也可传递／导出。GUI 导入时再校验检测 ID、版本与必要信息，按当前编译配置恢复显示，完全不访问记录的游戏根目录；核心调用方也可用 `FromDetections(recorded, configuration)` 显式使用原配置。动态条目 ID 统一禁止空白、控制字符、冒号和等号。无识别记录的旧扫描 JSON 继续可导入，但不显示凭空推测的信息；GUI 拒绝未知／损坏的识别记录。当前配置变化后，旧记录未必仍能通过当前规则，不宣称历史适配规则永久兼容。
 

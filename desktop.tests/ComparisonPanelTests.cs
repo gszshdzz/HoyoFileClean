@@ -31,7 +31,7 @@ public sealed class ComparisonPanelTests
         Assert.Empty(Descendants(Find<ComparisonPanel>(form, "ComparisonResult")).OfType<TextBox>());
         Assert.False(next.Enabled);
         Assert.Equal("共有但不同数：—", Find<Label>(form, "ComparisonDifferent").Text);
-        Assert.Equal("hk4e_cn", Find<Label>(form, "ComparisonGameGame").Text);
+        Assert.Equal("hk4e_cn / official", Find<Label>(form, "ComparisonGameGame").Text);
         Assert.Equal("7.2.0", Find<Label>(form, "ComparisonGameVersion").Text);
         Assert.Equal("game; zh-cn", Find<Label>(form, "ComparisonReferenceLocation").Text);
         Assert.Equal("3", Find<Label>(form, "ComparisonReferenceFiles").Text);

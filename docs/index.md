@@ -29,6 +29,7 @@
   - [预置排除与补丁整合](history/preset-patch-integration-review.md)
   - [自动获取交付](history/automatic-manifest-delivery.md)
   - [结果选择整合](history/result-selection-integration-review.md)
+  - [渠道补充规则与原神预置](history/channel-adaptation-review.md)
   - [测试必要性与耗时](history/testing-assessment.md)
   - [技能安装验证](history/skill-installation.md)
 - [提交与 session 对照](commit-sessions.md)

@@ -712,6 +712,39 @@ public sealed class NetworkReferenceTests
         Assert.False(information.Visible);
     });
 
+    [Theory]
+    [InlineData("14", "bilibili")]
+    [InlineData("future", null)]
+    public void SupplementalChannelNeverChangesOfficialManifestMatching(string channel, string? expectedId) => OnSta(() =>
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var session = ReferenceSession();
+        GameIdentification identification = GameIdentifier.FromDetections(new Dictionary<string, string>
+        {
+            ["ini_game_id"] = "hk4e_cn", ["ini_version"] = "7.1.0", ["exe_hk4e_cn"] = "YuanShen.exe",
+            ["ini_channel"] = channel, ["ini_sub_channel"] = "0"
+        });
+        session.AcceptGame(session.Game!, session.Game!.Sources[0].Scan!.Root, identification);
+        using var form = new MainForm(session, networkClient: new NetworkManifestClient(http))
+        { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000), ShowInTaskbar = false };
+        form.Show();
+        ClickAndWait(form, session, "ParseNetworkReference");
+        Assert.NotNull(session.Reference);
+        Assert.True(Find<Button>(form, "Next").Enabled);
+        Assert.Equal(new[] { "7.1.0" }, handler.Versions);
+        Assert.EndsWith("manifest-game", handler.Paths.Last());
+        var table = Find<ManifestTable>(form, "NetworkManifests");
+        Assert.Equal("hk4e_cn", Assert.Single(table.Rows.Cast<DataGridViewRow>()).Cells["Game"].Value);
+        string text = Find<Label>(form, "AutomaticNetworkInformation").Text;
+        if (expectedId is not null) Assert.Contains("hk4e_cn / " + expectedId, text);
+        else
+        {
+            Assert.False(identification.Information.ContainsKey("channel"));
+            Assert.DoesNotContain(" / ", text);
+        }
+    });
+
     [Fact]
     public void AutomaticFetchWithoutIdentificationMakesNoRequest() => OnSta(() =>
     {

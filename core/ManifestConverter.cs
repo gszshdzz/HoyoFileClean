@@ -137,8 +137,24 @@ public static class ManifestConverter
                 prefix.Position = 0;
             }
             else prefix.Position = skip;
-            return FileComparer.ReadInputs([inputPath],
-                _ => new PrefixReadStream(prefix, limited), cancellationToken);
+            try
+            {
+                return FileComparer.ReadInputs([inputPath],
+                    _ => new PrefixReadStream(prefix, limited), cancellationToken);
+            }
+            catch (CoreException error) when (error.Code == CoreErrorCode.ListJsonInvalid)
+            {
+                // Protobuf tags and lengths can look like whitespace followed by '{'.
+                // Retry the original bytes, retaining the JSON error if neither format parses.
+                limited.CopyTo(Stream.Null);
+                using var decodedAgain = replayDecoded();
+                using var boundedAgain = new ManifestReadStream(decodedAgain, Maintenance.DecodedLimit, cancellationToken);
+                try { return ReadProtobuf(boundedAgain, inputPath, cancellationToken, replayDecoded, allowLocalFormats); }
+                catch (CoreException binaryError) when (binaryError.Code is
+                    CoreErrorCode.ManifestEncodingInvalid or CoreErrorCode.ManifestEmpty) { }
+                finally { boundedAgain.CopyTo(Stream.Null); }
+                throw;
+            }
         }
 
         if (prefixOverflow)

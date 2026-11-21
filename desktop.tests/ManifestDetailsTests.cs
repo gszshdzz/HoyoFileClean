@@ -170,7 +170,7 @@ public sealed class ManifestDetailsTests
         dialog.Location = new Point(-20000, -20000);
         dialog.Show();
         var information = NativeTestHost.Find<Label>(dialog, "ManifestInformation");
-        Assert.Equal("游戏: hk4e_cn      版本: 7.2.0      包体: game      文件数: 1 个      覆盖大小: 0KB      MD5: 0/1", information.Text);
+        Assert.Equal("游戏: hk4e_cn      版本: 7.2.0      包体: game      文件数: 1 个      覆盖大小: 1B      MD5: 0/1", information.Text);
         Assert.DoesNotContain(sample.Input.File.FullPath, information.Text);
         Assert.Equal(BorderStyle.None, information.BorderStyle);
         var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
@@ -241,14 +241,14 @@ public sealed class ManifestDetailsTests
     });
 
     [Theory]
-    [InlineData(0L, "0KB")]
+    [InlineData(0L, "0B")]
     [InlineData(1861222L, "1.77MB")]
     [InlineData(1073741824L, "1GB")]
-    [InlineData(132499741081L, "123.4GB")]
-    [InlineData(1073634449817L, "999.9GB")]
+    [InlineData(132499741081L, "123GB")]
+    [InlineData(1073634449817L, "0.976TB")]
     [InlineData(1099511627776L, "1TB")]
-    public void DetailSizesUseThreeSignificantDigitsOrFourForLargeGigabytes(long bytes, string expected)
-        => Assert.Equal(expected, ManifestTable.FormatSize(bytes, detailedGigabytes: true));
+    public void DetailSizesUseTheSameThreeSignificantDigitsAsOtherPages(long bytes, string expected)
+        => Assert.Equal(expected, HoyoFileClean.Presentation.FileSizeText.Format(bytes));
 
     [Fact]
     public void CancellingFileSelectionDoesNotExport() => NativeTestHost.OnSta(() =>

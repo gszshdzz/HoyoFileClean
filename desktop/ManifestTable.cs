@@ -50,6 +50,7 @@ internal sealed class ManifestTable : DataGridView
         AddColumn("Name", L.Get("ManifestColumnName"), typeof(string), 8);
         AddColumn("Modified", L.Get("ManifestColumnModified"), typeof(DateTime), 7);
         AddColumn("Size", L.Get("ManifestColumnSize"), typeof(long), 3);
+        FileSizeCells.Configure(this);
         AddColumn("State", L.Get("ManifestColumnState"), typeof(string), 3);
         AddColumn("Game", L.Get("ManifestColumnGame"), typeof(string), 3);
         AddColumn("Version", L.Get("ManifestColumnVersion"), typeof(string), 2);
@@ -83,12 +84,6 @@ internal sealed class ManifestTable : DataGridView
             if (args.RowIndex >= 0 && args.RowIndex < hourBands.Length && hourBands[args.RowIndex]
                 && !SystemInformation.HighContrast)
                 args.CellStyle!.BackColor = HourBandColor(args.CellStyle.BackColor, args.CellStyle.ForeColor);
-            if (args.ColumnIndex == 3 && args.Value is long bytes)
-            {
-                args.Value = FormatSize(bytes);
-                args.FormattingApplied = true;
-                return;
-            }
             if (args.ColumnIndex != 2 || args.Value is not DateTime utc) return;
             args.Value = utc.ToLocalTime().ToString(L.Get("ManifestModifiedFormat"));
             args.FormattingApplied = true;
@@ -179,20 +174,6 @@ internal sealed class ManifestTable : DataGridView
             foreach (DataGridViewRow row in Rows)
                 row.Cells[0].Value = packages.Contains(Data(row).Input.Remote!.MatchingField, StringComparer.Ordinal);
         });
-
-    internal static string FormatSize(long bytes, bool detailedGigabytes = false)
-    {
-        decimal value = bytes / 1024m;
-        string[] units = [L.Get("UnitKB"), L.Get("UnitMB"), L.Get("UnitGB"),
-            L.Get("UnitTB"), L.Get("UnitPB"), L.Get("UnitEB")];
-        int unitIndex = 0;
-        while (value >= (detailedGigabytes && unitIndex == 2 ? 999.95m : 999.5m)
-            && unitIndex < units.Length - 1) { value /= 1024m; unitIndex++; }
-        int decimals = detailedGigabytes && unitIndex == 2 && value >= 99.95m ? 1
-            : value >= 99.95m ? 0 : value >= 9.995m ? 1 : 2;
-        return Math.Round(value, decimals, MidpointRounding.AwayFromZero)
-            .ToString(decimals switch { 0 => "0", 1 => "0.#", _ => "0.##" }, System.Globalization.CultureInfo.InvariantCulture) + units[unitIndex];
-    }
 
     private DataGridViewColumn AddColumn(string name, string title, Type type, float weight)
     {

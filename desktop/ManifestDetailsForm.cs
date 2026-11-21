@@ -37,6 +37,7 @@ internal sealed class ManifestDetailsForm : Form
             ManifestFile file = files[args.RowIndex];
             args.Value = args.ColumnIndex switch { 0 => file.Path, 1 => file.Size, _ => file.Hash ?? L.Get("UnavailableValue") };
         };
+        FileSizeCells.Configure(content);
         content.RowCount = files.Length;
         content.SelectionChanged += (_, _) => content.ClearSelection();
         content.ClearSelection();
@@ -45,7 +46,7 @@ internal sealed class ManifestDetailsForm : Form
             Name = "ManifestInformation", AutoSize = true, Dock = DockStyle.Fill,
             UseMnemonic = false, Margin = new Padding(3, 3, 3, 12),
             Text = information + "      " + L.Format("ManifestDetailsSummary", snapshot.FileCount,
-                ManifestTable.FormatSize(snapshot.TotalSize, detailedGigabytes: true), snapshot.HashedFileCount)
+                FileSizeText.Format(snapshot.TotalSize), snapshot.HashedFileCount)
         };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         buttons.Controls.AddRange([close, export]);

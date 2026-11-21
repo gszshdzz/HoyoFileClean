@@ -917,7 +917,7 @@ public sealed class WizardTests
     }
 
     [Theory]
-    [InlineData(0L, "0KB")]
+    [InlineData(0L, "0B")]
     [InlineData(1024L, "1KB")]
     [InlineData(125952L, "123KB")]
     [InlineData(1861222L, "1.77MB")]
@@ -926,7 +926,7 @@ public sealed class WizardTests
     [InlineData(1048576L, "1MB")]
     [InlineData(1073741824L, "1GB")]
     public void ManifestSizesUseCompactUnits(long bytes, string expected)
-        => Assert.Equal(expected, ManifestTable.FormatSize(bytes));
+        => Assert.Equal(expected, HoyoFileClean.Presentation.FileSizeText.Format(bytes));
 
     [Fact]
     public void GuiScanAndComparisonKeepResultsInMemory() => OnSta(() =>

@@ -266,7 +266,7 @@ public sealed class DifferencePanel : UserControl
         => GridSelectionHeader.Position(grid, selectAll);
 
     private static string FileText(ManifestFile? file, int depth) => file is null ? "" :
-        new string(' ', depth * 4) + file.Path.Split('/')[^1] + "  ·  " + L.Format("FileSizeBytes", file.Size);
+        new string(' ', depth * 4) + file.Path.Split('/')[^1] + "  ·  " + FileSizeText.Format(file.Size);
 
     private static string Status(DifferenceCategory category) => category switch
     {
@@ -286,7 +286,7 @@ public sealed class DifferencePanel : UserControl
             selectAll.Enabled = !session.IsBusy && root.SelectableCount > 0;
             selectAll.CheckState = root.CheckState;
             grid.InvalidateColumn(0);
-            selection.Text = L.Format("SelectionSummary", session.SelectedCount, session.SelectedSize);
+            selection.Text = L.Format("SelectionSummary", session.SelectedCount, FileSizeText.Format(session.SelectedSize));
         }
         finally { rendering = previous; }
     }

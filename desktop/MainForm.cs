@@ -57,7 +57,7 @@ public sealed partial class MainForm : Form
 
     internal MainForm(WizardSession session, ReferenceParser? referenceParser = null, NetworkManifestClient? networkClient = null,
         Func<IReadOnlyList<NetworkService>>? loadNetworkServices = null, Func<string, bool>? confirmPatchReference = null,
-        Func<IWin32Window, string?>? chooseExclusionOutput = null)
+        Func<IWin32Window, string?>? chooseExclusionOutput = null, Func<string, bool>? confirmFileOperation = null)
     {
         this.session = session;
         SuspendLayout();
@@ -77,7 +77,8 @@ public sealed partial class MainForm : Form
         ClientSize = new Size(1040, 780);
         AutoScaleMode = AutoScaleMode.Dpi;
         differences = new DifferencePanel(session);
-        fileOperations = new FileOperationPanel(session);
+        fileOperations = new FileOperationPanel(session, confirmFileOperation);
+        fileOperations.OperationConfirmed += async request => await ExecuteFileOperationAsync(request);
         var operationPage = new Panel { Dock = DockStyle.Fill };
         operationPage.Controls.Add(fileOperations);
         pages = [BuildScanPage(), BuildReferencePage(), BuildComparisonPage(), BuildDifferencePage(), operationPage];
@@ -309,8 +310,9 @@ public sealed partial class MainForm : Form
             ? ResultText.DescribeIdentification(identification)
             : L.Get("IdentificationMissing");
         referenceResult.Text = session.Reference is { } reference
-            ? L.Format("ReferenceSummary", reference.FileCount, reference.TotalSize) : L.Get("ReferenceResultMissing");
+            ? L.Format("ReferenceSummary", reference.FileCount, FileSizeText.Format(reference.TotalSize)) : L.Get("ReferenceResultMissing");
         comparisonResult.Render(session, IsNetworkSource ? networkManifests.CheckedNetworkMetadata : null);
+        if (session.Step == 4) fileOperations.Render();
     }
 
     private void ShowReferencePage(Panel target)

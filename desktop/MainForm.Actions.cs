@@ -72,7 +72,8 @@ public sealed partial class MainForm
             if (generation != scanGeneration || session.Operation != DesktopOperation.Scan
                 || !session.IsBusy || session.IsCancellationRequested) return;
             ShowScanProgress(value);
-            status.Text = L.Format("GameHashProgress", value.CompletedFiles, value.TotalFiles, value.ProcessedBytes, value.TotalBytes);
+            status.Text = L.Format("GameHashProgress", value.CompletedFiles, value.TotalFiles,
+                FileSizeText.Format(value.ProcessedBytes), FileSizeText.Format(value.TotalBytes));
         });
         session.InvalidateGame();
         RefreshView();

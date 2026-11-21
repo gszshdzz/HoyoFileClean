@@ -120,7 +120,7 @@ internal sealed class ComparisonPanel : UserControl
     private void ShowInput(string side, FileListSnapshot? snapshot)
     {
         Set(side + "Files", snapshot?.FileCount.ToString("N0") ?? L.Get("UnavailableValue"));
-        Set(side + "Size", snapshot is null ? L.Get("UnavailableValue") : ManifestTable.FormatSize(snapshot.TotalSize));
+        Set(side + "Size", snapshot is null ? L.Get("UnavailableValue") : FileSizeText.Format(snapshot.TotalSize));
         Set(side + "Md5", snapshot is null ? L.Get("UnavailableValue") : $"{snapshot.HashedFileCount:N0}/{snapshot.FileCount:N0}");
     }
 

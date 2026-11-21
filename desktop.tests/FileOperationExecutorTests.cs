@@ -285,6 +285,22 @@ public sealed class FileOperationExecutorTests
     }
 
     [Fact]
+    public void MissingSourceUsesSharedDiagnosticAndDoesNotExposeNativeError()
+    {
+        var (root, game, request) = Request(FileOperationKind.Delete);
+        File.Move(Path.Combine(root, "second"), Path.Combine(root, "saved-second"));
+
+        var result = FileOperationExecutor.Execute(request, game);
+
+        Assert.False(result.ExecutionStarted);
+        Assert.Equal("整批预检失败，尚未执行任何文件操作。原因：操作未完成，请检查输入后重试。", result.Error);
+        Assert.Equal("操作未完成，请检查输入后重试。", result.Files[1].Message);
+        Assert.Equal("first content", File.ReadAllText(Path.Combine(root, "first")));
+        Assert.Equal("second content", File.ReadAllText(Path.Combine(root, "saved-second")));
+        Assert.Equal("keep content", File.ReadAllText(Path.Combine(root, "keep")));
+    }
+
+    [Fact]
     public void FileBeingEditedRejectsTheWholeBatchAndPromptsToCloseOtherPrograms()
     {
         var (root, game, request) = Request(FileOperationKind.Delete);
@@ -293,6 +309,7 @@ public sealed class FileOperationExecutorTests
             var result = FileOperationExecutor.Execute(request, game);
             Assert.Contains("整批预检失败", result.Error);
             Assert.Contains("请关闭游戏、更新器或编辑器后重试", result.Error);
+            Assert.Equal("文件或目录正被其他程序使用，请关闭游戏、更新器或编辑器后重试。", result.Files[1].Message);
             Assert.Equal(0, result.SucceededCount);
             Assert.Equal(FileOperationState.Failed, result.Files[1].State);
         }
@@ -348,7 +365,7 @@ public sealed class FileOperationExecutorTests
         var (root, game, _) = Request(FileOperationKind.Recycle);
         var guard = new WindowsRecycleBin.RecycleGuard(Path.Combine(root, "first"), game.Files["first"], default);
         Assert.Equal(unchecked((int)0x80004004), guard.PreDeleteItem(flags, null!));
-        Assert.IsType<IOException>(guard.Failure);
+        Assert.IsType<FileOperationException>(guard.Failure);
         Assert.False(guard.Completed);
         Assert.Equal("first content", File.ReadAllText(Path.Combine(root, "first")));
         Assert.Equal("second content", File.ReadAllText(Path.Combine(root, "second")));

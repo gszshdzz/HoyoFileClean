@@ -45,7 +45,7 @@ internal sealed class WindowsRecycleBin : IDisposable
             operation.GetAnyOperationsAborted(out bool aborted);
             if (sink.Failure is not null) ExceptionDispatchInfo.Capture(sink.Failure).Throw();
             if (aborted || !sink.Completed)
-                throw new IOException(L.Get("FileOperationRecycleFailed"));
+                throw new FileOperationException("FileOperationRecycleFailed");
             return sink.RecycledPath!;
         }
         finally { Marshal.FinalReleaseComObject(item); }
@@ -65,13 +65,13 @@ internal sealed class WindowsRecycleBin : IDisposable
         {
             try
             {
-                if ((flags & 0x80) == 0) throw new IOException(L.Get("FileOperationRecycleFailed"));
+                if ((flags & 0x80) == 0) throw new FileOperationException("FileOperationRecycleFailed");
                 item.GetDisplayName(0x80058000, out string actual); // SIGDN_FILESYSPATH
                 if (!string.Equals(actual, path, StringComparison.OrdinalIgnoreCase))
-                    throw new IOException(L.Get("FileOperationOutsideSelection"));
+                    throw new FileOperationException("FileOperationOutsideSelection");
                 using var input = WindowsSourceFile.Open(path, allowDelete: true);
                 input.Validate(expected);
-                if (input.Identity != identity) throw new IOException(L.Get("FileOperationFileChanged"));
+                if (input.Identity != identity) throw new FileOperationException("FileOperationFileChanged");
                 return 0;
             }
             catch (Exception error) { Failure = error; return Abort; }

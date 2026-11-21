@@ -14,7 +14,7 @@ internal sealed class WindowsDirectoryLease : IDisposable
     {
         // Device paths, UNC shares and path aliases are not game-directory inputs.
         if (!Path.IsPathFullyQualified(path) || path.Length < 3 || path[1] != ':' || !char.IsAsciiLetter(path[0]))
-            throw new InvalidDataException(L.Get("FileOperationLocalPathRequired"));
+            throw new FileOperationException("FileOperationLocalPathRequired");
         string root = Path.GetPathRoot(path)!;
         string rest = Path.TrimEndingDirectorySeparator(path)[root.Length..];
         if (rest.Length > 0) FilePathRules.NormalizeRelative(rest);
@@ -34,7 +34,7 @@ internal sealed class WindowsDirectoryLease : IDisposable
         {
             var information = WindowsNative.Information(handle);
             if ((information.Attributes & (uint)(FileAttributes.Directory | FileAttributes.ReparsePoint)) != (uint)FileAttributes.Directory)
-                throw new IOException(L.Get("FileOperationDirectoryUnsafe"));
+                throw new FileOperationException("FileOperationDirectoryUnsafe");
             handles.Add(path, handle);
         }
         catch { handle.Dispose(); throw; }
@@ -85,7 +85,7 @@ internal sealed class WindowsDirectoryLease : IDisposable
     private static void RejectExisting(string path)
     {
         uint attributes = WindowsNative.GetFileAttributesW(path);
-        if (attributes != uint.MaxValue) throw new IOException(L.Get("FileOperationTargetExists"));
+        if (attributes != uint.MaxValue) throw new FileOperationException("FileOperationTargetExists");
         int error = Marshal.GetLastWin32Error();
         if (error is not (2 or 3)) throw new Win32Exception(error);
     }
@@ -112,7 +112,7 @@ internal sealed class WindowsSourceFile : IDisposable
         var information = WindowsNative.Information(handle);
         if ((information.Attributes & (uint)(FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.ReadOnly)) != 0
             || information.Links != 1)
-            throw new IOException(L.Get("FileOperationFileUnsafe"));
+            throw new FileOperationException("FileOperationFileUnsafe");
         Identity = new(information.Volume, information.IndexHigh, information.IndexLow,
             information.SizeHigh, information.SizeLow, information.WriteHigh, information.WriteLow);
         stream = new FileStream(handle, FileAccess.Read);
@@ -128,12 +128,12 @@ internal sealed class WindowsSourceFile : IDisposable
 
     internal void Validate(ManifestFile file)
     {
-        if (stream.Length != file.Size) throw new IOException(L.Get("FileOperationFileChanged"));
+        if (stream.Length != file.Size) throw new FileOperationException("FileOperationFileChanged");
         if (file.Hash is not null)
         {
             stream.Position = 0;
             if (!Convert.ToHexString(MD5.HashData(stream)).Equals(file.Hash, StringComparison.OrdinalIgnoreCase))
-                throw new IOException(L.Get("FileOperationFileChanged"));
+                throw new FileOperationException("FileOperationFileChanged");
         }
         stream.Position = 0;
     }
@@ -158,7 +158,7 @@ internal sealed class WindowsSourceFile : IDisposable
         using var copy = WindowsSourceFile.Open(destination);
         stream.Position = 0;
         if (stream.Length != copy.stream.Length || !SHA256.HashData(stream).AsSpan().SequenceEqual(SHA256.HashData(copy.stream)))
-            throw new IOException(L.Get("FileOperationCopyMismatch"));
+            throw new FileOperationException("FileOperationCopyMismatch");
         Delete();
     }
 

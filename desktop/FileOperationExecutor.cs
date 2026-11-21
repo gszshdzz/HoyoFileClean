@@ -4,6 +4,9 @@ public enum FileOperationState { Pending, Succeeded, Failed, NotProcessed }
 
 public sealed record FileOperationItemResult(string Path, FileOperationState State, string Message);
 
+// Only application-authored, localized messages may be shown without diagnostic mapping.
+internal sealed class FileOperationException(string textId) : IOException(L.Get(textId)) { }
+
 public sealed record FileOperationResult(IReadOnlyList<FileOperationItemResult> Files, string? Error = null,
     bool ExecutionStarted = false)
 {
@@ -30,7 +33,7 @@ public static class FileOperationExecutor
             WizardSession.ValidateGameInput(game, request.Root);
             string root = WindowsDirectoryLease.Normalize(request.Root);
             if (!Enum.IsDefined(request.Kind) || request.Files.Count == 0)
-                throw new InvalidDataException(L.Get("FileOperationInvalidRequest"));
+                throw new FileOperationException("FileOperationInvalidRequest");
             FilePathRules.ValidatePaths(request.Files.Select(row => row.Path));
             if (request.Kind == FileOperationKind.Move)
                 target = ValidateMoveDestination(root, request.Destination ?? "", directories);
@@ -42,7 +45,7 @@ public static class FileOperationExecutor
                 string relative = FilePathRules.NormalizeRelative(row.Path);
                 if (!row.CanSelect || !game.Files.TryGetValue(relative, out ManifestFile? scanned)
                     || scanned != row.Game || game.IsOutsideScope(relative))
-                    throw new InvalidDataException(L.Get("FileOperationOutsideSelection"));
+                    throw new FileOperationException("FileOperationOutsideSelection");
                 string source = Path.Combine(root, relative);
                 directories.Pin(Path.GetDirectoryName(source)!);
                 using var input = WindowsSourceFile.Open(source);
@@ -60,7 +63,7 @@ public static class FileOperationExecutor
                 using var input = WindowsSourceFile.Open(source, allowDelete: request.Kind == FileOperationKind.Recycle);
                 input.Validate(row.Game!);
                 if (input.Identity != identities[index])
-                    throw new IOException(L.Get("FileOperationFileChanged"));
+                    throw new FileOperationException("FileOperationFileChanged");
                 string message;
                 if (request.Kind == FileOperationKind.Delete)
                 {
@@ -89,8 +92,12 @@ public static class FileOperationExecutor
             or System.ComponentModel.Win32Exception or NotSupportedException or CoreException
             or System.Runtime.InteropServices.COMException)
         {
-            string detail = error is System.ComponentModel.Win32Exception { NativeErrorCode: 32 or 33 }
-                ? L.Get("FileOperationFileBusy") + " " + error.Message : error.Message;
+            string detail = error switch
+            {
+                FileOperationException => error.Message,
+                System.ComponentModel.Win32Exception { NativeErrorCode: 32 or 33 } => L.Get("FileOperationFileBusy"),
+                _ => DiagnosticText.ForDesktop(error)
+            };
             if (index < results.Length)
                 results[index] = new(results[index].Path, FileOperationState.Failed, detail);
             string message = L.Format(executing ? "FileOperationExecutionStopped" : "FileOperationPreflightFailed", detail);
@@ -109,10 +116,10 @@ public static class FileOperationExecutor
         root = WindowsDirectoryLease.Normalize(root);
         target = WindowsDirectoryLease.Normalize(target);
         if (Within(root, target) || Within(target, root))
-            throw new InvalidDataException(L.Get("FileOperationOverlappingRoots"));
+            throw new FileOperationException("FileOperationOverlappingRoots");
         string physicalRoot = directories.PhysicalPath(root), physicalTarget = directories.PhysicalPath(target);
         if (Within(physicalRoot, physicalTarget) || Within(physicalTarget, physicalRoot))
-            throw new InvalidDataException(L.Get("FileOperationOverlappingRoots"));
+            throw new FileOperationException("FileOperationOverlappingRoots");
         return target;
     }
 

@@ -125,7 +125,11 @@ public sealed partial class MainForm
         remove.Click += (_, _) =>
         {
             if (session.IsBusy || list.SelectedItems.Count == 0) return;
-            foreach (object item in list.SelectedItems.Cast<object>().ToArray()) list.Items.Remove(item);
+            foreach (string item in list.SelectedItems.Cast<string>().ToArray())
+            {
+                list.Items.Remove(item);
+                (directory ? presetDirectories : presetFiles).Remove(item);
+            }
             GameChanged();
         };
         EnablePathDrop(entry, directory);
@@ -255,10 +259,15 @@ public sealed partial class MainForm
         { status.Text = L.Get("AddExclusionFailed"); }
     }
 
-    private static void MergeExclusions(ListBox list, IEnumerable<string> paths)
+    private void MergeExclusions(ListBox list, IEnumerable<string> paths)
     {
+        HashSet<string> automatic = list == excludedDirectories ? presetDirectories : presetFiles;
         var known = list.Items.Cast<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (string path in paths) if (known.Add(path)) list.Items.Add(path);
+        foreach (string path in paths)
+        {
+            automatic.Remove(path);
+            if (known.Add(path)) list.Items.Add(path);
+        }
     }
 
     private async Task ImportExclusionRulesAsync()

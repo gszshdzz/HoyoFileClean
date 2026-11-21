@@ -144,7 +144,7 @@ public sealed partial class MainForm
         string Values(string field) => session.Identification?.Information.GetValueOrDefault(field) is { Values.Count: > 0 } info
             ? string.Join(L.Get("ListSeparator"), info.Values.Select(value => value.RawValue ?? L.Get("UnavailableValue")))
             : L.Get("UnavailableValue");
-        return L.Format("AutomaticNetworkInformation", Values(ResultText.IdentityField(session.Identification?.Information)),
+        return L.Format("AutomaticNetworkInformation", ResultText.DescribeGameIdentity(session.Identification),
             Values("version"), Values("package"));
     }
 

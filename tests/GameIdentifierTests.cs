@@ -35,7 +35,7 @@ public sealed class GameIdentifierTests
         Assert.False(result.Information.ContainsKey("game"));
         Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
         Assert.Equal("1", result.Detections["ini_channel"]);
-        Assert.False(result.Information.ContainsKey("channel"));
+        Assert.Equal("official", Assert.Single(result.Information["channel"].Values).RawValue);
         Assert.Equal("1.0.0", Assert.Single(result.Information["plugins"].Values).RawValue);
         Assert.Equal("COa9vWaYX9", Assert.Single(result.Information["plugins"].Values).Item);
         Assert.Equal("IdentificationPluginVersion", Assert.Single(result.Information["plugins"].Values).DisplayFormatTextId);
@@ -406,19 +406,20 @@ public sealed class GameIdentifierTests
     }
 
     [Theory]
-    [InlineData("", "")]
-    [InlineData("1", "1")]
-    [InlineData("1", "2")]
-    [InlineData("2", "1")]
-    [InlineData("9", "42")]
-    public void ChannelSwitchesDoNotGateIdentityOrInventManifestDifferences(string channel, string subChannel)
+    [InlineData("", "", null)]
+    [InlineData("1", "1", "official")]
+    [InlineData("14", "0", "bilibili")]
+    [InlineData("1", "2", null)]
+    [InlineData("2", "1", null)]
+    [InlineData("9", "42", null)]
+    public void ChannelSwitchesDoNotGateIdentityOrInventManifestDifferences(string channel, string subChannel, string? expectedId)
     {
         Write("uapc={\"hk4e_cn\":{}}\nchannel=" + channel + "\nsub_channel=" + subChannel);
         // Absent fields are unknown; empty matched values remain invalid input.
         if (channel.Length == 0) Write("uapc={\"hk4e_cn\":{}}");
         var result = GameIdentifier.Identify(root, TestContext.Current.CancellationToken);
         Assert.Equal("hk4e_cn", Assert.Single(result.Information["biz"].Values).RawValue);
-        Assert.False(result.Information.ContainsKey("channel"));
+        Assert.Equal(expectedId, result.Information.GetValueOrDefault("channel")?.Values.Single().RawValue);
         Assert.False(result.Information.ContainsKey("version"));
         Assert.False(result.Information.ContainsKey("plugins"));
         Assert.Equal(channel.Length == 0 ? null : channel, result.Detections.GetValueOrDefault("ini_channel"));

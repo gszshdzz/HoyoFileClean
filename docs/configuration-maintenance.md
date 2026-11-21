@@ -10,6 +10,7 @@
 | 游戏识别 | `config/GameIdentificationRules.cs` | 候选路径、提取规则及含义，见 [游戏识别](game-identification.md)。 |
 | 清单识别 | `config/ManifestIdentificationRules.cs` | 清单字段特征及含义，见 [manifest 识别](manifest-identification.md)。 |
 | 游戏文件规则 | `config/GameFileRules.cs` | `ScanDirectories`／`ScanFiles` 排除扫描；`ResultHiddenFiles` 只隐藏结果，不改变比较。 |
+| 渠道补充规则 | `config/GameChannelRules.cs` | 先匹配游戏信息，再匹配渠道原值；命中后显示规则内 ID 并追加文件规则，不引用语言适配项，不限制 manifest 匹配。 |
 | 自动获取限制 | `config/AutomaticManifestRules.cs` | 识别不完备的游戏禁用名单，与识别和文件规则分离。 |
 | 运行策略 | `config/Maintenance.cs` | 默认目录、资源上限、超时、连接节拍、线程、刷新和缓冲参数。 |
 | 展示配置 | `config/PresentationOptions.cs` | 默认语言和官方 branch 的包类型映射；只定义数据。 |

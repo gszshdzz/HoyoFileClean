@@ -219,22 +219,33 @@ public sealed class ManifestDetailsTests
         Assert.True(grid.Enabled);
     });
 
-    [Fact]
-    public void SummaryWrapsAtMinimumWidthAndLeavesSpaceForContents() => NativeTestHost.OnSta(() =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SummaryWrapsAtMinimumWidthAndLeavesSpaceForContents(bool useSegoeUi) => NativeTestHost.OnSta(() =>
     {
         var sample = Sample();
+        using var font = new Font("Segoe UI", 9);
         using var dialog = new ManifestDetailsForm(sample.Input, sample.Snapshot,
-            "游戏: hk4e_cn      版本: 7.2.0      包体: game", _ => null)
+            "游戏: hk4e_cn      版本: 7.2.0      包体: game; zh-cn; en-us; ja-jp; ko-kr", _ => null)
         {
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000)
         };
+        if (useSegoeUi) dialog.Font = font;
         dialog.Show();
         var header = NativeTestHost.Find<Label>(dialog, "ManifestInformation");
+        int singleLineWidth = header.GetPreferredSize(Size.Empty).Width
+            + header.Margin.Horizontal + header.Parent!.Padding.Horizontal;
+        dialog.ClientSize = new Size(Math.Max(dialog.ClientSize.Width, singleLineWidth), dialog.ClientSize.Height);
+        Application.DoEvents();
+        Assert.True(header.GetPreferredSize(Size.Empty).Width <= header.Width, "宽窗口应容纳完整摘要的一行文字。");
         int wideHeight = header.Height;
         dialog.Size = dialog.MinimumSize;
         Application.DoEvents();
         var grid = NativeTestHost.Find<DataGridView>(dialog, "ManifestContents");
-        Assert.True(header.Height > wideHeight);
+        Assert.True(header.GetPreferredSize(Size.Empty).Width > header.Width, "多包摘要必须超出窄窗口宽度，才能验证自动换行。");
+        Assert.True(header.Height > wideHeight,
+            $"font={header.Font.Name}, wideHeight={wideHeight}, narrowHeight={header.Height}, width={header.Width}, preferredWidth={header.GetPreferredSize(Size.Empty).Width}");
         Assert.True(header.Height >= header.GetPreferredSize(new Size(header.Width, 0)).Height);
         Assert.True(header.Bottom <= grid.Top);
         Assert.True(grid.Height > dialog.ClientSize.Height / 2);

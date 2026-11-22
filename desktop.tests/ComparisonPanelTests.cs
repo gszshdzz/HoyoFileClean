@@ -12,13 +12,17 @@ public sealed class ComparisonPanelTests
     private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ComparisonUsesPageActionsAlignedLabelsAndRealCounts(bool heavy) => OnSta(() =>
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void ComparisonUsesPageActionsAlignedLabelsAndRealCounts(bool heavy, bool useSegoeUi) => OnSta(() =>
     {
         var session = Session(heavy);
+        using var font = new Font("Segoe UI", 9);
         using var form = new MainForm(session) { StartPosition = FormStartPosition.Manual,
             Location = new Point(-20000, -20000), ShowInTaskbar = false, Size = new Size(800, 650) };
+        if (useSegoeUi) form.Font = font;
         form.Show();
         Application.DoEvents();
         Button compare = Find<Button>(form, "Execute"), next = Find<Button>(form, "Next");
@@ -53,7 +57,9 @@ public sealed class ComparisonPanelTests
         Rectangle summaryClient = summary.RectangleToScreen(summary.ClientRectangle);
         foreach (Control label in Descendants(summary).Where(control => control is Label))
         {
-            Assert.True(label.Height >= label.Font.Height, label.Name + " 文字高度不足");
+            int preferredHeight = label.GetPreferredSize(Size.Empty).Height;
+            Assert.True(label.Height >= preferredHeight,
+                $"{label.Name} 文字高度不足: font={label.Font.Name}, height={label.Height}, fontHeight={label.Font.Height}, preferred={label.GetPreferredSize(Size.Empty).Height}");
             Assert.True(client.Contains(label.RectangleToScreen(label.ClientRectangle)), label.Name + " 超出窗口");
             Assert.True(summaryClient.Contains(label.RectangleToScreen(label.ClientRectangle)), label.Name + " 被摘要区域裁切");
         }

@@ -17,7 +17,9 @@
 
 ## 提交与 session 编号
 
-编号用于将 commit 对应到用户自行命名的 session：实际修改 session 用纯数字，合并 session 用带箭头的编号。同一 session 的全部提交沿用同一编号，不按 commit 递增；编号只写入 `docs/commit-sessions.md`，不写入 commit message，也不额外记录 session ID 或链接。无法唯一确定编号时，用问题卡片询问用户。
+编号用于将 commit 对应到用户自行命名的 session：实际修改 session 用纯数字，合并 session 用带箭头的编号。同一 session 的全部提交沿用同一编号，不按 commit 递增；编号记录只写入 `docs/commit-sessions.md`，不写入 commit message，也不额外记录 session ID 或链接。无法唯一确定编号时，用问题卡片询问用户。
+
+确定本 session 编号后，agent 必须主动将自己的 session 名称改为 `编号 原名称`，编号与原名称之间使用一个空格，保留原名称且不重复添加编号前缀。worktree 尚未分配编号时不加前缀，分配后由合并 agent 为对应修改 session 补齐前缀；合并 session 使用完整箭头编号。
 
 - **在 main 工作**：新 session 首次编号时，沿主线第一父链找到上一条有实际修改（含文档）的提交，按对照文档中的编号加一；跳过工具归档提交。上一条若为合并编号，取其目标 session 的纯数字编号作为递增基准。
 - **在 worktree 工作**：提交时记录完整 message，编号暂留空。由合并 agent 在合并前，按上述主线递增规则为目标修改 session 分配编号，补齐该 session 的全部提交记录，并 amend 目标分支末次提交；不要求用户预先分号。amend 会改变提交哈希，已共享历史等不宜安全改写的情况先询问，不擅自强推。

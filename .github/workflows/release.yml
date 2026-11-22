@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag, for example 1.0.0 or v1.0.0
+        description: Version to publish; a missing tag is created automatically, for example 1.0.0 or v1.0.0
         required: true
-        default: '1.0.0'
+        default: 'v1.0.0'
         type: string
   push:
     tags:
@@ -37,15 +37,30 @@ jobs:
       - name: Validate version tag
         run: |
           if ($env:RELEASE_TAG -cnotmatch '^v?(?<version>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$') {
-            throw 'Use an existing stable version tag such as 1.0.0 or v1.0.0.'
+            throw 'Use a stable version such as 1.0.0 or v1.0.0.'
           }
           "RELEASE_VERSION=$($Matches.version)" >> $env:GITHUB_ENV
 
-      - name: Check out the exact release tag
+      - name: Check out the exact workflow commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Verify any existing tag matches the build commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tags = @(gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$env:RELEASE_TAG" | ConvertFrom-Json)
+          $tag = $tags | Where-Object { $_.ref -ceq "refs/tags/$env:RELEASE_TAG" }
+          if ($tag) {
+            $commit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$env:RELEASE_TAG" --jq '.sha'
+            if ($commit -cne '${{ github.sha }}') {
+              throw 'The existing version tag points to a different commit. Select that tag to rerun, or use a new version.'
+            }
+          }
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -66,7 +81,6 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $root = Join-Path $env:RUNNER_TEMP 'hoyofileclean-release'
           $cache = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $HOME '.nuget/packages' }
-          $checksums = @()
           foreach ($desktop in @($true, $false)) {
             foreach ($bundled in @($true, $false)) {
               $kind = if ($desktop) { 'desktop' } else { 'cli' }
@@ -89,11 +103,8 @@ jobs:
               }
               $zip = Join-Path $root "HoyoFileClean-$env:RELEASE_VERSION-win-x64-$mode.zip"
               Compress-Archive -Path (Join-Path $folder '*') -DestinationPath $zip -CompressionLevel Optimal
-              $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-              $checksums += "$hash  $([IO.Path]::GetFileName($zip))"
             }
           }
-          $checksums | Set-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Encoding utf8
           "RELEASE_OUTPUT=$root" >> $env:GITHUB_ENV
 
       - name: Upload downloads and publish release
@@ -102,6 +113,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          $files = @(Get-ChildItem -LiteralPath $env:RELEASE_OUTPUT -File | Where-Object { $_.Extension -eq '.zip' -or $_.Name -eq 'SHA256SUMS.txt' })
-          gh release create $env:RELEASE_TAG @($files.FullName) --repo $env:GITHUB_REPOSITORY --verify-tag --title $env:RELEASE_TAG --notes 'Windows x64: with-dotnet ZIPs include .NET; smaller ZIPs require .NET 10. Each ZIP includes project and third-party licenses. Checksums: SHA256SUMS.txt.'
+          $files = @(Get-ChildItem -LiteralPath $env:RELEASE_OUTPUT -File -Filter '*.zip')
+          gh release create $env:RELEASE_TAG @($files.FullName) --repo $env:GITHUB_REPOSITORY --target '${{ github.sha }}' --title $env:RELEASE_TAG --notes 'Windows x64: with-dotnet ZIPs include .NET; smaller ZIPs require .NET 10. Each ZIP includes project and third-party licenses.'
           "Release: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG" >> $env:GITHUB_STEP_SUMMARY

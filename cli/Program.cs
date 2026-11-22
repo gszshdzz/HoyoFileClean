@@ -1,5 +1,8 @@
 using HoyoFileClean;
 using HoyoFileClean.Cli;
+using System.Text;
+
+Console.OutputEncoding = new UTF8Encoding(false);
 
 if (args.Length == 0 || args is ["--help"] or ["-h"])
 {

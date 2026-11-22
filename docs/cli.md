@@ -2,6 +2,8 @@
 
 命令在项目根目录执行，需要 .NET 10 SDK。可先运行 `dotnet build HoyoFileClean.csproj`，此后在未修改代码时使用 `dotnet run --no-build -- ...`；首次构建会还原声明的依赖。
 
+标准输出和标准错误使用无 BOM 的 UTF-8，不依赖 Windows 默认代码页。其他程序重定向读取 CLI 输出时也应使用 UTF-8，避免中文提示和 Unicode 路径乱码。
+
 ## 本地转换
 
 ```powershell

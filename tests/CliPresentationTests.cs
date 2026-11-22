@@ -8,6 +8,35 @@ public sealed class CliPresentationTests
     private readonly string directory = Path.Combine(TestTemporaryFiles.Root, Guid.NewGuid().ToString("N"));
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RedirectedCliPreservesUnicodePathsAndChineseMessages(bool fail)
+    {
+        string root = Path.Combine(directory, "游戏🎮");
+        Directory.CreateDirectory(root);
+        string output = Path.Combine(directory, "清单🎮.json");
+        string missing = Path.Combine(root, "缺失🎮.manifest");
+        var result = CliRunner.RunWithLegacyConsoleEncoding(fail ? ["convert", missing, output] : ["scan", root, output]);
+
+        Assert.Equal(fail ? 1 : 0, result.ExitCode);
+        if (fail)
+        {
+            Assert.Empty(result.Output);
+            Assert.Contains("错误：输入文件不存在。", result.Error);
+            Assert.Contains(missing, result.Error);
+            Assert.False(File.Exists(output));
+        }
+        else
+        {
+            Assert.Empty(result.Error);
+            Assert.Contains("轻扫描完成", result.Output);
+            Assert.Contains(output, result.Output);
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
+            Assert.Equal(0, document.RootElement.GetProperty("fileCount").GetInt32());
+        }
+    }
+
+    [Theory]
     [InlineData("invalid-list", "清单 JSON 格式无效", "ListJsonInvalid")]
     [InlineData("existing-output", "输出已存在，不能覆盖", "OutputExists")]
     [InlineData("unsafe-path", "文件路径不是安全的相对路径", "RelativePathInvalid")]

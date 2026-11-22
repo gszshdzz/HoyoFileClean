@@ -275,6 +275,24 @@ public sealed class DifferencePanelTests
         typeof(DataGridView).GetMethod("OnCellClick", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(grid, [new DataGridViewCellEventArgs(column, row)]);
 
+    [Fact]
+    public void DoubleClickLocatesOnlyLeftFileAndDoesNotChangeSelection() => NativeTestHost.OnSta(() =>
+    {
+        WizardSession session = Ready();
+        var located = new List<string>();
+        using var panel = new DifferencePanel(session, located.Add);
+        var grid = NativeTestHost.Find<DataGridView>(panel, "DifferenceGrid");
+        int local = Enumerable.Range(0, grid.RowCount).Single(index => panel.FileAtRow(index)?.Path == "folder/nested/local");
+        int missing = Enumerable.Range(0, grid.RowCount).Single(index => panel.FileAtRow(index)?.Path == "folder/nested/reference");
+        var doubleClick = typeof(DataGridView).GetMethod("OnCellDoubleClick", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        foreach ((int column, int row) in new[] { (3, local), (2, local), (1, missing), (1, 0), (1, -1) })
+            doubleClick.Invoke(grid, [new DataGridViewCellEventArgs(column, row)]);
+        Assert.Empty(located);
+        doubleClick.Invoke(grid, [new DataGridViewCellEventArgs(1, local)]);
+        Assert.Equal(new[] { Path.Combine(session.Game!.Sources[0].Scan!.Root, "folder", "nested", "local") }, located);
+        Assert.Equal(0, session.SelectedCount);
+    });
+
     private static void ClickHeader(CheckBox header) =>
         typeof(CheckBox).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(header, [EventArgs.Empty]);
 

@@ -62,6 +62,53 @@ public sealed class FileOperationPanelTests
     });
 
     [Fact]
+    public void DoubleClickLocatesOnlyFilePath() => OnSta(() =>
+    {
+        var session = Ready();
+        var located = new List<string>();
+        using var panel = new FileOperationPanel(session, locateFile: located.Add);
+        var grid = Find<DataGridView>(panel, "FileOperationFiles");
+        var doubleClick = typeof(DataGridView).GetMethod("OnCellDoubleClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        doubleClick.Invoke(grid, [new DataGridViewCellEventArgs(0, 0)]);
+        doubleClick.Invoke(grid, [new DataGridViewCellEventArgs(6, -1)]);
+        Assert.Empty(located);
+        doubleClick.Invoke(grid, [new DataGridViewCellEventArgs(6, 0)]);
+        Assert.Equal(new[] { Path.Combine(session.Game!.Sources[0].Scan!.Root, "file") }, located);
+        Assert.Equal(1, session.SelectedCount);
+    });
+
+    [Theory]
+    [InlineData(FileOperationKind.Move, FileOperationState.Succeeded)]
+    [InlineData(FileOperationKind.Delete, FileOperationState.Succeeded)]
+    [InlineData(FileOperationKind.Recycle, FileOperationState.Succeeded)]
+    [InlineData(FileOperationKind.Move, FileOperationState.Failed)]
+    [InlineData(FileOperationKind.Move, FileOperationState.NotProcessed)]
+    public void ResultDoubleClickUsesActualLocationOrReportsRemoval(FileOperationKind kind, FileOperationState state) => OnSta(() =>
+    {
+        var session = Ready();
+        string target = NewRoot();
+        File.WriteAllText(Path.Combine(target, "file"), "moved");
+        var located = new List<string>();
+        var errors = new List<string>();
+        using var panel = new FileOperationPanel(session, inputError: errors.Add, locateFile: located.Add);
+        var request = new FileOperationRequest(kind, session.Game!.Sources[0].Scan!.Root,
+            session.SelectedRows.ToArray(), target);
+        panel.ShowResult(request, new FileOperationResult([new("file", state, "not a path")], ExecutionStarted: true), session.Game);
+        typeof(DataGridView).GetMethod("OnCellDoubleClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(Find<DataGridView>(panel, "FileOperationFiles"), [new DataGridViewCellEventArgs(6, 0)]);
+        if (state == FileOperationState.Succeeded && kind != FileOperationKind.Move)
+        {
+            Assert.Empty(located);
+            Assert.Equal(new[] { "此文件已删除或移入回收站，无法定位原文件。" }, errors);
+        }
+        else
+        {
+            Assert.Equal(new[] { Path.Combine(state == FileOperationState.Succeeded ? target : request.Root, "file") }, located);
+            Assert.Empty(errors);
+        }
+    });
+
+    [Fact]
     public void EqualFilesUseEqualCategoryAndVirtualRows() => OnSta(() =>
     {
         string root = NewRoot(), reference = NewRoot();
@@ -92,6 +139,7 @@ public sealed class FileOperationPanelTests
         Application.DoEvents();
         for (int i = 0; i < 4; i++) Find<Button>(form, "Next").PerformClick();
         Assert.Equal(4, session.Step);
+        Assert.Equal("5 文件操作", HoyoFileClean.Presentation.Text.Get("StepFileOperation"));
         Assert.True(Find<FileOperationPanel>(form, "FileOperationPanel").Visible);
         Assert.False(Find<DifferencePanel>(form, "DifferencePanel").Visible);
         Assert.False(Find<Button>(form, "Next").Visible);

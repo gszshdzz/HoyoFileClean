@@ -9,9 +9,12 @@ public sealed record FileOperationRequest(FileOperationKind Kind, string Root,
 public sealed class FileOperationPanel : UserControl
 {
     private readonly WizardSession session;
+    private readonly Action<string> locateFile;
     private DifferenceRow[] displayedRows = [];
     private string displayedRoot = "";
     private FileOperationResult? operationResult;
+    private FileOperationKind resultKind;
+    private string? resultDestination;
     private FileListSnapshot? resultSnapshot;
     private readonly ProgressBar operationProgress = new() { Name = "FileOperationProgress", Dock = DockStyle.Fill,
         Style = ProgressBarStyle.Marquee, Visible = false };
@@ -31,12 +34,14 @@ public sealed class FileOperationPanel : UserControl
     private readonly Action<string> inputError;
     public event Action<FileOperationRequest>? OperationConfirmed;
 
-    public FileOperationPanel(WizardSession session, Func<string, bool>? confirm = null, Action<string>? inputError = null)
+    public FileOperationPanel(WizardSession session, Func<string, bool>? confirm = null, Action<string>? inputError = null,
+        Action<string>? locateFile = null)
     {
         this.session = session;
         this.confirm = confirm ?? (message => MessageBox.Show(this, message, L.Get("FileOperationConfirmTitle"),
             MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes);
         this.inputError = inputError ?? (message => MessageBox.Show(this, message, L.Get("FileOperationInvalidInputTitle")));
+        this.locateFile = path => WindowsFileLocator.Locate(this, path, locateFile, inputError);
         Name = "FileOperationPanel";
         Dock = DockStyle.Fill;
         AddColumn("Category", L.Get("FileOperationCategoryColumn"), 100, 12);
@@ -73,6 +78,22 @@ public sealed class FileOperationPanel : UserControl
         };
         // Like ManifestTable, this is a display list, not another selection surface.
         files.SelectionChanged += (_, _) => files.ClearSelection();
+        files.CellDoubleClick += (_, args) =>
+        {
+            if (session.IsBusy || args.ColumnIndex != files.Columns["Path"]?.Index
+                || args.RowIndex < 0 || args.RowIndex >= displayedRows.Length) return;
+            DifferenceRow row = displayedRows[args.RowIndex];
+            if (operationResult?.Files[args.RowIndex].State == FileOperationState.Succeeded)
+            {
+                if (resultKind != FileOperationKind.Move)
+                {
+                    WindowsFileLocator.ReportError(this, L.Get("FileLocationRemoved"), inputError);
+                    return;
+                }
+                this.locateFile(Path.Combine(resultDestination!, row.Path.Replace('/', Path.DirectorySeparatorChar)));
+            }
+            else this.locateFile(FullPath(row));
+        };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
         layout.ColumnStyles.Add(new(SizeType.Percent, 100));
         layout.RowStyles.Add(new(SizeType.AutoSize));
@@ -128,6 +149,8 @@ public sealed class FileOperationPanel : UserControl
     {
         displayedRows = request.Files.ToArray();
         displayedRoot = request.Root;
+        resultKind = request.Kind;
+        resultDestination = request.Destination;
         resultSnapshot = snapshot;
         operationResult = result;
         Render();

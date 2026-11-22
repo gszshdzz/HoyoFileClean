@@ -3,6 +3,7 @@ namespace HoyoFileClean.Desktop;
 public sealed class DifferencePanel : UserControl
 {
     private readonly WizardSession session;
+    private readonly Action<string> locateFile;
     private readonly ResultGrid grid = new()
     {
         Name = "DifferenceGrid", Dock = DockStyle.Fill, AllowUserToAddRows = false,
@@ -30,9 +31,10 @@ public sealed class DifferencePanel : UserControl
     private bool hasRendered;
     private bool rendering;
 
-    public DifferencePanel(WizardSession session)
+    public DifferencePanel(WizardSession session, Action<string>? locateFile = null)
     {
         this.session = session;
+        this.locateFile = path => WindowsFileLocator.Locate(this, path, locateFile);
         session.SelectionChanged += OnSelectionChanged;
         grid.CheckBoxToggleRequested += ToggleRowSelection;
         Name = "DifferencePanel";
@@ -104,7 +106,13 @@ public sealed class DifferencePanel : UserControl
             if (rendering || args.ColumnIndex != 0) return;
             SetRowSelection(args.RowIndex, args.Value is true or CheckState.Checked);
         };
-        grid.CellDoubleClick += (_, args) => { if (args.ColumnIndex == 0) ToggleRowSelection(args.RowIndex); };
+        grid.CellDoubleClick += (_, args) =>
+        {
+            if (args.ColumnIndex == 0) ToggleRowSelection(args.RowIndex);
+            else if (!session.IsBusy && args.ColumnIndex == 1 && FileAtRow(args.RowIndex) is { Game: not null } row
+                && session.Game?.Sources[0].Scan is { } scan)
+                this.locateFile(Path.Combine(scan.Root, row.Path.Replace('/', Path.DirectorySeparatorChar)));
+        };
         grid.SelectionChanged += (_, _) => grid.ClearSelection();
         grid.CellFormatting += (_, args) =>
         {

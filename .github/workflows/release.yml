@@ -114,5 +114,5 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $files = @(Get-ChildItem -LiteralPath $env:RELEASE_OUTPUT -File -Filter '*.zip')
-          gh release create $env:RELEASE_TAG @($files.FullName) --repo $env:GITHUB_REPOSITORY --target '${{ github.sha }}' --title $env:RELEASE_TAG --notes 'Windows x64: with-dotnet ZIPs include .NET; smaller ZIPs require .NET 10. Each ZIP includes project and third-party licenses.'
+          gh release create $env:RELEASE_TAG @($files.FullName) --repo $env:GITHUB_REPOSITORY --target '${{ github.sha }}' --title $env:RELEASE_TAG --generate-notes --notes 'Windows x64: with-dotnet ZIPs include .NET; smaller ZIPs require .NET 10. Each ZIP includes project and third-party licenses.'
           "Release: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG" >> $env:GITHUB_STEP_SUMMARY

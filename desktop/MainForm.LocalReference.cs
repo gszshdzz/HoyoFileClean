@@ -50,9 +50,8 @@ public sealed partial class MainForm
         var input = Vertical();
         input.Controls.Add(pathRow);
         localReferenceActions = OperationActions("LocalReferenceActions", cancelParsing, getLocalManifests, parseLocalReference);
-        input.Controls.Add(localReferenceActions);
         input.Controls.Add(Note(L.Get("LocalManifestHint")));
-        return Page(input, localManifests);
+        return Page(input, localManifests, localReferenceActions);
     }
 
     private string? DroppedManifestDirectory(DragEventArgs args)

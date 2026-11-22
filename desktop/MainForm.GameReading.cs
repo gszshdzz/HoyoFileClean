@@ -51,7 +51,7 @@ public sealed partial class MainForm
             RefreshView();
             status.Text = L.Get("CancellingScan");
         };
-        input.Controls.Add(OperationActions("ScanActions", cancelScan, loadGamePreset, readGame, heavy));
+        TableLayoutPanel actions = OperationActions("ScanActions", cancelScan, loadGamePreset, readGame, heavy);
         input.Controls.Add(identificationResult);
 
         var options = CompactGameInputs();
@@ -90,15 +90,17 @@ public sealed partial class MainForm
         results.Controls.Add(scanFileProgress, 1, 0);
         results.Controls.Add(scanByteStatus, 0, 1);
         results.Controls.Add(scanByteProgress, 1, 1);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
         using var layoutBatch = new LayoutBatch(layout);
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(input, 0, 0);
         layout.Controls.Add(scanOptions, 0, 1);
-        layout.Controls.Add(results, 0, 2);
+        layout.Controls.Add(actions, 0, 2);
+        layout.Controls.Add(results, 0, 3);
         foreach (RadioButton option in new[] { scanGameSource, importGameSource })
             option.CheckedChanged += (_, _) => { if (option.Checked) GameChanged(); };
         var page = new Panel { Dock = DockStyle.Fill };

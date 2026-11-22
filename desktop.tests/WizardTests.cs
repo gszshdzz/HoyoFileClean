@@ -1409,7 +1409,7 @@ public sealed class WizardTests
                 form.ClientSize = new Size(i % 2 == 0 ? 1500 : 784, 700);
                 if (i % 7 == 0) Application.DoEvents();
                 Control parent = table.Parent!;
-                Control input = parent.Controls.Cast<Control>().Single(control => control != table);
+                Control input = Assert.IsType<TableLayoutPanel>(parent).GetControlFromPosition(0, 0)!;
                 Assert.True(table.Top >= input.Bottom,
                     $"local={local}, width={form.Width}, tableTop={table.Top}, inputBottom={input.Bottom}");
                 foreach (Label label in input.Controls.OfType<Label>())

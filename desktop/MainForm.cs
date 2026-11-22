@@ -164,11 +164,10 @@ public sealed partial class MainForm : Form
         using var inputBatch = new LayoutBatch(input);
         input.Controls.Add(Note(L.Get("ManualManifestHint")));
         manualReferenceActions = OperationActions("ManualReferenceActions", cancelParsing, add, remove, parseManualReference);
-        input.Controls.Add(manualReferenceActions);
         parseManualReference.Click += async (_, _) => await ExecuteAsync();
         input.Controls.Add(referenceResult);
         manifests.CheckedFilesChanged += ReferenceChanged;
-        manualReferencePage = Page(input, manifests);
+        manualReferencePage = Page(input, manifests, manualReferenceActions);
         referenceModeContent.Controls.Add(manualReferencePage);
         localReferencePage = BuildLocalReferencePage();
         referenceModeContent.Controls.Add(localReferencePage);
@@ -198,25 +197,24 @@ public sealed partial class MainForm : Form
         }
         var page = new Panel { Dock = DockStyle.Fill };
         page.Controls.Add(layout);
-        return WithPageProgress(page, parsingProgress);
+        return WithPageFooter(page, parsingProgress);
     }
 
     private Panel BuildComparisonPage()
     {
         var input = Vertical();
         input.Controls.Add(Note(L.Get("ComparisonInputHint")));
-        input.Controls.Add(Buttons(execute));
-        return WithPageProgress(Page(input, comparisonResult), comparisonProgress);
+        return WithPageFooter(Page(input, comparisonResult, Buttons(execute)), comparisonProgress);
     }
 
-    private static Panel WithPageProgress(Control page, ProgressBar bar)
+    private static Panel WithPageFooter(Control page, Control footer)
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(page, 0, 0);
-        layout.Controls.Add(bar, 0, 1);
+        layout.Controls.Add(footer, 0, 1);
         return layout;
     }
 
@@ -369,15 +367,20 @@ public sealed partial class MainForm : Form
         row.Controls.Add(cancel, 1, 0);
         return row;
     }
-    private static Panel Page(Control input, Control result)
+    private static Panel Page(Control input, Control result, Control? actions = null)
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = actions is null ? 2 : 3 };
         using var layoutBatch = new LayoutBatch(panel);
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.Controls.Add(input, 0, 0);
         panel.Controls.Add(result, 0, 1);
+        if (actions is not null)
+        {
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.Controls.Add(actions, 0, 2);
+        }
         return panel;
     }
 }

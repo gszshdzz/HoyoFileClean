@@ -115,8 +115,8 @@ public sealed partial class MainForm
         var input = Vertical();
         input.Controls.Add(automaticNetworkInformation);
         input.Controls.Add(choices);
-        input.Controls.Add(OperationActions("NetworkActions", cancelNetwork, queryNetwork, getNetwork, parseNetwork));
-        return Page(input, networkManifests);
+        return Page(input, networkManifests,
+            OperationActions("NetworkActions", cancelNetwork, queryNetwork, getNetwork, parseNetwork));
     }
 
     private void InvalidateNetworkQuery()

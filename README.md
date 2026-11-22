@@ -6,6 +6,7 @@
 >
 > 本程序100％由AI生成，使用者应当自行评估风险，我（gszshdzz）不对任何由于使用者操作或程序本身bug导致的包括但不仅限于文件损坏/无法启动/其他非游戏文件丢失的后果负任何责任。
 > 使用者应当自行对使用本程序负责，在进行操作前核对操作的目标文件，清单外文件不等于无用文件。建议在操作后在官方启动器进行一次文件完整性扫描。
+> 此项目与[**miHoYo (miHoYo Co., Ltd.)**](https://www.mihoyo.com/) 或[**HoYoverse (COGNOSPHERE PTE. LTD.)**](https://www.hoyoverse.com/en-us)**无关联**
 
 ## 支持情况
 
@@ -101,6 +102,10 @@
 
 - [文档导航](docs/index.md)：使用、格式、开发维护与研究资料。
 - [第三方声明](THIRD-PARTY-NOTICES.md)：Sophon 协议来源与许可。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。第三方代码、协议、依赖和开发技能保留各自原有许可；参见 [第三方声明](THIRD-PARTY-NOTICES.md) 及 [.opencode/third-party-licenses/](.opencode/third-party-licenses/)。
 
 ## 鸣谢
 
